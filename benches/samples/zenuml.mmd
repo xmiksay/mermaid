@@ -1,0 +1,8 @@
+zenuml
+    title Auth flow
+    Browser -> Server: GET /login
+    Server ->> Browser: 200 OK
+    Browser -> Server: POST /login
+    Server -> DB: SELECT user
+    DB ->> Server: row
+    Server ->> Browser: 200 OK with cookie

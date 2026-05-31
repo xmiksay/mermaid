@@ -111,21 +111,20 @@ impl Default for Theme {
 }
 
 const PALETTE_DEFAULT: [&str; 10] = [
-    "#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE",
-    "#3BA272", "#FC8452", "#9A60B4", "#EA7CCC", "#7BCBA5",
+    "#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#3BA272", "#FC8452", "#9A60B4",
+    "#EA7CCC", "#7BCBA5",
 ];
 
 const PALETTE_DARK: [&str; 10] = [
-    "#7CB5FF", "#A6D88A", "#FFD980", "#FF8888", "#8FD8F2",
-    "#5BC09A", "#FF9B6E", "#B58CE0", "#FF9CDA", "#8FE0BA",
+    "#7CB5FF", "#A6D88A", "#FFD980", "#FF8888", "#8FD8F2", "#5BC09A", "#FF9B6E", "#B58CE0",
+    "#FF9CDA", "#8FE0BA",
 ];
 
 const PALETTE_FOREST: [&str; 10] = [
-    "#4E8A4E", "#7BAA5A", "#A8C870", "#D7E0A0", "#A8C8A8",
-    "#3A6B3A", "#6BA66B", "#C0D8A0", "#7AA070", "#5C8C5C",
+    "#4E8A4E", "#7BAA5A", "#A8C870", "#D7E0A0", "#A8C8A8", "#3A6B3A", "#6BA66B", "#C0D8A0",
+    "#7AA070", "#5C8C5C",
 ];
 
 const PALETTE_NEUTRAL: [&str; 10] = [
-    "#444", "#666", "#888", "#AAA", "#555",
-    "#777", "#999", "#BBB", "#5E5E5E", "#7E7E7E",
+    "#444", "#666", "#888", "#AAA", "#555", "#777", "#999", "#BBB", "#5E5E5E", "#7E7E7E",
 ];

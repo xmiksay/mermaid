@@ -1,0 +1,12 @@
+gantt
+    title Release plan
+    dateFormat YYYY-MM-DD
+    excludes weekends
+    todayMarker 2026-01-10
+    section Design
+    Spec : a1, 2026-01-01, 5d
+    Review : after a1, 2d
+    section Build
+    Backend : crit, b1, 2026-01-08, 1w
+    Frontend : active, 2026-01-08, 1w
+    Integration : after b1, 3d

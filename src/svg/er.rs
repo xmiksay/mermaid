@@ -81,18 +81,31 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 fn entity_size(e: &Entity) -> (f64, f64) {
     let mut max_chars = e.name.chars().count();
     for a in &e.attributes {
-        let s = format!("{} {} {}", a.type_, a.name, a.key.clone().unwrap_or_default());
+        let s = format!(
+            "{} {} {}",
+            a.type_,
+            a.name,
+            a.key.clone().unwrap_or_default()
+        );
         let len = s.chars().count();
         if len > max_chars {
             max_chars = len;
         }
     }
     let w = (max_chars as f64 * CHAR_W + PAD_X * 2.0).max(MIN_W);
-    let h = HEADER_H + e.attributes.len() as f64 * LINE_H + if e.attributes.is_empty() { 0.0 } else { 8.0 };
+    let h = HEADER_H
+        + e.attributes.len() as f64 * LINE_H
+        + if e.attributes.is_empty() { 0.0 } else { 8.0 };
     (w, h)
 }
 
-fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e: &Entity, theme: &Theme) {
+fn draw_entity(
+    svg: &mut SvgBuilder,
+    (cx, cy): (f64, f64),
+    (w, h): (f64, f64),
+    e: &Entity,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let flow_node_fill = theme.flow_node_fill;
     let flow_node_stroke = theme.flow_node_stroke;
@@ -140,7 +153,9 @@ fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e
                 svg.text(
                     x + w - 8.0,
                     row_y,
-                    &format!("text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\""),
+                    &format!(
+                        "text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\""
+                    ),
                     k,
                 );
             }
@@ -212,7 +227,13 @@ fn draw_relation(
 }
 
 /// Draw a Crow's Foot glyph at `anchor`, oriented by the direction toward `away`.
-fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), card: Cardinality, theme: &Theme) {
+fn draw_cardinality(
+    svg: &mut SvgBuilder,
+    anchor: (f64, f64),
+    away: (f64, f64),
+    card: Cardinality,
+    theme: &Theme,
+) {
     let flow_edge_stroke = theme.flow_edge_stroke;
     let (ax, ay) = anchor;
     let dx = away.0 - ax;
@@ -234,8 +255,17 @@ fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), 
         Cardinality::ExactlyOne => {
             // Two perpendicular ticks "||"
             for off in [0.0, 6.0] {
-                let (ix, iy) = (ax + ux * (CARD_GAP - 4.0 + off), ay + uy * (CARD_GAP - 4.0 + off));
-                svg.line(ix + px * 7.0, iy + py * 7.0, ix - px * 7.0, iy - py * 7.0, &stroke);
+                let (ix, iy) = (
+                    ax + ux * (CARD_GAP - 4.0 + off),
+                    ay + uy * (CARD_GAP - 4.0 + off),
+                );
+                svg.line(
+                    ix + px * 7.0,
+                    iy + py * 7.0,
+                    ix - px * 7.0,
+                    iy - py * 7.0,
+                    &stroke,
+                );
             }
         }
         Cardinality::ZeroOrOne => {
@@ -247,12 +277,24 @@ fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), 
                 &format!("fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\""),
             );
             let (ix, iy) = (ax + ux * (CARD_GAP + 4.0), ay + uy * (CARD_GAP + 4.0));
-            svg.line(ix + px * 7.0, iy + py * 7.0, ix - px * 7.0, iy - py * 7.0, &stroke);
+            svg.line(
+                ix + px * 7.0,
+                iy + py * 7.0,
+                ix - px * 7.0,
+                iy - py * 7.0,
+                &stroke,
+            );
         }
         Cardinality::OneOrMore => {
             // Tick + crow's foot "|{"
             let (ix, iy) = (ax + ux * (CARD_GAP - 4.0), ay + uy * (CARD_GAP - 4.0));
-            svg.line(ix + px * 7.0, iy + py * 7.0, ix - px * 7.0, iy - py * 7.0, &stroke);
+            svg.line(
+                ix + px * 7.0,
+                iy + py * 7.0,
+                ix - px * 7.0,
+                iy - py * 7.0,
+                &stroke,
+            );
             draw_crowfoot(svg, anchor, ux, uy, px, py, &stroke);
         }
         Cardinality::ZeroOrMore => {
@@ -308,8 +350,16 @@ fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) 
     }
     let hw = w / 2.0;
     let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 { hw / dx.abs() } else { f64::INFINITY };
-    let ty = if dy.abs() > 1e-9 { hh / dy.abs() } else { f64::INFINITY };
+    let tx = if dx.abs() > 1e-9 {
+        hw / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy.abs() > 1e-9 {
+        hh / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (c.0 + dx * t, c.1 + dy * t)
 }
@@ -332,7 +382,10 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     for (i, w) in pts.windows(2).enumerate() {
         if walked + segs[i] >= half {
             let t = (half - walked) / segs[i].max(1e-9);
-            return (w[0].0 + t * (w[1].0 - w[0].0), w[0].1 + t * (w[1].1 - w[0].1));
+            return (
+                w[0].0 + t * (w[1].0 - w[0].0),
+                w[0].1 + t * (w[1].1 - w[0].1),
+            );
         }
         walked += segs[i];
     }

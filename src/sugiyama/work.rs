@@ -64,7 +64,11 @@ impl Work {
         for (i, &(u, v)) in g.edges.iter().enumerate() {
             let ui = *real_idx.get(&u).ok_or(LayoutError::UnknownNode(u))?;
             let vi = *real_idx.get(&v).ok_or(LayoutError::UnknownNode(v))?;
-            edges.push(InternalEdge { src: ui, dst: vi, original: i });
+            edges.push(InternalEdge {
+                src: ui,
+                dst: vi,
+                original: i,
+            });
             if ui == vi {
                 self_loop.push(true);
             } else {

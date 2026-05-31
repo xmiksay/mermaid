@@ -139,13 +139,8 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
         }
 
         if line.contains("-->") {
-            let (from_id, to_id) = parse_transition(
-                line,
-                &mut diag,
-                &mut existing,
-                &mut start_n,
-                &mut end_n,
-            )?;
+            let (from_id, to_id) =
+                parse_transition(line, &mut diag, &mut existing, &mut start_n, &mut end_n)?;
             // Composite tracking: each new normal state declared in the line
             // belongs to the active region.
             if let Some(top) = composite_stack.last_mut() {
@@ -219,11 +214,7 @@ fn parse_note_head(head: &str) -> Option<(NotePosition, String)> {
     None
 }
 
-fn parse_state_decl(
-    rest: &str,
-    diag: &mut StateDiagram,
-    existing: &mut HashMap<String, usize>,
-) {
+fn parse_state_decl(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
     let rest = rest.trim();
     let (id_part, label_part) = match rest.split_once(':') {
         Some((a, b)) => (a.trim(), b.trim().to_string()),
@@ -321,7 +312,11 @@ fn ensure_state(
         return;
     }
     existing.insert(id.to_string(), diag.states.len());
-    let final_label = if label.is_empty() { id.to_string() } else { label.to_string() };
+    let final_label = if label.is_empty() {
+        id.to_string()
+    } else {
+        label.to_string()
+    };
     diag.states.push(State {
         id: id.to_string(),
         label: final_label,
@@ -373,10 +368,8 @@ mod tests {
 
     #[test]
     fn note_multiline() {
-        let d = parse(
-            "stateDiagram-v2\nA --> B\nnote left of A\nthis is\na long note\nend note\n",
-        )
-        .unwrap();
+        let d = parse("stateDiagram-v2\nA --> B\nnote left of A\nthis is\na long note\nend note\n")
+            .unwrap();
         assert_eq!(d.notes.len(), 1);
         assert!(d.notes[0].text.contains("this is"));
         assert!(d.notes[0].text.contains("long note"));

@@ -68,7 +68,11 @@ fn assign_x(w: &mut Work, node_gap: f64, max_iter: usize) {
                     let mut positions: Vec<f64> = edges
                         .iter()
                         .map(|&e| {
-                            let u = if look_up { w.edges[e].src } else { w.edges[e].dst };
+                            let u = if look_up {
+                                w.edges[e].src
+                            } else {
+                                w.edges[e].dst
+                            };
                             x[u]
                         })
                         .collect();
@@ -125,9 +129,9 @@ fn assign_x(w: &mut Work, node_gap: f64, max_iter: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::work::Work;
     use super::super::{cycle, layer, order, Graph, LayoutConfig, NodeId};
+    use super::*;
     use std::collections::HashMap;
 
     fn build(nodes: &[NodeId], edges: &[(NodeId, NodeId)], size: (f64, f64)) -> Work {
@@ -154,8 +158,7 @@ mod tests {
         assign(&mut w, &LayoutConfig::default());
         // All children share layer 1: verify they don't overlap horizontally.
         for layer in &w.layers {
-            let mut by_x: Vec<(f64, usize)> =
-                layer.iter().map(|&v| (w.x[v], v)).collect();
+            let mut by_x: Vec<(f64, usize)> = layer.iter().map(|&v| (w.x[v], v)).collect();
             by_x.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             for win in by_x.windows(2) {
                 let (xa, va) = win[0];

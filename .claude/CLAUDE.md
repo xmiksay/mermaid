@@ -14,12 +14,16 @@ src/
 ├── parse/           Mermaid source → Diagram AST (line-oriented scanners)
 │   ├── mod.rs       parse() dispatcher, ParseError, ast re-export
 │   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`)
-│   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
+│   └── {pie,sequence,flowchart,state,class,er,gantt,
+│        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
+│        gitgraph,requirement,c4,block,architecture,kanban,treemap,zenuml}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
 │   ├── theme.rs     Theme struct + default/dark/forest/neutral
-│   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
+│   └── {pie,sequence,flowchart,state,class,er,gantt,
+│        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
+│        gitgraph,requirement,c4,block,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
 │   ├── tests.rs
@@ -37,7 +41,9 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 |---|---|
 | sugiyama layout (cycle/layer/order/coord/route) | done |
 | pie · sequence · flowchart · state · class · ER · gantt parsers | done |
-| Matching SVG renderers | done |
+| journey · timeline · sankey · quadrant · xychart · radar · packet parsers | done |
+| mindmap · gitGraph · requirement · C4 · block · architecture · kanban · treemap · zenuml parsers | done |
+| Matching SVG renderers (zenuml reuses sequence renderer) | done |
 | Themes (default, dark, forest, neutral + user-defined) | done |
 | CLI binary (`mermaid-svg`) | done |
 
@@ -45,16 +51,29 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (113 tests)
+cargo test               # unit + integration + doctest (178 tests)
 cargo run --bin mermaid-svg -- --help
+cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
 ```
+
+Bench layout: `benches/render.rs` drives criterion; one `.mmd` per diagram
+type lives in `benches/samples/`. Two groups: `parse/<kind>` (parse only)
+and `render/<kind>` (parse + render to SVG). Sized inputs use realistic
+non-trivial examples (typically 10-30 lines).
 
 Integration tests write sample SVGs to `target/test-samples/`:
 - `pie_browsers.svg`, `sequence_api.svg`
 - `flowchart_td.svg`, `flowchart_lr.svg`
 - `state_lifecycle.svg`, `class_uml.svg`
 - `er_customer.svg`, `gantt_release.svg`
+- `journey_day.svg`, `timeline_history.svg`
+- `sankey_energy.svg`, `quadrant_campaigns.svg`
+- `xychart_sales.svg`, `radar_skills.svg`, `packet_tcp.svg`
+- `mindmap_tree.svg`, `gitgraph_branches.svg`
+- `requirement_test.svg`, `c4_context.svg`
+- `block_grid.svg`, `architecture_api.svg`
+- `kanban_board.svg`, `treemap_drinks.svg`, `zenuml_auth.svg`
 
 ## Themes — internal contract
 

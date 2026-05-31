@@ -114,9 +114,9 @@ fn rebuild_layers(w: &mut Work) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::work::{NodeKind, Work};
     use super::super::{Graph, NodeId};
+    use super::*;
     use std::collections::HashMap;
 
     fn make(nodes: &[NodeId], edges: &[(NodeId, NodeId)]) -> Work {

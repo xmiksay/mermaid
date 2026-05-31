@@ -76,8 +76,16 @@ pub(crate) fn build(w: &Work) -> Layout {
         edge_points.insert((orig_u, orig_v), waypoints);
     }
 
-    let width = if min_x.is_finite() { max_x - min_x } else { 0.0 };
-    let height = if min_y.is_finite() { max_y - min_y } else { 0.0 };
+    let width = if min_x.is_finite() {
+        max_x - min_x
+    } else {
+        0.0
+    };
+    let height = if min_y.is_finite() {
+        max_y - min_y
+    } else {
+        0.0
+    };
 
     Layout {
         node_pos,

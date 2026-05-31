@@ -69,9 +69,7 @@ fn run() -> Result<(), String> {
     }
 
     let theme = Theme::by_name(&theme_name).ok_or_else(|| {
-        format!(
-            "unknown theme '{theme_name}' (valid: default, dark, forest, neutral)"
-        )
+        format!("unknown theme '{theme_name}' (valid: default, dark, forest, neutral)")
     })?;
 
     let input_path = positional.first().map(String::as_str);

@@ -1,0 +1,11 @@
+C4Context
+    title System Context diagram
+    Person(customerA, "Banking Customer", "A customer of the bank")
+    Person(customerB, "Bank Employee", "Internal staff")
+    System(SystemAA, "Internet Banking", "Allows customers to manage accounts")
+    System_Ext(SystemB, "Email", "Microsoft Exchange")
+    System_Ext(SystemC, "Mainframe", "Stores all banking info")
+    Rel(customerA, SystemAA, "Uses")
+    Rel(customerB, SystemAA, "Supports")
+    Rel(SystemAA, SystemB, "Sends emails", "SMTP")
+    Rel(SystemAA, SystemC, "Reads/writes", "JDBC")

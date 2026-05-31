@@ -30,8 +30,12 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
 
     let dir = d.direction;
     let node_sizes: Vec<(f64, f64)> = d.nodes.iter().map(node_size).collect();
-    let id_to_u32: HashMap<String, NodeId> =
-        d.nodes.iter().enumerate().map(|(i, n)| (n.id.clone(), i as NodeId)).collect();
+    let id_to_u32: HashMap<String, NodeId> = d
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.clone(), i as NodeId))
+        .collect();
 
     let nodes: Vec<NodeId> = (0..d.nodes.len() as NodeId).collect();
     let edges: Vec<(NodeId, NodeId)> = d
@@ -83,7 +87,15 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     define_markers(&mut svg, theme);
 
     // Subgraph frames (drawn first so they sit under nodes/edges).
-    draw_subgraphs(&mut svg, d, &id_to_u32, &node_sizes, &layout, &transform, theme);
+    draw_subgraphs(
+        &mut svg,
+        d,
+        &id_to_u32,
+        &node_sizes,
+        &layout,
+        &transform,
+        theme,
+    );
 
     // Edges.
     for fedge in &d.edges {
@@ -97,7 +109,15 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_edge(&mut svg, &pts, fedge, &d.nodes, &id_to_u32, &node_sizes, theme);
+        draw_edge(
+            &mut svg,
+            &pts,
+            fedge,
+            &d.nodes,
+            &id_to_u32,
+            &node_sizes,
+            theme,
+        );
     }
 
     // Nodes.
@@ -132,12 +152,17 @@ fn node_size(n: &FlowNode) -> (f64, f64) {
     }
 }
 
-fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), node: &FlowNode, theme: &Theme) {
+fn draw_node(
+    svg: &mut SvgBuilder,
+    (cx, cy): (f64, f64),
+    (w, h): (f64, f64),
+    node: &FlowNode,
+    theme: &Theme,
+) {
     let flow_node_fill = theme.flow_node_fill;
     let flow_node_stroke = theme.flow_node_stroke;
-    let fill_attr = format!(
-        "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\""
-    );
+    let fill_attr =
+        format!("fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\"");
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     let off = 12.0; // skew for parallelogram/trapezoid
@@ -501,7 +526,10 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     for (i, w) in pts.windows(2).enumerate() {
         if walked + segs[i] >= half {
             let t = (half - walked) / segs[i].max(1e-9);
-            return (w[0].0 + t * (w[1].0 - w[0].0), w[0].1 + t * (w[1].1 - w[0].1));
+            return (
+                w[0].0 + t * (w[1].0 - w[0].0),
+                w[0].1 + t * (w[1].1 - w[0].1),
+            );
         }
         walked += segs[i];
     }
@@ -554,8 +582,16 @@ fn clip_rect(from: (f64, f64), center: (f64, f64), (w, h): (f64, f64)) -> (f64, 
     }
     let hw = w / 2.0;
     let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 { hw / dx.abs() } else { f64::INFINITY };
-    let ty = if dy.abs() > 1e-9 { hh / dy.abs() } else { f64::INFINITY };
+    let tx = if dx.abs() > 1e-9 {
+        hw / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy.abs() > 1e-9 {
+        hh / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (center.0 + dx * t, center.1 + dy * t)
 }
@@ -619,7 +655,10 @@ mod tests {
 
     #[test]
     fn renders_basic_td() {
-        let svg = render(&parse_flow("flowchart TD\nA --> B --> C\n"), &Theme::default());
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B --> C\n"),
+            &Theme::default(),
+        );
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains("A"));
         assert!(svg.contains("C"));
@@ -627,7 +666,10 @@ mod tests {
 
     #[test]
     fn edge_label_appears() {
-        let svg = render(&parse_flow("flowchart TD\nA -->|yes| B\n"), &Theme::default());
+        let svg = render(
+            &parse_flow("flowchart TD\nA -->|yes| B\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">yes<"));
     }
 
@@ -657,9 +699,10 @@ mod tests {
 
     #[test]
     fn subgraph_frame_drawn() {
-        let svg = render(&parse_flow(
-            "flowchart TD\nA --> B\nsubgraph S [Group]\nB --> C\nend\n",
-        ), &Theme::default());
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nsubgraph S [Group]\nB --> C\nend\n"),
+            &Theme::default(),
+        );
         // Dashed rect for subgraph + italic label
         assert!(svg.contains("stroke-dasharray=\"6 4\""));
         assert!(svg.contains(">Group<"));

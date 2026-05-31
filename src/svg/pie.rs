@@ -46,9 +46,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!(
-                "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""
-            ),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
         );
     }
@@ -77,7 +75,10 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
 
         // Full-circle case: SVG arc can't draw a 360° arc with one path; split.
         let segs: Vec<(f64, f64)> = if frac >= 0.9999 {
-            vec![(angle, angle + std::f64::consts::PI), (angle + std::f64::consts::PI, end)]
+            vec![
+                (angle, angle + std::f64::consts::PI),
+                (angle + std::f64::consts::PI, end),
+            ]
         } else {
             vec![(angle, end)]
         };
@@ -140,7 +141,12 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
 fn legend_text(e: &crate::parse::PieEntry, total: f64, show_data: bool) -> String {
     if show_data {
         let pct = e.value.max(0.0) / total * 100.0;
-        format!("{} ({} | {}%)", e.label, fnum(e.value), fnum(round_pct(pct)))
+        format!(
+            "{} ({} | {}%)",
+            e.label,
+            fnum(e.value),
+            fnum(round_pct(pct))
+        )
     } else {
         let pct = e.value.max(0.0) / total * 100.0;
         format!("{} ({}%)", e.label, fnum(round_pct(pct)))
@@ -200,13 +206,19 @@ mod tests {
 
     #[test]
     fn contains_one_path_per_segment() {
-        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0), ("C", 1.0)]), &Theme::default());
+        let svg = render(
+            &pie(vec![("A", 1.0), ("B", 1.0), ("C", 1.0)]),
+            &Theme::default(),
+        );
         assert_eq!(svg.matches("<path").count(), 3);
     }
 
     #[test]
     fn contains_title_and_legend_labels() {
-        let svg = render(&pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]), &Theme::default());
+        let svg = render(
+            &pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]),
+            &Theme::default(),
+        );
         assert!(svg.contains("test"));
         assert!(svg.contains("Chrome"));
         assert!(svg.contains("Firefox"));

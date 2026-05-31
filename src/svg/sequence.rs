@@ -53,7 +53,8 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         let x = PAD + ACTOR_W / 2.0 + (i as f64) * (ACTOR_W + PARTICIPANT_GAP);
         x_of.insert(p.id.clone(), x);
     }
-    let last_x = PAD + (d.participants.len() as f64) * ACTOR_W
+    let last_x = PAD
+        + (d.participants.len() as f64) * ACTOR_W
         + (d.participants.len().saturating_sub(1) as f64) * PARTICIPANT_GAP;
     let width = last_x + PAD;
 
@@ -223,10 +224,26 @@ fn layout_items(
                 });
             }
             SequenceItem::Alt(branches) => {
-                emit_branched_block(BlockKind::Alt, branches, out, cursor, counter, autonumber, x_of);
+                emit_branched_block(
+                    BlockKind::Alt,
+                    branches,
+                    out,
+                    cursor,
+                    counter,
+                    autonumber,
+                    x_of,
+                );
             }
             SequenceItem::Par(branches) => {
-                emit_branched_block(BlockKind::Par, branches, out, cursor, counter, autonumber, x_of);
+                emit_branched_block(
+                    BlockKind::Par,
+                    branches,
+                    out,
+                    cursor,
+                    counter,
+                    autonumber,
+                    x_of,
+                );
             }
             SequenceItem::Critical(branches) => {
                 emit_branched_block(
@@ -292,7 +309,10 @@ fn emit_branched_block(
         y: *cursor,
         kind: EventKind::BlockOpen {
             kind,
-            label: branches.first().map(|b| b.label.clone()).unwrap_or_default(),
+            label: branches
+                .first()
+                .map(|b| b.label.clone())
+                .unwrap_or_default(),
         },
     });
     for (i, branch) in branches.iter().enumerate() {
@@ -334,7 +354,15 @@ fn draw_actor(svg: &mut SvgBuilder, cx: f64, top: f64, label: &str, theme: &Them
     );
 }
 
-fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind, text: &str, theme: &Theme) {
+fn draw_message(
+    svg: &mut SvgBuilder,
+    x1: f64,
+    x2: f64,
+    y: f64,
+    arrow: ArrowKind,
+    text: &str,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let arrow_stroke = theme.arrow_stroke;
     let (dash, marker) = stroke_for(arrow);
@@ -390,12 +418,22 @@ fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind
     }
 }
 
-fn draw_note(svg: &mut SvgBuilder, note: &SequenceNote, y: f64, x_of: &HashMap<String, f64>, theme: &Theme) {
+fn draw_note(
+    svg: &mut SvgBuilder,
+    note: &SequenceNote,
+    y: f64,
+    x_of: &HashMap<String, f64>,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     if note.participants.is_empty() {
         return;
     }
-    let xs: Vec<f64> = note.participants.iter().filter_map(|id| x_of.get(id).copied()).collect();
+    let xs: Vec<f64> = note
+        .participants
+        .iter()
+        .filter_map(|id| x_of.get(id).copied())
+        .collect();
     if xs.is_empty() {
         return;
     }
@@ -432,7 +470,12 @@ fn draw_note(svg: &mut SvgBuilder, note: &SequenceNote, y: f64, x_of: &HashMap<S
     );
 }
 
-fn draw_block_frames(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>, theme: &Theme) {
+fn draw_block_frames(
+    svg: &mut SvgBuilder,
+    events: &[Event],
+    x_of: &HashMap<String, f64>,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let min_x = x_of.values().copied().fold(f64::INFINITY, f64::min);
     let max_x = x_of.values().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -608,7 +651,10 @@ mod tests {
 
     #[test]
     fn basic_envelope() {
-        let svg = render(&build("sequenceDiagram\ntitle Login\nalice->>bob: hi\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\ntitle Login\nalice->>bob: hi\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">Login<"));
         assert!(svg.contains(">hi<"));
         assert!(svg.contains("arrow-filled"));
@@ -616,7 +662,10 @@ mod tests {
 
     #[test]
     fn alt_block_renders_frame() {
-        let svg = render(&build("sequenceDiagram\nA->>B: q\nalt yes\nA->>B: y\nelse no\nA->>B: n\nend\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: q\nalt yes\nA->>B: y\nelse no\nA->>B: n\nend\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">alt<"));
         assert!(svg.contains("[yes]"));
         assert!(svg.contains("[no]"));
@@ -624,27 +673,39 @@ mod tests {
 
     #[test]
     fn loop_block_renders_frame() {
-        let svg = render(&build("sequenceDiagram\nloop every 5s\nA->>B: ping\nend\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\nloop every 5s\nA->>B: ping\nend\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">loop<"));
         assert!(svg.contains("[every 5s]"));
     }
 
     #[test]
     fn note_over_renders() {
-        let svg = render(&build("sequenceDiagram\nA->>B: hi\nNote over A,B: shared\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: hi\nNote over A,B: shared\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">shared<"));
     }
 
     #[test]
     fn autonumber_prefixes_messages() {
-        let svg = render(&build("sequenceDiagram\nautonumber\nA->>B: x\nA->>B: y\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\nautonumber\nA->>B: x\nA->>B: y\n"),
+            &Theme::default(),
+        );
         assert!(svg.contains(">1. x<"));
         assert!(svg.contains(">2. y<"));
     }
 
     #[test]
     fn activate_deactivate_draws_band() {
-        let svg = render(&build("sequenceDiagram\nA->>B: req\nactivate B\nB-->>A: resp\ndeactivate B\n"), &Theme::default());
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: req\nactivate B\nB-->>A: resp\ndeactivate B\n"),
+            &Theme::default(),
+        );
         // activation rect uses #ECECFF
         assert!(svg.contains("#ECECFF"));
     }

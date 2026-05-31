@@ -31,8 +31,12 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 
     let dir = d.direction;
     let sizes: Vec<(f64, f64)> = d.states.iter().map(state_size).collect();
-    let id_to_u32: HashMap<String, NodeId> =
-        d.states.iter().enumerate().map(|(i, s)| (s.id.clone(), i as NodeId)).collect();
+    let id_to_u32: HashMap<String, NodeId> = d
+        .states
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.clone(), i as NodeId))
+        .collect();
 
     let nodes: Vec<NodeId> = (0..d.states.len() as NodeId).collect();
     let edges: Vec<(NodeId, NodeId)> = d
@@ -148,7 +152,9 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 
     // Notes attached to states.
     for note in &d.notes {
-        draw_state_note(&mut svg, note, &id_to_u32, &sizes, &layout, &transform, theme);
+        draw_state_note(
+            &mut svg, note, &id_to_u32, &sizes, &layout, &transform, theme,
+        );
     }
 
     svg.finish()
@@ -206,7 +212,13 @@ fn state_size(s: &State) -> (f64, f64) {
     }
 }
 
-fn draw_state(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), s: &State, theme: &Theme) {
+fn draw_state(
+    svg: &mut SvgBuilder,
+    (cx, cy): (f64, f64),
+    (w, h): (f64, f64),
+    s: &State,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let flow_node_fill = theme.flow_node_fill;
     let flow_node_stroke = theme.flow_node_stroke;
@@ -215,7 +227,12 @@ fn draw_state(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), s:
             svg.circle(cx, cy, PSEUDO_R, "fill=\"#333\" stroke=\"none\"");
         }
         StateKind::End => {
-            svg.circle(cx, cy, PSEUDO_R, "fill=\"none\" stroke=\"#333\" stroke-width=\"1.5\"");
+            svg.circle(
+                cx,
+                cy,
+                PSEUDO_R,
+                "fill=\"none\" stroke=\"#333\" stroke-width=\"1.5\"",
+            );
             svg.circle(cx, cy, PSEUDO_R - 4.0, "fill=\"#333\" stroke=\"none\"");
         }
         StateKind::Choice => {
@@ -313,7 +330,12 @@ fn draw_transition(
     }
 }
 
-fn clip_to_state(from: (f64, f64), center: (f64, f64), size: (f64, f64), kind: StateKind) -> (f64, f64) {
+fn clip_to_state(
+    from: (f64, f64),
+    center: (f64, f64),
+    size: (f64, f64),
+    kind: StateKind,
+) -> (f64, f64) {
     match kind {
         StateKind::Start | StateKind::End => clip_circle(from, center, PSEUDO_R),
         StateKind::Choice => clip_rhombus(from, center, (28.0, 28.0)),
@@ -329,8 +351,16 @@ fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) 
     }
     let hw = w / 2.0;
     let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 { hw / dx.abs() } else { f64::INFINITY };
-    let ty = if dy.abs() > 1e-9 { hh / dy.abs() } else { f64::INFINITY };
+    let tx = if dx.abs() > 1e-9 {
+        hw / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy.abs() > 1e-9 {
+        hh / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (c.0 + dx * t, c.1 + dy * t)
 }
@@ -381,7 +411,10 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     for (i, w) in pts.windows(2).enumerate() {
         if walked + segs[i] >= half {
             let t = (half - walked) / segs[i].max(1e-9);
-            return (w[0].0 + t * (w[1].0 - w[0].0), w[0].1 + t * (w[1].1 - w[0].1));
+            return (
+                w[0].0 + t * (w[1].0 - w[0].0),
+                w[0].1 + t * (w[1].1 - w[0].1),
+            );
         }
         walked += segs[i];
     }
@@ -412,9 +445,7 @@ mod tests {
 
     #[test]
     fn renders_full_lifecycle() {
-        let d = build(
-            "stateDiagram-v2\n[*] --> Idle\nIdle --> Running: go\nRunning --> [*]\n",
-        );
+        let d = build("stateDiagram-v2\n[*] --> Idle\nIdle --> Running: go\nRunning --> [*]\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Idle<"));

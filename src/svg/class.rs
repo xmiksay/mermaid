@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::parse::{
-    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, UmlClass,
-    Visibility,
+    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, UmlClass, Visibility,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
@@ -202,7 +201,13 @@ fn render_member(m: &crate::parse::ClassMember) -> String {
     format!("{vis}{}", m.text)
 }
 
-fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c: &UmlClass, theme: &Theme) {
+fn draw_class(
+    svg: &mut SvgBuilder,
+    (cx, cy): (f64, f64),
+    (w, h): (f64, f64),
+    c: &UmlClass,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let flow_node_fill = theme.flow_node_fill;
     let flow_node_stroke = theme.flow_node_stroke;
@@ -240,8 +245,16 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
     );
     cursor += 4.0;
 
-    let attrs: Vec<_> = c.members.iter().filter(|m| m.kind == MemberKind::Attribute).collect();
-    let meths: Vec<_> = c.members.iter().filter(|m| m.kind == MemberKind::Method).collect();
+    let attrs: Vec<_> = c
+        .members
+        .iter()
+        .filter(|m| m.kind == MemberKind::Attribute)
+        .collect();
+    let meths: Vec<_> = c
+        .members
+        .iter()
+        .filter(|m| m.kind == MemberKind::Method)
+        .collect();
 
     if !attrs.is_empty() {
         cursor += 4.0;
@@ -330,7 +343,9 @@ fn draw_relation(
     let d = polyline_path(&clipped);
     svg.path(
         &d,
-        &format!("fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"{dash_attr}{ms}{me}"),
+        &format!(
+            "fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"{dash_attr}{ms}{me}"
+        ),
     );
 
     if let Some(label) = &rel.label {
@@ -385,8 +400,16 @@ fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) 
     }
     let hw = w / 2.0;
     let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 { hw / dx.abs() } else { f64::INFINITY };
-    let ty = if dy.abs() > 1e-9 { hh / dy.abs() } else { f64::INFINITY };
+    let tx = if dx.abs() > 1e-9 {
+        hw / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy.abs() > 1e-9 {
+        hh / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (c.0 + dx * t, c.1 + dy * t)
 }
@@ -409,7 +432,10 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     for (i, w) in pts.windows(2).enumerate() {
         if walked + segs[i] >= half {
             let t = (half - walked) / segs[i].max(1e-9);
-            return (w[0].0 + t * (w[1].0 - w[0].0), w[0].1 + t * (w[1].1 - w[0].1));
+            return (
+                w[0].0 + t * (w[1].0 - w[0].0),
+                w[0].1 + t * (w[1].1 - w[0].1),
+            );
         }
         walked += segs[i];
     }

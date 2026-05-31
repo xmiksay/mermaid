@@ -24,7 +24,10 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     // Step 1 — resolve absolute start positions in "days from epoch".
     let resolved = resolve_tasks(d);
-    let project_start = resolved.iter().map(|t| t.start_day).fold(f64::INFINITY, f64::min);
+    let project_start = resolved
+        .iter()
+        .map(|t| t.start_day)
+        .fold(f64::INFINITY, f64::min);
     let project_end = resolved
         .iter()
         .map(|t| t.start_day + t.duration)
@@ -64,12 +67,24 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let axis_y = HEADER_H;
 
     // Axis line + day ticks
-    svg.line(body_x, axis_y + AXIS_H - 1.0, body_x + body_w, axis_y + AXIS_H - 1.0, "stroke=\"#999\" stroke-width=\"1\"");
+    svg.line(
+        body_x,
+        axis_y + AXIS_H - 1.0,
+        body_x + body_w,
+        axis_y + AXIS_H - 1.0,
+        "stroke=\"#999\" stroke-width=\"1\"",
+    );
     let tick_step = pick_tick_step(total_days);
     let mut tick = 0.0;
     while tick <= total_days + 1e-6 {
         let x = body_x + (tick / total_days) * body_w;
-        svg.line(x, axis_y, x, axis_y + AXIS_H, "stroke=\"#bbb\" stroke-width=\"1\"");
+        svg.line(
+            x,
+            axis_y,
+            x,
+            axis_y + AXIS_H,
+            "stroke=\"#bbb\" stroke-width=\"1\"",
+        );
         svg.text(
             x + 2.0,
             axis_y + 14.0,
@@ -190,7 +205,9 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
     }
     fn month_offset(m: i32) -> f64 {
         // Cumulative days at start of month (non-leap).
-        const TBL: [f64; 12] = [0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.];
+        const TBL: [f64; 12] = [
+            0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.,
+        ];
         TBL[(m.clamp(1, 12) - 1) as usize]
     }
 
@@ -198,10 +215,9 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
         for task in &section.tasks {
             let start = match &task.start {
                 TaskStart::Date(s) => ymd_to_day(s).unwrap_or(cursor),
-                TaskStart::AfterId(id) => id_to_start_end
-                    .get(id)
-                    .map(|(_, e)| *e)
-                    .unwrap_or(last_end),
+                TaskStart::AfterId(id) => {
+                    id_to_start_end.get(id).map(|(_, e)| *e).unwrap_or(last_end)
+                }
                 TaskStart::AfterPrevious => last_end,
             };
             let dur = task.duration_days.max(0.5);
@@ -228,7 +244,9 @@ fn ymd_or_none(s: &str) -> Option<f64> {
     let y: i32 = parts[0].parse().ok()?;
     let m: i32 = parts[1].parse().ok()?;
     let dd: i32 = parts[2].parse().ok()?;
-    const TBL: [f64; 12] = [0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.];
+    const TBL: [f64; 12] = [
+        0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.,
+    ];
     Some((y as f64) * 365.25 + TBL[(m.clamp(1, 12) - 1) as usize] + (dd as f64))
 }
 

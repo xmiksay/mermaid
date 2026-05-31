@@ -1,0 +1,10 @@
+flowchart TD
+    Start([Start]) --> Input[/Read input/]
+    Input --> Valid{Valid?}
+    Valid -->|yes| Process[Process] & Audit[(Audit log)]
+    Valid -->|no| Error>Error]
+    subgraph Cleanup [Cleanup phase]
+        Process --> End([End])
+        Audit --> End
+    end
+    Error --> End

@@ -1,9 +1,9 @@
 [package]
 name = "mermaid-svg"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-description = "Render Mermaid diagrams (pie, sequence, flowchart, state, class, ER, gantt) to SVG. Pure Rust, no Node.js or native deps."
+description = "Render 23 Mermaid diagram types (pie, sequence, flowchart, state, class, ER, gantt, journey, timeline, sankey, quadrant, xychart, radar, packet, mindmap, gitGraph, requirement, C4, block, architecture, kanban, treemap, zenuml) to SVG. Pure Rust, no Node.js or native deps."
 repository = "https://github.com/xmiksay/mermaid"
 readme = "README.md"
 keywords = ["mermaid", "diagram", "svg", "flowchart", "uml"]
@@ -12,3 +12,10 @@ categories = ["visualization", "rendering", "parser-implementations"]
 [dependencies]
 petgraph = "0.6"
 thiserror = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "render"
+harness = false

@@ -1,0 +1,17 @@
+gitGraph
+   commit
+   commit id: "init"
+   branch develop
+   checkout develop
+   commit
+   commit
+   checkout main
+   commit
+   merge develop id: "merge1" tag: "v1.0"
+   branch feature
+   checkout feature
+   commit
+   commit
+   checkout main
+   merge feature
+   commit tag: "v1.1"

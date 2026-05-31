@@ -1,0 +1,21 @@
+classDiagram
+    namespace Domain {
+        class Animal {
+            <<abstract>>
+            +String name
+            +int age
+            +eat()
+            +sleep()
+        }
+        class Dog {
+            +String breed
+            +bark()
+        }
+    }
+    class Cat {
+        +bool indoor
+        +purr()
+    }
+    Animal <|-- Dog
+    Animal <|-- Cat
+    Dog *-- Collar

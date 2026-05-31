@@ -129,9 +129,9 @@ fn count_crossings(w: &Work) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::work::Work;
     use super::super::{layer, Graph, NodeId};
+    use super::*;
     use std::collections::HashMap;
 
     fn build(nodes: &[NodeId], edges: &[(NodeId, NodeId)]) -> Work {

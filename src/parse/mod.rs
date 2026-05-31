@@ -7,14 +7,30 @@
 //! rather than a single PEG grammar — Mermaid's syntax is strongly
 //! line-based and per-type scanners stay short and easy to extend.
 
+mod architecture;
 pub mod ast;
+mod block;
+mod c4;
 mod class;
 mod er;
 mod flowchart;
 mod gantt;
+mod gitgraph;
+mod journey;
+mod kanban;
+mod mindmap;
+mod packet;
 mod pie;
+mod quadrant;
+mod radar;
+mod requirement;
+mod sankey;
 mod sequence;
 mod state;
+mod timeline;
+mod treemap;
+mod xychart;
+mod zenuml;
 
 pub use ast::*;
 
@@ -50,6 +66,26 @@ pub fn parse(input: &str) -> Result<Diagram, ParseError> {
         "classDiagram" => class::parse(input).map(Diagram::Class),
         "erDiagram" => er::parse(input).map(Diagram::Er),
         "gantt" => gantt::parse(input).map(Diagram::Gantt),
+        "journey" => journey::parse(input).map(Diagram::Journey),
+        "timeline" => timeline::parse(input).map(Diagram::Timeline),
+        "sankey-beta" | "sankey" => sankey::parse(input).map(Diagram::Sankey),
+        "quadrantChart" => quadrant::parse(input).map(Diagram::Quadrant),
+        "xychart-beta" | "xychart" => xychart::parse(input).map(Diagram::XyChart),
+        "radar-beta" | "radar" => radar::parse(input).map(Diagram::Radar),
+        "packet-beta" | "packet" => packet::parse(input).map(Diagram::Packet),
+        "mindmap" => mindmap::parse(input).map(Diagram::Mindmap),
+        "gitGraph" => gitgraph::parse(input).map(Diagram::GitGraph),
+        "requirementDiagram" => requirement::parse(input).map(Diagram::Requirement),
+        "C4Context" | "C4Container" | "C4Component" | "C4Dynamic" | "C4Deployment" => {
+            c4::parse(input).map(Diagram::C4)
+        }
+        "block-beta" | "block" => block::parse(input).map(Diagram::Block),
+        "architecture-beta" | "architecture" => {
+            architecture::parse(input).map(Diagram::Architecture)
+        }
+        "kanban" => kanban::parse(input).map(Diagram::Kanban),
+        "treemap-beta" | "treemap" => treemap::parse(input).map(Diagram::Treemap),
+        "zenuml" => zenuml::parse(input).map(Diagram::Sequence),
         other => Err(ParseError::UnknownDiagramType(other.to_string())),
     }
 }

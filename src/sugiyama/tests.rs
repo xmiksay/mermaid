@@ -95,13 +95,20 @@ fn self_loop_present_in_output() {
 #[test]
 fn diamond_no_overlap() {
     // 1 splits to 2 & 3, both merge into 4.
-    let g = make_graph(&[1, 2, 3, 4], &[(1, 2), (1, 3), (2, 4), (3, 4)], (40.0, 20.0));
+    let g = make_graph(
+        &[1, 2, 3, 4],
+        &[(1, 2), (1, 3), (2, 4), (3, 4)],
+        (40.0, 20.0),
+    );
     let l = layout(&g).unwrap();
     // 2 and 3 are on the same layer — verify they don't overlap.
     let p2 = l.node_pos[&2];
     let p3 = l.node_pos[&3];
     assert!((p2.1 - p3.1).abs() < 1e-6, "siblings on same layer");
-    assert!((p2.0 - p3.0).abs() >= 40.0, "nodes don't overlap horizontally");
+    assert!(
+        (p2.0 - p3.0).abs() >= 40.0,
+        "nodes don't overlap horizontally"
+    );
 }
 
 #[test]
@@ -122,8 +129,5 @@ fn errors_on_missing_size() {
         edges: vec![(1, 2)],
         node_size: HashMap::from([(1, (10.0, 10.0))]),
     };
-    assert_eq!(
-        layout(&g).unwrap_err(),
-        super::LayoutError::MissingSize(2)
-    );
+    assert_eq!(layout(&g).unwrap_err(), super::LayoutError::MissingSize(2));
 }

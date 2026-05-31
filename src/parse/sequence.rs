@@ -295,15 +295,9 @@ fn attach_pending(diag: &mut SequenceDiagram, frame: BlockFrame) {
 fn push_item(diag: &mut SequenceDiagram, stack: &mut [BlockFrame], item: SequenceItem) {
     if let Some(frame) = stack.last_mut() {
         match frame {
-            BlockFrame::Alt {
-                current_items, ..
-            }
-            | BlockFrame::Par {
-                current_items, ..
-            }
-            | BlockFrame::Critical {
-                current_items, ..
-            } => current_items.push(item),
+            BlockFrame::Alt { current_items, .. }
+            | BlockFrame::Par { current_items, .. }
+            | BlockFrame::Critical { current_items, .. } => current_items.push(item),
             BlockFrame::Loop { items, .. } | BlockFrame::Opt { items, .. } => items.push(item),
             BlockFrame::Box {
                 participant_ids, ..
@@ -441,7 +435,10 @@ fn parse_message(line: &str, line_no: usize) -> Result<Message, ParseError> {
     }
     let after = &line[arrow_pos + token.len()..];
     let (to, text) = match after.find(':') {
-        Some(c) => (after[..c].trim().to_string(), after[c + 1..].trim().to_string()),
+        Some(c) => (
+            after[..c].trim().to_string(),
+            after[c + 1..].trim().to_string(),
+        ),
         None => (after.trim().to_string(), String::new()),
     };
     if to.is_empty() {
@@ -532,11 +529,20 @@ mod tests {
 
     #[test]
     fn alt_block() {
-        let d = parse(
-            "sequenceDiagram\nA->>B: q\nalt is yes\nA->>B: y\nelse is no\nA->>B: n\nend\n",
-        )
-        .unwrap();
-        let alt = d.items.iter().find_map(|i| if let SequenceItem::Alt(b) = i { Some(b) } else { None }).unwrap();
+        let d =
+            parse("sequenceDiagram\nA->>B: q\nalt is yes\nA->>B: y\nelse is no\nA->>B: n\nend\n")
+                .unwrap();
+        let alt = d
+            .items
+            .iter()
+            .find_map(|i| {
+                if let SequenceItem::Alt(b) = i {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
         assert_eq!(alt.len(), 2);
         assert_eq!(alt[0].label, "is yes");
         assert_eq!(alt[1].label, "is no");
@@ -548,7 +554,13 @@ mod tests {
         let lp = d
             .items
             .iter()
-            .find_map(|i| if let SequenceItem::Loop(b) = i { Some(b) } else { None })
+            .find_map(|i| {
+                if let SequenceItem::Loop(b) = i {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
             .unwrap();
         assert_eq!(lp.label, "every 5s");
         assert_eq!(lp.items.len(), 1);
@@ -556,14 +568,17 @@ mod tests {
 
     #[test]
     fn par_with_branches() {
-        let d = parse(
-            "sequenceDiagram\npar req\nA->>B: x\nand other\nA->>C: y\nend\n",
-        )
-        .unwrap();
+        let d = parse("sequenceDiagram\npar req\nA->>B: x\nand other\nA->>C: y\nend\n").unwrap();
         let branches = d
             .items
             .iter()
-            .find_map(|i| if let SequenceItem::Par(b) = i { Some(b) } else { None })
+            .find_map(|i| {
+                if let SequenceItem::Par(b) = i {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
             .unwrap();
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[0].label, "req");
@@ -576,21 +591,31 @@ mod tests {
         let opt = d
             .items
             .iter()
-            .find_map(|i| if let SequenceItem::Opt(b) = i { Some(b) } else { None })
+            .find_map(|i| {
+                if let SequenceItem::Opt(b) = i {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
             .unwrap();
         assert_eq!(opt.label, "cond");
     }
 
     #[test]
     fn notes() {
-        let d = parse(
-            "sequenceDiagram\nA->>B: hi\nNote over A,B: shared\nNote right of B: thx\n",
-        )
-        .unwrap();
+        let d = parse("sequenceDiagram\nA->>B: hi\nNote over A,B: shared\nNote right of B: thx\n")
+            .unwrap();
         let notes: Vec<_> = d
             .items
             .iter()
-            .filter_map(|i| if let SequenceItem::Note(n) = i { Some(n) } else { None })
+            .filter_map(|i| {
+                if let SequenceItem::Note(n) = i {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
             .collect();
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].position, NotePosition::Over);

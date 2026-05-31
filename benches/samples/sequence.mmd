@@ -1,0 +1,20 @@
+sequenceDiagram
+    title API call with blocks
+    autonumber
+    actor user as User
+    participant api as API
+    participant db as DB
+    user->>api: GET /users
+    activate api
+    api->>db: SELECT
+    db-->>api: rows
+    deactivate api
+    alt cached
+        api-->>user: 200 OK (cache)
+    else miss
+        Note over api,db: warm cache
+        api-->>user: 200 OK
+    end
+    loop every 30s
+        api->>db: heartbeat
+    end

@@ -1,0 +1,14 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Running : start
+    Running --> Idle : stop
+    Running --> [*] : crash
+    state choose <<choice>>
+    Idle --> choose
+    state Workflow {
+        [*] --> Step1
+        Step1 --> Step2
+        Step2 --> [*]
+    }
+    Idle --> Workflow
+    note right of Idle: waiting state

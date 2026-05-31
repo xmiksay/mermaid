@@ -76,11 +76,7 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
     Ok(diag)
 }
 
-fn parse_header(
-    line: &str,
-    diag: &mut FlowchartDiagram,
-    line_no: usize,
-) -> Result<(), ParseError> {
+fn parse_header(line: &str, diag: &mut FlowchartDiagram, line_no: usize) -> Result<(), ParseError> {
     let rest = if let Some(r) = line.strip_prefix("flowchart") {
         r
     } else if let Some(r) = line.strip_prefix("graph") {
@@ -161,7 +157,14 @@ fn handle_subgraph_open(
 }
 
 fn is_unsupported_statement(line: &str) -> bool {
-    const PFX: &[&str] = &["style ", "classDef ", "class ", "click ", "linkStyle ", "direction "];
+    const PFX: &[&str] = &[
+        "style ",
+        "classDef ",
+        "class ",
+        "click ",
+        "linkStyle ",
+        "direction ",
+    ];
     PFX.iter().any(|k| line.starts_with(k))
 }
 
@@ -266,12 +269,11 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
         sc.advance(2);
         let opener_was_slash = sc.s.as_bytes()[sc.i - 1] == b'/';
         // Scan text until we hit `/]` or `\]`.
-        let (text, used_close) = read_until_either(sc, "/]", "\\]").ok_or_else(|| {
-            ParseError::Syntax {
+        let (text, used_close) =
+            read_until_either(sc, "/]", "\\]").ok_or_else(|| ParseError::Syntax {
                 message: format!("missing closing for node '{id}'"),
                 line: line_no,
-            }
-        })?;
+            })?;
         let shape = match (opener_was_slash, used_close) {
             (true, "/]") => NodeShape::Parallelogram,
             (true, "\\]") => NodeShape::Trapezoid,
@@ -574,7 +576,11 @@ mod tests {
         let d = parse("flowchart LR\nA & B --> C & D\n").unwrap();
         assert_eq!(d.nodes.len(), 4);
         assert_eq!(d.edges.len(), 4);
-        let pairs: Vec<_> = d.edges.iter().map(|e| (e.from.clone(), e.to.clone())).collect();
+        let pairs: Vec<_> = d
+            .edges
+            .iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect();
         assert!(pairs.contains(&("A".into(), "C".into())));
         assert!(pairs.contains(&("A".into(), "D".into())));
         assert!(pairs.contains(&("B".into(), "C".into())));

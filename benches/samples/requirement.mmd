@@ -1,0 +1,23 @@
+requirementDiagram
+requirement test_req {
+    id: 1
+    text: the test text
+    risk: high
+    verifymethod: test
+}
+functionalRequirement func_req {
+    id: 2
+    text: must do thing
+    risk: medium
+    verifymethod: analysis
+}
+element test_entity {
+    type: simulation
+}
+element user_doc {
+    type: document
+    docref: user-guide.md
+}
+test_entity - satisfies -> test_req
+user_doc - traces -> test_req
+test_req - derives -> func_req

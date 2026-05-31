@@ -9,6 +9,21 @@ pub enum Diagram {
     Class(ClassDiagram),
     Er(ErDiagram),
     Gantt(GanttDiagram),
+    Journey(JourneyDiagram),
+    Timeline(TimelineDiagram),
+    Sankey(SankeyDiagram),
+    Quadrant(QuadrantDiagram),
+    XyChart(XyChartDiagram),
+    Radar(RadarDiagram),
+    Packet(PacketDiagram),
+    Mindmap(MindmapDiagram),
+    GitGraph(GitGraphDiagram),
+    Requirement(RequirementDiagram),
+    C4(C4Diagram),
+    Block(BlockDiagram),
+    Architecture(ArchitectureDiagram),
+    Kanban(KanbanDiagram),
+    Treemap(TreemapDiagram),
 }
 
 // ---- pie -------------------------------------------------------------------
@@ -432,4 +447,524 @@ pub enum TaskStatus {
     Active,
     Done,
     Crit,
+}
+
+// ---- journey ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct JourneyDiagram {
+    pub title: Option<String>,
+    pub sections: Vec<JourneySection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JourneySection {
+    pub name: String,
+    pub tasks: Vec<JourneyTask>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JourneyTask {
+    pub name: String,
+    pub score: i32,
+    pub actors: Vec<String>,
+}
+
+// ---- timeline --------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TimelineDiagram {
+    pub title: Option<String>,
+    pub sections: Vec<TimelineSection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineSection {
+    /// `None` for events that appear before any explicit `section` block.
+    pub name: Option<String>,
+    pub periods: Vec<TimelinePeriod>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelinePeriod {
+    pub label: String,
+    pub events: Vec<String>,
+}
+
+// ---- sankey ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SankeyDiagram {
+    pub links: Vec<SankeyLink>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SankeyLink {
+    pub source: String,
+    pub target: String,
+    pub value: f64,
+}
+
+// ---- quadrant --------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuadrantDiagram {
+    pub title: Option<String>,
+    pub x_axis_left: Option<String>,
+    pub x_axis_right: Option<String>,
+    pub y_axis_bottom: Option<String>,
+    pub y_axis_top: Option<String>,
+    pub q1: Option<String>,
+    pub q2: Option<String>,
+    pub q3: Option<String>,
+    pub q4: Option<String>,
+    pub points: Vec<QuadrantPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuadrantPoint {
+    pub label: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+// ---- xychart ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct XyChartDiagram {
+    pub horizontal: bool,
+    pub title: Option<String>,
+    pub x_axis: Option<XyAxis>,
+    pub y_axis: Option<XyAxis>,
+    pub series: Vec<XySeries>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct XyAxis {
+    pub title: Option<String>,
+    pub kind: XyAxisKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum XyAxisKind {
+    /// Categorical labels (e.g. month names).
+    Categories(Vec<String>),
+    /// Numeric range `min --> max`.
+    Range { min: f64, max: f64 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct XySeries {
+    pub kind: XySeriesKind,
+    pub values: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XySeriesKind {
+    Bar,
+    Line,
+}
+
+// ---- radar -----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RadarDiagram {
+    pub title: Option<String>,
+    pub axes: Vec<RadarAxis>,
+    pub curves: Vec<RadarCurve>,
+    /// Optional explicit max value; defaults to max observed.
+    pub max: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RadarAxis {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RadarCurve {
+    pub id: String,
+    pub label: String,
+    pub values: Vec<f64>,
+}
+
+// ---- packet ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PacketDiagram {
+    pub title: Option<String>,
+    pub fields: Vec<PacketField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PacketField {
+    pub start: u32,
+    pub end: u32,
+    pub label: String,
+}
+
+// ---- mindmap ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MindmapDiagram {
+    pub root: Option<MindmapNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MindmapNode {
+    pub text: String,
+    pub shape: MindmapShape,
+    pub icon: Option<String>,
+    pub children: Vec<MindmapNode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MindmapShape {
+    /// Default — no explicit delimiters.
+    Default,
+    /// `[text]` — square
+    Square,
+    /// `(text)` — rounded square
+    Rounded,
+    /// `((text))` — circle
+    Circle,
+    /// `))text((` — bang / explosion
+    Bang,
+    /// `)text(` — cloud
+    Cloud,
+    /// `{{text}}` — hexagon
+    Hexagon,
+}
+
+// ---- gitGraph --------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GitGraphDiagram {
+    pub title: Option<String>,
+    pub direction: GitDirection,
+    pub events: Vec<GitEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GitDirection {
+    #[default]
+    LeftRight,
+    TopDown,
+    BottomTop,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GitEvent {
+    Commit {
+        id: Option<String>,
+        tag: Option<String>,
+        kind: CommitKind,
+    },
+    Branch {
+        name: String,
+    },
+    Checkout {
+        name: String,
+    },
+    Merge {
+        from: String,
+        id: Option<String>,
+        tag: Option<String>,
+    },
+    CherryPick {
+        commit_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommitKind {
+    #[default]
+    Normal,
+    Highlight,
+    Reverse,
+}
+
+// ---- requirement -----------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequirementDiagram {
+    pub requirements: Vec<Requirement>,
+    pub elements: Vec<ReqElement>,
+    pub relations: Vec<ReqRelation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Requirement {
+    pub kind: RequirementKind,
+    pub name: String,
+    pub id: Option<String>,
+    pub text: Option<String>,
+    pub risk: Option<String>,
+    pub verifymethod: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RequirementKind {
+    #[default]
+    Requirement,
+    Functional,
+    Interface,
+    Performance,
+    Physical,
+    DesignConstraint,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReqElement {
+    pub name: String,
+    pub type_: Option<String>,
+    pub docref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReqRelation {
+    pub from: String,
+    pub to: String,
+    pub kind: ReqRelationKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReqRelationKind {
+    Contains,
+    Copies,
+    Derives,
+    Satisfies,
+    Verifies,
+    Refines,
+    Traces,
+}
+
+// ---- C4 --------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct C4Diagram {
+    pub kind: C4Kind,
+    pub title: Option<String>,
+    pub elements: Vec<C4Element>,
+    pub relations: Vec<C4Relation>,
+}
+
+impl Default for C4Diagram {
+    fn default() -> Self {
+        Self {
+            kind: C4Kind::Context,
+            title: None,
+            elements: Vec::new(),
+            relations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum C4Kind {
+    Context,
+    Container,
+    Component,
+    Dynamic,
+    Deployment,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct C4Element {
+    pub kind: C4ElementKind,
+    pub alias: String,
+    pub label: String,
+    pub descr: Option<String>,
+    pub technology: Option<String>,
+    pub external: bool,
+    pub boundary_alias: Option<String>,
+    pub boundary_label: Option<String>,
+    pub boundary_kind: Option<C4BoundaryKind>,
+    pub members: Vec<C4Element>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum C4ElementKind {
+    Person,
+    System,
+    SystemDb,
+    SystemQueue,
+    Container,
+    ContainerDb,
+    ContainerQueue,
+    Component,
+    ComponentDb,
+    ComponentQueue,
+    Node,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum C4BoundaryKind {
+    System,
+    Container,
+    Enterprise,
+    Generic,
+    Deployment,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct C4Relation {
+    pub from: String,
+    pub to: String,
+    pub label: String,
+    pub technology: Option<String>,
+    pub direction: C4RelDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum C4RelDirection {
+    #[default]
+    Default,
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+// ---- block-beta ------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BlockDiagram {
+    pub columns: Option<usize>,
+    pub items: Vec<BlockItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockItem {
+    Block(Block),
+    Group(BlockGroup),
+    Space(usize),
+    Edge(BlockEdge),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub id: String,
+    pub label: String,
+    pub shape: BlockShape,
+    /// Optional column-span like `a["wide"]:2`.
+    pub span: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockShape {
+    #[default]
+    Rect,
+    Round,
+    Stadium,
+    Cylinder,
+    Circle,
+    Rhombus,
+    Hexagon,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockGroup {
+    pub id: String,
+    pub label: Option<String>,
+    pub columns: Option<usize>,
+    pub items: Vec<BlockItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockEdge {
+    pub from: String,
+    pub to: String,
+    pub label: Option<String>,
+    pub arrow: bool,
+}
+
+// ---- architecture-beta -----------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ArchitectureDiagram {
+    pub groups: Vec<ArchGroup>,
+    pub services: Vec<ArchService>,
+    pub junctions: Vec<ArchJunction>,
+    pub edges: Vec<ArchEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchGroup {
+    pub id: String,
+    pub icon: Option<String>,
+    pub label: Option<String>,
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchService {
+    pub id: String,
+    pub icon: Option<String>,
+    pub label: Option<String>,
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchJunction {
+    pub id: String,
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchEdge {
+    pub from: String,
+    pub from_side: ArchSide,
+    pub from_arrow: bool,
+    pub to: String,
+    pub to_side: ArchSide,
+    pub to_arrow: bool,
+    pub label: Option<String>,
+    pub group: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchSide {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+// ---- kanban ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct KanbanDiagram {
+    pub columns: Vec<KanbanColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KanbanColumn {
+    pub id: String,
+    pub label: String,
+    pub tasks: Vec<KanbanTask>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KanbanTask {
+    pub id: String,
+    pub text: String,
+    pub assigned: Option<String>,
+    pub priority: Option<String>,
+}
+
+// ---- treemap ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TreemapDiagram {
+    pub title: Option<String>,
+    pub root: Vec<TreemapNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TreemapNode {
+    pub label: String,
+    pub value: Option<f64>,
+    pub children: Vec<TreemapNode>,
 }
