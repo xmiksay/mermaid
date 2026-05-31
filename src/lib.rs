@@ -14,4 +14,4 @@ mod svg;
 pub use parse::ast;
 pub use parse::ast::Diagram;
 pub use parse::{parse, ParseError};
-pub use svg::{render, render_diagram, RenderError};
+pub use svg::{render, render_diagram, render_diagram_with, render_with, RenderError, Theme};

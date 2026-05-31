@@ -8,7 +8,7 @@ use crate::parse::{Cardinality, Entity, ErDiagram, ErRelation};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
-use super::theme::{FG, FLOW_EDGE_STROKE, FLOW_LABEL_BG, FLOW_NODE_FILL, FLOW_NODE_STROKE};
+use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
 const LINE_H: f64 = 20.0;
@@ -18,7 +18,7 @@ const MIN_W: f64 = 130.0;
 const CANVAS_PAD: f64 = 24.0;
 const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
 
-pub(crate) fn render(d: &ErDiagram) -> String {
+pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     if d.entities.is_empty() {
         return SvgBuilder::new(40.0, 40.0).finish();
     }
@@ -67,12 +67,12 @@ pub(crate) fn render(d: &ErDiagram) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32);
+        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
     }
 
     for (i, e) in d.entities.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_entity(&mut svg, center, sizes[i], e);
+        draw_entity(&mut svg, center, sizes[i], e, theme);
     }
 
     svg.finish()
@@ -92,7 +92,10 @@ fn entity_size(e: &Entity) -> (f64, f64) {
     (w, h)
 }
 
-fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e: &Entity) {
+fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e: &Entity, theme: &Theme) {
+    let fg = theme.fg;
+    let flow_node_fill = theme.flow_node_fill;
+    let flow_node_stroke = theme.flow_node_stroke;
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     svg.rect(
@@ -101,13 +104,13 @@ fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e
         w,
         h,
         &format!(
-            "fill=\"{FLOW_NODE_FILL}\" stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1.5\" rx=\"2\""
+            "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"2\""
         ),
     );
     svg.text(
         cx,
         y + 19.0,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-weight=\"bold\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
         &e.name,
     );
     if !e.attributes.is_empty() {
@@ -116,7 +119,7 @@ fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e
             y + HEADER_H,
             x + w,
             y + HEADER_H,
-            &format!("stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1\""),
+            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
         );
         let mut row_y = y + HEADER_H + 6.0;
         for a in &e.attributes {
@@ -124,13 +127,13 @@ fn draw_entity(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), e
             svg.text(
                 x + 8.0,
                 row_y,
-                &format!("fill=\"{FG}\" font-size=\"13\""),
+                &format!("fill=\"{fg}\" font-size=\"13\""),
                 &a.type_,
             );
             svg.text(
                 x + w / 2.0,
                 row_y,
-                &format!("fill=\"{FG}\" font-size=\"13\""),
+                &format!("fill=\"{fg}\" font-size=\"13\""),
                 &a.name,
             );
             if let Some(k) = &a.key {
@@ -152,7 +155,11 @@ fn draw_relation(
     rel: &ErRelation,
     sizes: &[(f64, f64)],
     id_to_u32: &HashMap<String, NodeId>,
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
+    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_label_bg = theme.flow_label_bg;
     let src = id_to_u32[&rel.left] as usize;
     let dst = id_to_u32[&rel.right] as usize;
     let n = pts.len();
@@ -175,13 +182,13 @@ fn draw_relation(
     let d = polyline_path(&clipped);
     svg.path(
         &d,
-        &format!("fill=\"none\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"{dash_attr}"),
+        &format!("fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"{dash_attr}"),
     );
 
     // Cardinality glyphs at both endpoints — drawn explicitly as paths so we
     // don't need 8 SVG markers.
-    draw_cardinality(svg, clipped[0], clipped[1], rel.left_card);
-    draw_cardinality(svg, clipped[n - 1], clipped[n - 2], rel.right_card);
+    draw_cardinality(svg, clipped[0], clipped[1], rel.left_card, theme);
+    draw_cardinality(svg, clipped[n - 1], clipped[n - 2], rel.right_card, theme);
 
     if !rel.label.is_empty() {
         let mid = midpoint(&clipped);
@@ -193,19 +200,20 @@ fn draw_relation(
             mid.1 - h / 2.0,
             w,
             h,
-            &format!("fill=\"{FLOW_LABEL_BG}\" stroke=\"none\""),
+            &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
         );
         svg.text(
             mid.0,
             mid.1 + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             &rel.label,
         );
     }
 }
 
 /// Draw a Crow's Foot glyph at `anchor`, oriented by the direction toward `away`.
-fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), card: Cardinality) {
+fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), card: Cardinality, theme: &Theme) {
+    let flow_edge_stroke = theme.flow_edge_stroke;
     let (ax, ay) = anchor;
     let dx = away.0 - ax;
     let dy = away.1 - ay;
@@ -220,7 +228,7 @@ fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), 
     let cx_glyph = ax + ux * CARD_GAP;
     let cy_glyph = ay + uy * CARD_GAP;
 
-    let stroke = format!("stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\" fill=\"none\"");
+    let stroke = format!("stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\" fill=\"none\"");
 
     match card {
         Cardinality::ExactlyOne => {
@@ -236,7 +244,7 @@ fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), 
                 ax + ux * (CARD_GAP - 4.0),
                 ay + uy * (CARD_GAP - 4.0),
                 5.0,
-                &format!("fill=\"#fff\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\""),
+                &format!("fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\""),
             );
             let (ix, iy) = (ax + ux * (CARD_GAP + 4.0), ay + uy * (CARD_GAP + 4.0));
             svg.line(ix + px * 7.0, iy + py * 7.0, ix - px * 7.0, iy - py * 7.0, &stroke);
@@ -253,7 +261,7 @@ fn draw_cardinality(svg: &mut SvgBuilder, anchor: (f64, f64), away: (f64, f64), 
                 ax + ux * (CARD_GAP - 4.0),
                 ay + uy * (CARD_GAP - 4.0),
                 5.0,
-                &format!("fill=\"#fff\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\""),
+                &format!("fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\""),
             );
             draw_crowfoot(svg, anchor, ux, uy, px, py, &stroke);
         }
@@ -346,7 +354,7 @@ mod tests {
     #[test]
     fn renders_basic() {
         let d = build("erDiagram\nCUSTOMER ||--o{ ORDER : places\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">CUSTOMER<"));
         assert!(svg.contains(">ORDER<"));
@@ -356,7 +364,7 @@ mod tests {
     #[test]
     fn entity_with_attributes() {
         let d = build("erDiagram\nCUSTOMER {\nstring name\nstring email PK\n}\nCUSTOMER ||--o{ ORDER : places\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.contains(">name<"));
         assert!(svg.contains(">email<"));
         assert!(svg.contains(">PK<"));

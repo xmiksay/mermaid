@@ -10,9 +10,7 @@ use crate::parse::{
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{escape, fnum, SvgBuilder};
-use super::theme::{
-    FG, FLOW_EDGE_STROKE, FLOW_LABEL_BG, FLOW_NODE_FILL, FLOW_NODE_STROKE,
-};
+use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
 const LINE_H: f64 = 20.0;
@@ -23,10 +21,10 @@ const MIN_H: f64 = 40.0;
 const CANVAS_PAD: f64 = 24.0;
 const SUBGRAPH_PAD: f64 = 16.0;
 
-pub(crate) fn render(d: &FlowchartDiagram) -> String {
+pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     if d.nodes.is_empty() {
         let mut svg = SvgBuilder::new(40.0, 40.0);
-        define_markers(&mut svg);
+        define_markers(&mut svg, theme);
         return svg.finish();
     }
 
@@ -82,10 +80,10 @@ pub(crate) fn render(d: &FlowchartDiagram) -> String {
     };
 
     let mut svg = SvgBuilder::new(width, height);
-    define_markers(&mut svg);
+    define_markers(&mut svg, theme);
 
     // Subgraph frames (drawn first so they sit under nodes/edges).
-    draw_subgraphs(&mut svg, d, &id_to_u32, &node_sizes, &layout, &transform);
+    draw_subgraphs(&mut svg, d, &id_to_u32, &node_sizes, &layout, &transform, theme);
 
     // Edges.
     for fedge in &d.edges {
@@ -99,14 +97,14 @@ pub(crate) fn render(d: &FlowchartDiagram) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_edge(&mut svg, &pts, fedge, &d.nodes, &id_to_u32, &node_sizes);
+        draw_edge(&mut svg, &pts, fedge, &d.nodes, &id_to_u32, &node_sizes, theme);
     }
 
     // Nodes.
     for (i, node) in d.nodes.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
         let size = node_sizes[i];
-        draw_node(&mut svg, center, size, node);
+        draw_node(&mut svg, center, size, node, theme);
     }
 
     svg.finish()
@@ -134,9 +132,11 @@ fn node_size(n: &FlowNode) -> (f64, f64) {
     }
 }
 
-fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), node: &FlowNode) {
+fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), node: &FlowNode, theme: &Theme) {
+    let flow_node_fill = theme.flow_node_fill;
+    let flow_node_stroke = theme.flow_node_stroke;
     let fill_attr = format!(
-        "fill=\"{FLOW_NODE_FILL}\" stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1.5\""
+        "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\""
     );
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
@@ -155,14 +155,14 @@ fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), nod
                 y,
                 x + 6.0,
                 y + h,
-                &format!("stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1\""),
+                &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
             );
             svg.line(
                 x + w - 6.0,
                 y,
                 x + w - 6.0,
                 y + h,
-                &format!("stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1\""),
+                &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
             );
         }
         NodeShape::Cylinder => {
@@ -193,7 +193,7 @@ fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), nod
                     fnum(x + w),
                     fnum(y + h - 8.0)
                 ),
-                &format!("fill=\"none\" stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1.5\""),
+                &format!("fill=\"none\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\""),
             );
         }
         NodeShape::Circle => {
@@ -308,10 +308,11 @@ fn draw_node(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), nod
             svg.path(&d, &fill_attr);
         }
     }
-    draw_label(svg, (cx, cy), &node.text);
+    draw_label(svg, (cx, cy), &node.text, theme);
 }
 
-fn draw_label(svg: &mut SvgBuilder, (cx, cy): (f64, f64), text: &str) {
+fn draw_label(svg: &mut SvgBuilder, (cx, cy): (f64, f64), text: &str, theme: &Theme) {
+    let fg = theme.fg;
     let lines: Vec<&str> = text.split("\\n").collect();
     let n = lines.len() as f64;
     let line_h = 18.0;
@@ -320,7 +321,7 @@ fn draw_label(svg: &mut SvgBuilder, (cx, cy): (f64, f64), text: &str) {
         svg.text(
             cx,
             y0 + i as f64 * line_h,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\""),
             line,
         );
     }
@@ -335,7 +336,9 @@ fn draw_subgraphs(
     node_sizes: &[(f64, f64)],
     layout: &crate::sugiyama::Layout,
     transform: &impl Fn((f64, f64)) -> (f64, f64),
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
     // We compute the bounding box of each subgraph by collecting transformed
     // coordinates of all nodes that belong to it (recursively).
     let mut sub_idx_by_id: HashMap<&str, usize> = HashMap::new();
@@ -399,7 +402,7 @@ fn draw_subgraphs(
         svg.text(
             x + 10.0,
             y + 12.0,
-            &format!("fill=\"{FG}\" font-size=\"12\" font-style=\"italic\""),
+            &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
             label,
         );
     }
@@ -414,7 +417,9 @@ fn draw_edge(
     nodes: &[FlowNode],
     id_to_u32: &HashMap<String, NodeId>,
     sizes: &[(f64, f64)],
+    theme: &Theme,
 ) {
+    let flow_edge_stroke = theme.flow_edge_stroke;
     let n = pts.len();
     let src_idx = id_to_u32[&edge.from] as usize;
     let dst_idx = id_to_u32[&edge.to] as usize;
@@ -432,14 +437,14 @@ fn draw_edge(
     let d = polyline_path(&clipped);
     let (style, marker) = edge_style(edge.line, edge.head);
     let attrs = format!(
-        "fill=\"none\" stroke=\"{FLOW_EDGE_STROKE}\" {style} {marker}",
+        "fill=\"none\" stroke=\"{flow_edge_stroke}\" {style} {marker}",
         marker = marker_attr(marker)
     );
     svg.path(&d, &attrs);
 
     if let Some(label) = &edge.label {
         let mid = midpoint(&clipped);
-        draw_edge_label(svg, mid, label);
+        draw_edge_label(svg, mid, label, theme);
     }
 }
 
@@ -503,7 +508,9 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     pts[pts.len() / 2]
 }
 
-fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str) {
+fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme: &Theme) {
+    let fg = theme.fg;
+    let flow_label_bg = theme.flow_label_bg;
     let chars = text.chars().count() as f64;
     let w = chars * 7.0 + 8.0;
     let h = 18.0;
@@ -512,12 +519,12 @@ fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str) {
         my - h / 2.0,
         w,
         h,
-        &format!("fill=\"{FLOW_LABEL_BG}\" stroke=\"none\""),
+        &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
     );
     svg.text(
         mx,
         my + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
         text,
     );
 }
@@ -574,21 +581,22 @@ fn clip_rhombus(from: (f64, f64), center: (f64, f64), (w, h): (f64, f64)) -> (f6
 
 // ---- markers ---------------------------------------------------------------
 
-fn define_markers(svg: &mut SvgBuilder) {
+fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
+    let flow_edge_stroke = theme.flow_edge_stroke;
     svg.defs_raw(&format!(
         "<marker id=\"arrow-filled\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{FLOW_EDGE_STROKE}\"/></marker>"
+         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
     ));
     svg.defs_raw(&format!(
         "<marker id=\"arrow-circle\" viewBox=\"0 0 12 12\" refX=\"10\" refY=\"6\" \
          markerWidth=\"12\" markerHeight=\"12\" orient=\"auto-start-reverse\">\
-         <circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#fff\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"/></marker>"
+         <circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/></marker>"
     ));
     svg.defs_raw(&format!(
         "<marker id=\"arrow-cross\" viewBox=\"0 0 10 10\" refX=\"5\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto\">\
-         <path d=\"M1 1 L9 9 M9 1 L1 9\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"/></marker>"
+         <path d=\"M1 1 L9 9 M9 1 L1 9\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/></marker>"
     ));
 }
 
@@ -611,7 +619,7 @@ mod tests {
 
     #[test]
     fn renders_basic_td() {
-        let svg = render(&parse_flow("flowchart TD\nA --> B --> C\n"));
+        let svg = render(&parse_flow("flowchart TD\nA --> B --> C\n"), &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains("A"));
         assert!(svg.contains("C"));
@@ -619,31 +627,31 @@ mod tests {
 
     #[test]
     fn edge_label_appears() {
-        let svg = render(&parse_flow("flowchart TD\nA -->|yes| B\n"));
+        let svg = render(&parse_flow("flowchart TD\nA -->|yes| B\n"), &Theme::default());
         assert!(svg.contains(">yes<"));
     }
 
     #[test]
     fn dotted_edge_uses_dasharray() {
-        let svg = render(&parse_flow("flowchart TD\nA -.-> B\n"));
+        let svg = render(&parse_flow("flowchart TD\nA -.-> B\n"), &Theme::default());
         assert!(svg.contains("stroke-dasharray=\"2 4\""));
     }
 
     #[test]
     fn circle_head_marker_used() {
-        let svg = render(&parse_flow("flowchart TD\nA --o B\n"));
+        let svg = render(&parse_flow("flowchart TD\nA --o B\n"), &Theme::default());
         assert!(svg.contains("arrow-circle"));
     }
 
     #[test]
     fn cross_head_marker_used() {
-        let svg = render(&parse_flow("flowchart TD\nA --x B\n"));
+        let svg = render(&parse_flow("flowchart TD\nA --x B\n"), &Theme::default());
         assert!(svg.contains("arrow-cross"));
     }
 
     #[test]
     fn solid_no_arrow_omits_marker() {
-        let svg = render(&parse_flow("flowchart TD\nA --- B\n"));
+        let svg = render(&parse_flow("flowchart TD\nA --- B\n"), &Theme::default());
         assert_eq!(svg.matches("marker-end=").count(), 0);
     }
 
@@ -651,7 +659,7 @@ mod tests {
     fn subgraph_frame_drawn() {
         let svg = render(&parse_flow(
             "flowchart TD\nA --> B\nsubgraph S [Group]\nB --> C\nend\n",
-        ));
+        ), &Theme::default());
         // Dashed rect for subgraph + italic label
         assert!(svg.contains("stroke-dasharray=\"6 4\""));
         assert!(svg.contains(">Group<"));
@@ -661,13 +669,13 @@ mod tests {
     fn all_asymmetric_shapes_render() {
         let svg = render(&parse_flow(
             "flowchart TD\nA[/par/] --> B[\\palt\\]\nB --> C[/trap\\]\nC --> D[\\tralt/]\nD --> E>flag]\n",
-        ));
+        ), &Theme::default());
         assert!(svg.starts_with("<svg"));
     }
 
     #[test]
     fn empty_flowchart_still_valid_svg() {
-        let svg = render(&FlowchartDiagram::default());
+        let svg = render(&FlowchartDiagram::default(), &Theme::default());
         assert!(svg.starts_with("<svg"));
     }
 }

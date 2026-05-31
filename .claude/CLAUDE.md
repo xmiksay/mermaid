@@ -1,34 +1,35 @@
 # mermaid-svg
 
 Single-crate Rust library that renders [Mermaid](https://mermaid.js.org/)
-diagrams to SVG. No Node.js, no JVM, no native binaries.
+diagrams to SVG. No Node.js, no JVM, no native binaries. Ships a `mermaid-svg`
+binary alongside the library.
 
 ## Layout
 
 ```
 src/
-├── lib.rs           public API: render(), parse(), Diagram, ast::*, errors
-├── parse/           Mermaid source → Diagram AST  (line-oriented scanners)
+├── lib.rs           public API: render*/parse/Diagram/ast::*/Theme/errors
+├── bin/
+│   └── mermaid-svg.rs   CLI (stdin/file → stdout/file, --theme flag)
+├── parse/           Mermaid source → Diagram AST (line-oriented scanners)
 │   ├── mod.rs       parse() dispatcher, ParseError, ast re-export
 │   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`)
 │   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
 ├── svg/             Diagram AST → SVG string
-│   ├── mod.rs       render() / render_diagram() dispatcher, RenderError
+│   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
-│   ├── theme.rs     default colors
+│   ├── theme.rs     Theme struct + default/dark/forest/neutral
 │   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
-├── sugiyama/        layered graph layout (private — no public API surface)
+├── sugiyama/        layered graph layout (private)
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
-│   ├── tests.rs     unit tests (private API)
+│   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
-examples/render_user.rs   throwaway one-off; safe to delete
+examples/render_user.rs   small one-shot example
 tests/integration.rs      end-to-end tests; writes samples to target/test-samples/
 ```
 
-Cargo manifest: single `[package]` (not `[workspace]`). Crate is published to
-crates.io as `mermaid-svg`. The historical 3-crate split (`sugiyama` +
-`mermaid-parse` + `mermaid-svg`) was consolidated — see `plan.md` for the
-original design.
+Cargo manifest: single `[package]`. Crate is published to crates.io as
+`mermaid-svg`.
 
 ## Done
 
@@ -37,17 +38,16 @@ original design.
 | sugiyama layout (cycle/layer/order/coord/route) | done |
 | pie · sequence · flowchart · state · class · ER · gantt parsers | done |
 | Matching SVG renderers | done |
-| HTTP server (kroki-style POST /svg) | not started |
-| PNG via resvg | not started |
-| Themes & config | not started (default theme only) |
+| Themes (default, dark, forest, neutral + user-defined) | done |
+| CLI binary (`mermaid-svg`) | done |
 
 ## Build & test
 
 ```bash
-cargo build              # library + example
-cargo test               # unit + integration + doctest (113 tests total)
-cargo run --example render_user
-cargo package --allow-dirty   # publish dry-run; produces .crate
+cargo build              # library + binary
+cargo test               # unit + integration + doctest (113 tests)
+cargo run --bin mermaid-svg -- --help
+cargo package --allow-dirty
 ```
 
 Integration tests write sample SVGs to `target/test-samples/`:
@@ -56,18 +56,25 @@ Integration tests write sample SVGs to `target/test-samples/`:
 - `state_lifecycle.svg`, `class_uml.svg`
 - `er_customer.svg`, `gantt_release.svg`
 
-## Known deviations from `plan.md`
+## Themes — internal contract
 
-Deliberate v0.1 simplifications. API does not change if these are revisited.
+Each per-diagram `render(d, theme: &Theme)` and any helper that touches a
+theme color receives `theme: &Theme` and starts with local bindings:
 
-1. **sugiyama X-coords**: `coord.rs` uses median-relaxation with hard
-   non-overlap constraints instead of full Brandes-Köpf (1.5 in the plan).
-   Layouts are valid but not as balanced as 4-pass BK.
-2. **mermaid parser**: hand-rolled line scanners instead of `pest` PEG (2.x in
-   the plan). Mermaid syntax is line-oriented, scanner code is shorter and
-   easier to extend. AST is unchanged.
-3. **svg writer**: own string SVG builder instead of `quick-xml` (3.1 in the
-   plan). No runtime parsing, write-only, escaping in `svg::builder::escape`.
+```rust
+fn draw_thing(svg: &mut SvgBuilder, …, theme: &Theme) {
+    let fg = theme.fg;
+    let flow_node_fill = theme.flow_node_fill;
+    …
+}
+```
+
+`format!` strings then use plain identifiers (`{fg}`), since Rust's named
+format args don't support field access.
+
+When adding a new color to `Theme`, also add it to all four built-in
+constructors in `src/svg/theme.rs`. Custom themes use struct-update syntax
+from one of the built-ins, so adding a field is non-breaking.
 
 ## Conventions
 

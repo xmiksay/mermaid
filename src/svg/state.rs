@@ -10,7 +10,7 @@ use crate::parse::{
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
-use super::theme::{FG, FLOW_EDGE_STROKE, FLOW_LABEL_BG, FLOW_NODE_FILL, FLOW_NODE_STROKE};
+use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
 const LINE_H: f64 = 20.0;
@@ -21,10 +21,11 @@ const MIN_H: f64 = 40.0;
 const PSEUDO_R: f64 = 10.0; // start/end radius
 const CANVAS_PAD: f64 = 24.0;
 
-pub(crate) fn render(d: &StateDiagram) -> String {
+pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
+    let fg = theme.fg;
     if d.states.is_empty() {
         let mut svg = SvgBuilder::new(40.0, 40.0);
-        define_marker(&mut svg);
+        define_marker(&mut svg, theme);
         return svg.finish();
     }
 
@@ -78,7 +79,7 @@ pub(crate) fn render(d: &StateDiagram) -> String {
     };
 
     let mut svg = SvgBuilder::new(width, height);
-    define_marker(&mut svg);
+    define_marker(&mut svg, theme);
 
     for tr in &d.transitions {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&tr.from), id_to_u32.get(&tr.to)) else {
@@ -91,12 +92,12 @@ pub(crate) fn render(d: &StateDiagram) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_transition(&mut svg, &pts, tr, &d.states, &id_to_u32, &sizes);
+        draw_transition(&mut svg, &pts, tr, &d.states, &id_to_u32, &sizes, theme);
     }
 
     for (i, state) in d.states.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_state(&mut svg, center, sizes[i], state);
+        draw_state(&mut svg, center, sizes[i], state, theme);
     }
 
     // Composite outlines: bounding box of all child state positions, drawn
@@ -140,14 +141,14 @@ pub(crate) fn render(d: &StateDiagram) -> String {
         svg.text(
             x + 10.0,
             y + 14.0,
-            &format!("fill=\"{FG}\" font-size=\"12\" font-weight=\"bold\""),
+            &format!("fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""),
             &comp.id,
         );
     }
 
     // Notes attached to states.
     for note in &d.notes {
-        draw_state_note(&mut svg, note, &id_to_u32, &sizes, &layout, &transform);
+        draw_state_note(&mut svg, note, &id_to_u32, &sizes, &layout, &transform, theme);
     }
 
     svg.finish()
@@ -160,7 +161,9 @@ fn draw_state_note(
     sizes: &[(f64, f64)],
     layout: &crate::sugiyama::Layout,
     transform: &impl Fn((f64, f64)) -> (f64, f64),
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
     let Some(&u) = id_to_u32.get(&note.target) else {
         return;
     };
@@ -184,7 +187,7 @@ fn draw_state_note(
     svg.text(
         nx + nw / 2.0,
         ny + nh / 2.0 + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
         &note.text,
     );
 }
@@ -203,7 +206,10 @@ fn state_size(s: &State) -> (f64, f64) {
     }
 }
 
-fn draw_state(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), s: &State) {
+fn draw_state(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), s: &State, theme: &Theme) {
+    let fg = theme.fg;
+    let flow_node_fill = theme.flow_node_fill;
+    let flow_node_stroke = theme.flow_node_stroke;
     match s.kind {
         StateKind::Start => {
             svg.circle(cx, cy, PSEUDO_R, "fill=\"#333\" stroke=\"none\"");
@@ -239,13 +245,13 @@ fn draw_state(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), s:
                 w,
                 h,
                 &format!(
-                    "fill=\"{FLOW_NODE_FILL}\" stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1.5\" rx=\"10\""
+                    "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"10\""
                 ),
             );
             svg.text(
                 cx,
                 cy + 5.0,
-                &format!("text-anchor=\"middle\" fill=\"{FG}\""),
+                &format!("text-anchor=\"middle\" fill=\"{fg}\""),
                 &s.label,
             );
         }
@@ -259,7 +265,11 @@ fn draw_transition(
     states: &[State],
     id_to_u32: &HashMap<String, NodeId>,
     sizes: &[(f64, f64)],
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
+    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_label_bg = theme.flow_label_bg;
     let src_idx = id_to_u32[&tr.from] as usize;
     let dst_idx = id_to_u32[&tr.to] as usize;
     let n = pts.len();
@@ -278,7 +288,7 @@ fn draw_transition(
     svg.path(
         &d,
         &format!(
-            "fill=\"none\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\" \
+            "fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\" \
              marker-end=\"url(#state-arrow)\""
         ),
     );
@@ -292,12 +302,12 @@ fn draw_transition(
             mid.1 - h / 2.0,
             w,
             h,
-            &format!("fill=\"{FLOW_LABEL_BG}\" stroke=\"none\""),
+            &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
         );
         svg.text(
             mid.0,
             mid.1 + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             label,
         );
     }
@@ -378,11 +388,12 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     pts[pts.len() / 2]
 }
 
-fn define_marker(svg: &mut SvgBuilder) {
+fn define_marker(svg: &mut SvgBuilder, theme: &Theme) {
+    let flow_edge_stroke = theme.flow_edge_stroke;
     let m = format!(
         "<marker id=\"state-arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{FLOW_EDGE_STROKE}\"/></marker>"
+         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
     );
     svg.defs_raw(&m);
 }
@@ -404,7 +415,7 @@ mod tests {
         let d = build(
             "stateDiagram-v2\n[*] --> Idle\nIdle --> Running: go\nRunning --> [*]\n",
         );
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Idle<"));
         assert!(svg.contains(">Running<"));
@@ -414,7 +425,7 @@ mod tests {
     #[test]
     fn start_and_end_drawn() {
         let d = build("stateDiagram-v2\n[*] --> A\nA --> [*]\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.contains("<circle"));
     }
 }

@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use crate::parse::PieDiagram;
 
 use super::builder::{escape, fnum, SvgBuilder};
-use super::theme::{pie_color, FG, FG_MUTED};
+use super::theme::Theme;
 
 const RADIUS: f64 = 150.0;
 const PAD: f64 = 24.0;
@@ -14,7 +14,11 @@ const LEGEND_ROW: f64 = 22.0;
 const SWATCH: f64 = 14.0;
 const LEGEND_LABEL_MAX: usize = 24;
 
-pub(crate) fn render(p: &PieDiagram) -> String {
+pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
+    let fg = theme.fg;
+    let fg_muted = theme.fg_muted;
+    let pie_color = |i| theme.pie_color(i);
+
     let total: f64 = p.entries.iter().map(|e| e.value.max(0.0)).sum();
 
     let legend_w = if p.entries.is_empty() {
@@ -43,7 +47,7 @@ pub(crate) fn render(p: &PieDiagram) -> String {
             width / 2.0,
             PAD + 18.0,
             &format!(
-                "text-anchor=\"middle\" fill=\"{FG}\" font-size=\"18\" font-weight=\"bold\""
+                "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""
             ),
             t,
         );
@@ -55,7 +59,7 @@ pub(crate) fn render(p: &PieDiagram) -> String {
             cx,
             cy,
             RADIUS,
-            &format!("fill=\"none\" stroke=\"{FG_MUTED}\" stroke-width=\"1\""),
+            &format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1\""),
         );
         return svg.finish();
     }
@@ -125,7 +129,7 @@ pub(crate) fn render(p: &PieDiagram) -> String {
         svg.text(
             legend_x + SWATCH + 6.0,
             y + SWATCH - 2.0,
-            &format!("fill=\"{FG}\" font-size=\"13\""),
+            &format!("fill=\"{fg}\" font-size=\"13\""),
             &label,
         );
     }
@@ -189,20 +193,20 @@ mod tests {
 
     #[test]
     fn produces_svg_envelope() {
-        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0)]));
+        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0)]), &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.ends_with("</svg>"));
     }
 
     #[test]
     fn contains_one_path_per_segment() {
-        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0), ("C", 1.0)]));
+        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0), ("C", 1.0)]), &Theme::default());
         assert_eq!(svg.matches("<path").count(), 3);
     }
 
     #[test]
     fn contains_title_and_legend_labels() {
-        let svg = render(&pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]));
+        let svg = render(&pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]), &Theme::default());
         assert!(svg.contains("test"));
         assert!(svg.contains("Chrome"));
         assert!(svg.contains("Firefox"));
@@ -213,14 +217,14 @@ mod tests {
     #[test]
     fn handles_full_circle() {
         // Single segment = 100%: must split into two arcs internally.
-        let svg = render(&pie(vec![("All", 1.0)]));
+        let svg = render(&pie(vec![("All", 1.0)]), &Theme::default());
         // Two path segments for full circle.
         assert_eq!(svg.matches("<path").count(), 2);
     }
 
     #[test]
     fn handles_empty() {
-        let svg = render(&PieDiagram::default());
+        let svg = render(&PieDiagram::default(), &Theme::default());
         assert!(svg.starts_with("<svg"));
         // No segments, just outline circle
         assert!(svg.contains("<circle"));

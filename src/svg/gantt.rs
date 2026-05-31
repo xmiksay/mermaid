@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::parse::{GanttDiagram, TaskStart, TaskStatus};
 
 use super::builder::SvgBuilder;
-use super::theme::FG;
+use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
 const BAR_H: f64 = 20.0;
@@ -20,7 +20,8 @@ const SECTION_H: f64 = 24.0;
 const PAD: f64 = 16.0;
 const TIME_COL_MIN_W: f64 = 480.0;
 
-pub(crate) fn render(d: &GanttDiagram) -> String {
+pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
+    let fg = theme.fg;
     // Step 1 — resolve absolute start positions in "days from epoch".
     let resolved = resolve_tasks(d);
     let project_start = resolved.iter().map(|t| t.start_day).fold(f64::INFINITY, f64::min);
@@ -53,7 +54,7 @@ pub(crate) fn render(d: &GanttDiagram) -> String {
         svg.text(
             width / 2.0,
             PAD + 20.0,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
         );
     }
@@ -72,7 +73,7 @@ pub(crate) fn render(d: &GanttDiagram) -> String {
         svg.text(
             x + 2.0,
             axis_y + 14.0,
-            &format!("fill=\"{FG}\" font-size=\"11\""),
+            &format!("fill=\"{fg}\" font-size=\"11\""),
             &format_day(tick, start_day, d.date_format.as_deref()),
         );
         tick += tick_step;
@@ -109,7 +110,7 @@ pub(crate) fn render(d: &GanttDiagram) -> String {
             svg.text(
                 PAD,
                 y + 16.0,
-                &format!("fill=\"{FG}\" font-size=\"13\" font-weight=\"bold\""),
+                &format!("fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
                 &section.name,
             );
             y += SECTION_H;
@@ -120,7 +121,7 @@ pub(crate) fn render(d: &GanttDiagram) -> String {
             svg.text(
                 PAD,
                 y + 14.0,
-                &format!("fill=\"{FG}\" font-size=\"12\""),
+                &format!("fill=\"{fg}\" font-size=\"12\""),
                 &task.name,
             );
             // Bar
@@ -291,7 +292,7 @@ mod tests {
         let d = build(
             "gantt\ntitle My Plan\ndateFormat YYYY-MM-DD\nsection Phase 1\nDesign : a1, 2026-01-01, 5d\nReview : after a1, 2d\n",
         );
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">My Plan<"));
         assert!(svg.contains(">Phase 1<"));
@@ -309,7 +310,7 @@ mod tests {
     #[test]
     fn crit_uses_red_palette() {
         let d = build("gantt\nsection S\nUrgent : crit, 2026-01-01, 1d\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.contains("#F19E9E") || svg.contains("#C0524F"));
     }
 }

@@ -22,8 +22,42 @@ graph TD
 std::fs::write("diagram.svg", svg).unwrap();
 ```
 
-The `render` function returns an `SVG` string for any supported diagram
-source. If you already have a parsed AST, call `render_diagram` instead.
+## CLI
+
+The crate also installs a `mermaid-svg` binary:
+
+```bash
+cargo install mermaid-svg
+
+mermaid-svg diagram.mmd diagram.svg              # files
+mermaid-svg < diagram.mmd > diagram.svg          # stdin/stdout
+mermaid-svg --theme dark diagram.mmd > out.svg   # pick a theme
+echo 'pie\n"A":1\n"B":2' | mermaid-svg
+```
+
+Run `mermaid-svg --help` for the full usage.
+
+## Themes
+
+Four built-in themes: `default`, `dark`, `forest`, `neutral`.
+
+```rust
+use mermaid_svg::{render_with, Theme};
+
+let svg = render_with("classDiagram\n  A <|-- B", &Theme::dark())?;
+```
+
+Custom themes: construct a [`Theme`] with the colors you want
+(typically using struct-update syntax from a built-in):
+
+```rust
+let custom = Theme {
+    flow_node_fill: "#fffbe6",
+    flow_node_stroke: "#caa400",
+    ..Theme::default()
+};
+let svg = render_with(source, &custom)?;
+```
 
 ## Supported diagrams
 
@@ -41,7 +75,9 @@ source. If you already have a parsed AST, call `render_diagram` instead.
 
 ```rust
 pub fn render(input: &str) -> Result<String, RenderError>;
+pub fn render_with(input: &str, theme: &Theme) -> Result<String, RenderError>;
 pub fn render_diagram(d: &Diagram) -> Result<String, RenderError>;
+pub fn render_diagram_with(d: &Diagram, theme: &Theme) -> Result<String, RenderError>;
 pub fn parse(input: &str) -> Result<Diagram, ParseError>;
 
 pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, ...
@@ -51,9 +87,6 @@ pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, ...
 
 - Asymmetric flowchart shapes `[/text/]` and `[\text\]` are not parsed; use
   the standard `[text]` form.
-- PNG output is not yet implemented (the plan is to add it via `resvg`).
-- Only the default theme is available. Custom themes / `%%{init: ...}%%`
-  blocks are not yet honored.
 
 ## Implementation notes
 
@@ -63,8 +96,6 @@ pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, ...
 - Sequence, pie, and gantt have hand-tuned layouts that do not need
   Sugiyama.
 - The SVG is built as a plain string. No XML library at runtime.
-- See `plan.md` for the original design and `.claude/CLAUDE.md` for the
-  current architecture summary.
 
 ## License
 

@@ -11,7 +11,7 @@ use crate::parse::{
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{escape, fnum, SvgBuilder};
-use super::theme::{FG, FLOW_EDGE_STROKE, FLOW_LABEL_BG, FLOW_NODE_FILL, FLOW_NODE_STROKE};
+use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
 const LINE_H: f64 = 18.0;
@@ -21,10 +21,11 @@ const COMPARTMENT_PAD: f64 = 8.0;
 const MIN_W: f64 = 110.0;
 const CANVAS_PAD: f64 = 24.0;
 
-pub(crate) fn render(d: &ClassDiagram) -> String {
+pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
+    let fg = theme.fg;
     if d.classes.is_empty() {
         let mut svg = SvgBuilder::new(40.0, 40.0);
-        define_markers(&mut svg);
+        define_markers(&mut svg, theme);
         return svg.finish();
     }
 
@@ -82,7 +83,7 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
     };
 
     let mut svg = SvgBuilder::new(width, height);
-    define_markers(&mut svg);
+    define_markers(&mut svg, theme);
 
     // Relations first.
     for rel in &d.relations {
@@ -96,13 +97,13 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32);
+        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
     }
 
     // Classes.
     for (i, c) in d.classes.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_class(&mut svg, center, sizes[i], c);
+        draw_class(&mut svg, center, sizes[i], c, theme);
     }
 
     // Namespace frames around their member classes.
@@ -141,7 +142,7 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
         svg.text(
             x + 8.0,
             y + 14.0,
-            &format!("fill=\"{FG}\" font-size=\"12\" font-style=\"italic\""),
+            &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
             &ns.name,
         );
     }
@@ -201,7 +202,10 @@ fn render_member(m: &crate::parse::ClassMember) -> String {
     format!("{vis}{}", m.text)
 }
 
-fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c: &UmlClass) {
+fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c: &UmlClass, theme: &Theme) {
+    let fg = theme.fg;
+    let flow_node_fill = theme.flow_node_fill;
+    let flow_node_stroke = theme.flow_node_stroke;
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     svg.rect(
@@ -210,7 +214,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
         w,
         h,
         &format!(
-            "fill=\"{FLOW_NODE_FILL}\" stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1.5\" rx=\"2\""
+            "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"2\""
         ),
     );
 
@@ -221,7 +225,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
         svg.text(
             cx,
             cursor,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\" font-style=\"italic\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
             &format!("«{s}»"),
         );
     } else {
@@ -231,7 +235,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
     svg.text(
         cx,
         cursor,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-weight=\"bold\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
         &c.name,
     );
     cursor += 4.0;
@@ -246,7 +250,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
             cursor,
             x + w,
             cursor,
-            &format!("stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1\""),
+            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
         );
         cursor += COMPARTMENT_PAD;
         for m in attrs {
@@ -254,7 +258,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
             svg.text(
                 x + 8.0,
                 cursor,
-                &format!("fill=\"{FG}\" font-size=\"13\""),
+                &format!("fill=\"{fg}\" font-size=\"13\""),
                 &render_member(m),
             );
             cursor += 4.0;
@@ -268,7 +272,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
             cursor,
             x + w,
             cursor,
-            &format!("stroke=\"{FLOW_NODE_STROKE}\" stroke-width=\"1\""),
+            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
         );
         cursor += COMPARTMENT_PAD;
         for m in meths {
@@ -276,7 +280,7 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
             svg.text(
                 x + 8.0,
                 cursor,
-                &format!("fill=\"{FG}\" font-size=\"13\""),
+                &format!("fill=\"{fg}\" font-size=\"13\""),
                 &render_member(m),
             );
             cursor += 4.0;
@@ -284,13 +288,18 @@ fn draw_class(svg: &mut SvgBuilder, (cx, cy): (f64, f64), (w, h): (f64, f64), c:
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_relation(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
     rel: &ClassRelation,
     sizes: &[(f64, f64)],
     id_to_u32: &HashMap<String, NodeId>,
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
+    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_label_bg = theme.flow_label_bg;
     let src = id_to_u32[&rel.from] as usize;
     let dst = id_to_u32[&rel.to] as usize;
     let n = pts.len();
@@ -321,7 +330,7 @@ fn draw_relation(
     let d = polyline_path(&clipped);
     svg.path(
         &d,
-        &format!("fill=\"none\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"{dash_attr}{ms}{me}"),
+        &format!("fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"{dash_attr}{ms}{me}"),
     );
 
     if let Some(label) = &rel.label {
@@ -334,12 +343,12 @@ fn draw_relation(
             mid.1 - h / 2.0,
             w,
             h,
-            &format!("fill=\"{FLOW_LABEL_BG}\" stroke=\"none\""),
+            &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
         );
         svg.text(
             mid.0,
             mid.1 + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             label,
         );
     }
@@ -407,29 +416,30 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     pts[pts.len() / 2]
 }
 
-fn define_markers(svg: &mut SvgBuilder) {
+fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
+    let flow_edge_stroke = theme.flow_edge_stroke;
     // Triangle (hollow) for inheritance/realization — marker-end at parent
     let triangle = format!(
         "<marker id=\"cls-triangle\" viewBox=\"0 0 12 12\" refX=\"11\" refY=\"6\" \
          markerWidth=\"14\" markerHeight=\"14\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L11 6 L0 12 Z\" fill=\"#fff\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"/>\
+         <path d=\"M0 0 L11 6 L0 12 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
     );
     let arrow = format!(
         "<marker id=\"cls-arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{FLOW_EDGE_STROKE}\"/></marker>"
+         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
     );
     let diamond_filled = format!(
         "<marker id=\"cls-diamond-filled\" viewBox=\"0 0 16 8\" refX=\"0\" refY=\"4\" \
          markerWidth=\"16\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"{FLOW_EDGE_STROKE}\" stroke=\"{FLOW_EDGE_STROKE}\"/>\
+         <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"{flow_edge_stroke}\" stroke=\"{flow_edge_stroke}\"/>\
          </marker>"
     );
     let diamond_open = format!(
         "<marker id=\"cls-diamond-open\" viewBox=\"0 0 16 8\" refX=\"0\" refY=\"4\" \
          markerWidth=\"16\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"#fff\" stroke=\"{FLOW_EDGE_STROKE}\" stroke-width=\"1.5\"/>\
+         <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
     );
     svg.defs_raw(&triangle);
@@ -458,7 +468,7 @@ mod tests {
     #[test]
     fn renders_inheritance() {
         let d = build("classDiagram\nAnimal <|-- Dog\nclass Animal {\n+name\n+eat()\n}\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Animal<"));
         assert!(svg.contains(">Dog<"));
@@ -468,7 +478,7 @@ mod tests {
     #[test]
     fn composition_has_diamond() {
         let d = build("classDiagram\nCar *-- Wheel\n");
-        let svg = render(&d);
+        let svg = render(&d, &Theme::default());
         assert!(svg.contains("cls-diamond-filled"));
     }
 }

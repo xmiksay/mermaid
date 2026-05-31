@@ -12,7 +12,7 @@ use crate::parse::{
 };
 
 use super::builder::SvgBuilder;
-use super::theme::{ACTOR_FILL, ACTOR_STROKE, ARROW_STROKE, FG, LIFELINE};
+use super::theme::Theme;
 
 const ACTOR_W: f64 = 110.0;
 const ACTOR_H: f64 = 40.0;
@@ -30,14 +30,16 @@ const BLOCK_BOTTOM_GAP: f64 = 12.0;
 const BLOCK_LABEL_W: f64 = 60.0;
 const ACTIVATION_W: f64 = 10.0;
 
-pub(crate) fn render(d: &SequenceDiagram) -> String {
+pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
+    let fg = theme.fg;
+    let lifeline = theme.lifeline;
     if d.participants.is_empty() {
         let mut svg = SvgBuilder::new(200.0, 60.0);
         if let Some(t) = &d.title {
             svg.text(
                 100.0,
                 30.0,
-                &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"16\""),
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"16\""),
                 t,
             );
         }
@@ -77,13 +79,13 @@ pub(crate) fn render(d: &SequenceDiagram) -> String {
     let height = footer_bottom + PAD;
 
     let mut svg = SvgBuilder::new(width, height);
-    define_markers(&mut svg);
+    define_markers(&mut svg, theme);
 
     if let Some(t) = &d.title {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
         );
     }
@@ -96,7 +98,7 @@ pub(crate) fn render(d: &SequenceDiagram) -> String {
             header_bottom,
             x,
             lifeline_bottom,
-            &format!("stroke=\"{LIFELINE}\" stroke-width=\"1\" stroke-dasharray=\"4 4\""),
+            &format!("stroke=\"{lifeline}\" stroke-width=\"1\" stroke-dasharray=\"4 4\""),
         );
     }
 
@@ -104,13 +106,13 @@ pub(crate) fn render(d: &SequenceDiagram) -> String {
     draw_activations(&mut svg, &events, &x_of);
 
     // Block frames
-    draw_block_frames(&mut svg, &events, &x_of);
+    draw_block_frames(&mut svg, &events, &x_of, theme);
 
     // Headers (top + bottom)
     for p in &d.participants {
         let x = x_of[&p.id];
-        draw_actor(&mut svg, x, top_y, &p.display);
-        draw_actor(&mut svg, x, footer_top, &p.display);
+        draw_actor(&mut svg, x, top_y, &p.display, theme);
+        draw_actor(&mut svg, x, footer_top, &p.display, theme);
     }
 
     // Events
@@ -125,11 +127,11 @@ pub(crate) fn render(d: &SequenceDiagram) -> String {
                     } else {
                         msg.text.clone()
                     };
-                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &label);
+                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &label, theme);
                 }
             }
             EventKind::Note(note) => {
-                draw_note(&mut svg, note, ev.y, &x_of);
+                draw_note(&mut svg, note, ev.y, &x_of, theme);
             }
             _ => {}
         }
@@ -312,24 +314,29 @@ fn emit_branched_block(
     });
 }
 
-fn draw_actor(svg: &mut SvgBuilder, cx: f64, top: f64, label: &str) {
+fn draw_actor(svg: &mut SvgBuilder, cx: f64, top: f64, label: &str, theme: &Theme) {
+    let fg = theme.fg;
+    let actor_fill = theme.actor_fill;
+    let actor_stroke = theme.actor_stroke;
     let x = cx - ACTOR_W / 2.0;
     svg.rect(
         x,
         top,
         ACTOR_W,
         ACTOR_H,
-        &format!("fill=\"{ACTOR_FILL}\" stroke=\"{ACTOR_STROKE}\" stroke-width=\"1.5\" rx=\"4\""),
+        &format!("fill=\"{actor_fill}\" stroke=\"{actor_stroke}\" stroke-width=\"1.5\" rx=\"4\""),
     );
     svg.text(
         cx,
         top + ACTOR_H / 2.0 + 5.0,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\""),
         label,
     );
 }
 
-fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind, text: &str) {
+fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind, text: &str, theme: &Theme) {
+    let fg = theme.fg;
+    let arrow_stroke = theme.arrow_stroke;
     let (dash, marker) = stroke_for(arrow);
     let dash_attr = if dash.is_empty() {
         String::new()
@@ -349,14 +356,14 @@ fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind
         svg.path(
             &d_attr,
             &format!(
-                "fill=\"none\" stroke=\"{ARROW_STROKE}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
+                "fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
             ),
         );
         if !text.is_empty() {
             svg.text(
                 x1 + r + 4.0,
                 y + r / 2.0 + 4.0,
-                &format!("fill=\"{FG}\" font-size=\"12\""),
+                &format!("fill=\"{fg}\" font-size=\"12\""),
                 text,
             );
         }
@@ -369,7 +376,7 @@ fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind
         x2,
         y,
         &format!(
-            "stroke=\"{ARROW_STROKE}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
+            "stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
         ),
     );
     if !text.is_empty() {
@@ -377,13 +384,14 @@ fn draw_message(svg: &mut SvgBuilder, x1: f64, x2: f64, y: f64, arrow: ArrowKind
         svg.text(
             mid,
             y - TEXT_OFFSET,
-            &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             text,
         );
     }
 }
 
-fn draw_note(svg: &mut SvgBuilder, note: &SequenceNote, y: f64, x_of: &HashMap<String, f64>) {
+fn draw_note(svg: &mut SvgBuilder, note: &SequenceNote, y: f64, x_of: &HashMap<String, f64>, theme: &Theme) {
+    let fg = theme.fg;
     if note.participants.is_empty() {
         return;
     }
@@ -419,12 +427,13 @@ fn draw_note(svg: &mut SvgBuilder, note: &SequenceNote, y: f64, x_of: &HashMap<S
     svg.text(
         rect_x + rect_w / 2.0,
         y + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
         &note.text,
     );
 }
 
-fn draw_block_frames(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>) {
+fn draw_block_frames(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>, theme: &Theme) {
+    let fg = theme.fg;
     let min_x = x_of.values().copied().fold(f64::INFINITY, f64::min);
     let max_x = x_of.values().copied().fold(f64::NEG_INFINITY, f64::max);
     // Walk events to pair open/close with stack.
@@ -445,7 +454,7 @@ fn draw_block_frames(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<Stri
                     svg.text(
                         min_x + 4.0,
                         y_branch - 4.0,
-                        &format!("fill=\"{FG}\" font-size=\"11\" font-style=\"italic\""),
+                        &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
                         &format!("[{label}]"),
                     );
                 }
@@ -454,7 +463,7 @@ fn draw_block_frames(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<Stri
                 if let Some((open_idx, kind, label)) = stack.pop() {
                     let y_top = events[open_idx].y;
                     let y_bot = ev.y;
-                    draw_block_frame(svg, kind, &label, min_x, max_x, y_top, y_bot);
+                    draw_block_frame(svg, kind, &label, min_x, max_x, y_top, y_bot, theme);
                 }
             }
             _ => {}
@@ -470,7 +479,9 @@ fn draw_block_frame(
     max_x: f64,
     y_top: f64,
     y_bot: f64,
+    theme: &Theme,
 ) {
+    let fg = theme.fg;
     let frame_x = min_x - 16.0;
     let frame_w = (max_x + 16.0) - frame_x;
     let frame_h = y_bot - y_top;
@@ -499,14 +510,14 @@ fn draw_block_frame(
     svg.text(
         frame_x + 6.0,
         y_top + 13.0,
-        &format!("fill=\"{FG}\" font-size=\"11\" font-weight=\"bold\""),
+        &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
         title,
     );
     if !label.is_empty() {
         svg.text(
             frame_x + BLOCK_LABEL_W + 8.0,
             y_top + 13.0,
-            &format!("fill=\"{FG}\" font-size=\"11\" font-style=\"italic\""),
+            &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
             &format!("[{label}]"),
         );
     }
@@ -550,26 +561,27 @@ fn stroke_for(a: ArrowKind) -> (&'static str, &'static str) {
     }
 }
 
-fn define_markers(svg: &mut SvgBuilder) {
+fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
+    let arrow_stroke = theme.arrow_stroke;
     let h = ARROW_HEAD;
     let filled = format!(
         "<marker id=\"arrow-filled\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
          markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L{h} {half} L0 {h} z\" fill=\"{ARROW_STROKE}\"/></marker>",
+         <path d=\"M0 0 L{h} {half} L0 {h} z\" fill=\"{arrow_stroke}\"/></marker>",
         h = h,
         half = h / 2.0,
     );
     let open = format!(
         "<marker id=\"arrow-open\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
          markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L{h} {half} L0 {h}\" fill=\"none\" stroke=\"{ARROW_STROKE}\" stroke-width=\"1.5\"/></marker>",
+         <path d=\"M0 0 L{h} {half} L0 {h}\" fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"/></marker>",
         h = h,
         half = h / 2.0,
     );
     let cross = format!(
         "<marker id=\"arrow-cross\" viewBox=\"0 0 {h} {h}\" refX=\"{half}\" refY=\"{half}\" \
          markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto\">\
-         <path d=\"M0 0 L{h} {h} M{h} 0 L0 {h}\" stroke=\"{ARROW_STROKE}\" stroke-width=\"1.5\"/></marker>",
+         <path d=\"M0 0 L{h} {h} M{h} 0 L0 {h}\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"/></marker>",
         h = h,
         half = h / 2.0,
     );
@@ -596,9 +608,7 @@ mod tests {
 
     #[test]
     fn basic_envelope() {
-        let svg = render(&build(
-            "sequenceDiagram\ntitle Login\nalice->>bob: hi\n",
-        ));
+        let svg = render(&build("sequenceDiagram\ntitle Login\nalice->>bob: hi\n"), &Theme::default());
         assert!(svg.contains(">Login<"));
         assert!(svg.contains(">hi<"));
         assert!(svg.contains("arrow-filled"));
@@ -606,9 +616,7 @@ mod tests {
 
     #[test]
     fn alt_block_renders_frame() {
-        let svg = render(&build(
-            "sequenceDiagram\nA->>B: q\nalt yes\nA->>B: y\nelse no\nA->>B: n\nend\n",
-        ));
+        let svg = render(&build("sequenceDiagram\nA->>B: q\nalt yes\nA->>B: y\nelse no\nA->>B: n\nend\n"), &Theme::default());
         assert!(svg.contains(">alt<"));
         assert!(svg.contains("[yes]"));
         assert!(svg.contains("[no]"));
@@ -616,35 +624,27 @@ mod tests {
 
     #[test]
     fn loop_block_renders_frame() {
-        let svg = render(&build(
-            "sequenceDiagram\nloop every 5s\nA->>B: ping\nend\n",
-        ));
+        let svg = render(&build("sequenceDiagram\nloop every 5s\nA->>B: ping\nend\n"), &Theme::default());
         assert!(svg.contains(">loop<"));
         assert!(svg.contains("[every 5s]"));
     }
 
     #[test]
     fn note_over_renders() {
-        let svg = render(&build(
-            "sequenceDiagram\nA->>B: hi\nNote over A,B: shared\n",
-        ));
+        let svg = render(&build("sequenceDiagram\nA->>B: hi\nNote over A,B: shared\n"), &Theme::default());
         assert!(svg.contains(">shared<"));
     }
 
     #[test]
     fn autonumber_prefixes_messages() {
-        let svg = render(&build(
-            "sequenceDiagram\nautonumber\nA->>B: x\nA->>B: y\n",
-        ));
+        let svg = render(&build("sequenceDiagram\nautonumber\nA->>B: x\nA->>B: y\n"), &Theme::default());
         assert!(svg.contains(">1. x<"));
         assert!(svg.contains(">2. y<"));
     }
 
     #[test]
     fn activate_deactivate_draws_band() {
-        let svg = render(&build(
-            "sequenceDiagram\nA->>B: req\nactivate B\nB-->>A: resp\ndeactivate B\n",
-        ));
+        let svg = render(&build("sequenceDiagram\nA->>B: req\nactivate B\nB-->>A: resp\ndeactivate B\n"), &Theme::default());
         // activation rect uses #ECECFF
         assert!(svg.contains("#ECECFF"));
     }
