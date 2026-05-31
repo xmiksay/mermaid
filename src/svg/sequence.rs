@@ -514,6 +514,7 @@ fn draw_block_frames(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_block_frame(
     svg: &mut SvgBuilder,
     kind: BlockKind,

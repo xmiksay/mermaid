@@ -39,7 +39,7 @@ pub(crate) fn render(d: &KanbanDiagram, theme: &Theme) -> String {
         svg.text(
             x + COL_W / 2.0,
             PAD + HEAD_H / 2.0 + 5.0,
-            &format!("text-anchor=\"middle\" fill=\"#fff\" font-size=\"14\" font-weight=\"bold\""),
+            "text-anchor=\"middle\" fill=\"#fff\" font-size=\"14\" font-weight=\"bold\"",
             &col.label,
         );
         // Column body.

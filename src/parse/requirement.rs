@@ -67,8 +67,8 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
             };
             consume_req_body(&mut lines, &mut req)?;
             d.requirements.push(req);
-        } else if line.starts_with("element") {
-            let rest = line[7..].trim_start();
+        } else if let Some(rest) = line.strip_prefix("element") {
+            let rest = rest.trim_start();
             let open = rest.find('{').ok_or_else(|| ParseError::Syntax {
                 message: format!("expected '{{' in '{line}'"),
                 line: line_no,
@@ -114,7 +114,7 @@ fn consume_req_body<'a, I: Iterator<Item = (usize, &'a str)>>(
     lines: &mut std::iter::Peekable<I>,
     req: &mut Requirement,
 ) -> Result<(), ParseError> {
-    while let Some((_, raw)) = lines.next() {
+    for (_, raw) in lines.by_ref() {
         let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;
@@ -147,7 +147,7 @@ fn consume_element_body<'a, I: Iterator<Item = (usize, &'a str)>>(
     lines: &mut std::iter::Peekable<I>,
     el: &mut ReqElement,
 ) -> Result<(), ParseError> {
-    while let Some((_, raw)) = lines.next() {
+    for (_, raw) in lines.by_ref() {
         let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;

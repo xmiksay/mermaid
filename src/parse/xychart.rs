@@ -71,12 +71,12 @@ pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
 
 fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
     let rest = rest.trim();
-    let (title, body) = if rest.starts_with('"') {
-        let end = rest[1..].find('"').ok_or_else(|| ParseError::Syntax {
+    let (title, body) = if let Some(after) = rest.strip_prefix('"') {
+        let end = after.find('"').ok_or_else(|| ParseError::Syntax {
             message: "unterminated string in axis".into(),
             line: line_no,
         })?;
-        (Some(rest[1..1 + end].to_string()), rest[2 + end..].trim())
+        (Some(after[..end].to_string()), after[end + 1..].trim())
     } else {
         (None, rest)
     };

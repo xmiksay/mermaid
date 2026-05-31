@@ -224,7 +224,7 @@ fn parse_one_block(tok: &str) -> Option<BlockItem> {
 
 fn parse_shape(s: &str) -> (String, BlockShape, String) {
     let s = s.trim();
-    let shape_start = s.find(|c| matches!(c, '[' | '(' | '{'));
+    let shape_start = s.find(['[', '(', '{']);
     let (id, shape_part) = match shape_start {
         Some(p) => (&s[..p], &s[p..]),
         None => (s, ""),

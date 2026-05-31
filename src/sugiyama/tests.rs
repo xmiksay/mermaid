@@ -40,7 +40,7 @@ fn linear_chain() {
     let y3 = l.node_pos[&3].1;
     assert!(y1 < y2 && y2 < y3, "layers must increase in y");
     assert_eq!(l.edge_points.len(), 2);
-    for (_, pts) in &l.edge_points {
+    for pts in l.edge_points.values() {
         assert!(pts.len() >= 2);
     }
 }

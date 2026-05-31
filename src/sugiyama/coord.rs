@@ -113,8 +113,8 @@ fn assign_x(w: &mut Work, node_gap: f64, max_iter: usize) {
 
     // Normalize: leftmost edge at x = 0.
     let mut min_x = f64::INFINITY;
-    for v in 0..n {
-        let left_edge = x[v] - w.w[v] / 2.0;
+    for (v, &xv) in x.iter().enumerate() {
+        let left_edge = xv - w.w[v] / 2.0;
         if left_edge < min_x {
             min_x = left_edge;
         }

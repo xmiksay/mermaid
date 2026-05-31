@@ -110,7 +110,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 svg.text(
                     x + 4.0,
                     axis_y + 12.0,
-                    &format!("fill=\"#d33\" font-size=\"11\" font-weight=\"bold\""),
+                    "fill=\"#d33\" font-size=\"11\" font-weight=\"bold\"",
                     "today",
                 );
             }

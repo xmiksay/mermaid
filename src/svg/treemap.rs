@@ -47,6 +47,7 @@ fn node_value(n: &TreemapNode) -> f64 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn layout(
     nodes: &[TreemapNode],
     x: f64,
@@ -61,7 +62,7 @@ fn layout(
         return;
     }
     let total: f64 = nodes.iter().map(node_value).sum();
-    let horizontal = depth % 2 == 0;
+    let horizontal = depth.is_multiple_of(2);
     let mut offset = 0.0;
     for (i, n) in nodes.iter().enumerate() {
         let frac = node_value(n) / total.max(1e-9);
@@ -111,7 +112,7 @@ fn layout(
                     svg.text(
                         nx + 6.0,
                         ny + 28.0,
-                        &format!("fill=\"#fff\" font-size=\"10\""),
+                        "fill=\"#fff\" font-size=\"10\"",
                         &format!("{v}"),
                     );
                 }

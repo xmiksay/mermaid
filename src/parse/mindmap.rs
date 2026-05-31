@@ -59,10 +59,10 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
                 let (_, child) = stack.pop().unwrap();
                 if let Some((_, parent)) = stack.last_mut() {
                     parent.children.push(child);
-                } else if root.is_none() {
-                    root = Some(child);
+                } else if let Some(r) = root.as_mut() {
+                    r.children.push(child);
                 } else {
-                    root.as_mut().unwrap().children.push(child);
+                    root = Some(child);
                 }
             } else {
                 break;
@@ -76,10 +76,10 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
     while let Some((_, child)) = stack.pop() {
         if let Some((_, parent)) = stack.last_mut() {
             parent.children.push(child);
-        } else if root.is_none() {
-            root = Some(child);
+        } else if let Some(r) = root.as_mut() {
+            r.children.push(child);
         } else {
-            root.as_mut().unwrap().children.push(child);
+            root = Some(child);
         }
     }
 
@@ -91,7 +91,7 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
 
 fn parse_node(body: &str) -> MindmapNode {
     let body = body.trim();
-    let shape_start = body.find(|c| matches!(c, '(' | '[' | '{' | ')'));
+    let shape_start = body.find(['(', '[', '{', ')']);
     let (id, shape_part) = match shape_start {
         Some(pos) => (&body[..pos], &body[pos..]),
         None => (body, ""),

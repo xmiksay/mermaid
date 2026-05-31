@@ -123,7 +123,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
         let mut first = true;
         let mut prev: Option<(f64, f64)> = None;
         for (cx, t) in &task_xs {
-            if !t.actors.iter().any(|a| a == actor) && !(actor.is_empty() && t.actors.is_empty()) {
+            if !t.actors.iter().any(|a| a == actor) && (!actor.is_empty() || !t.actors.is_empty()) {
                 if let Some(p) = prev {
                     // Draw running segment up to here, then break.
                     let _ = p; // path break: start new subpath

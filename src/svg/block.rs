@@ -177,6 +177,7 @@ fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_block(
     b: &Block,
     x: f64,

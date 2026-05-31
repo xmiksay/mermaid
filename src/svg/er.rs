@@ -153,9 +153,7 @@ fn draw_entity(
                 svg.text(
                     x + w - 8.0,
                     row_y,
-                    &format!(
-                        "text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\""
-                    ),
+                    "text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\"",
                     k,
                 );
             }
