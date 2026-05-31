@@ -1,4 +1,4 @@
-use mermaid_parse::{parse, ArrowKind, Diagram, ParseError, ParticipantKind};
+use mermaid_parse::{parse, ArrowKind, Diagram, ParseError, ParticipantKind, SequenceItem};
 
 #[test]
 fn dispatches_pie() {
@@ -14,8 +14,12 @@ fn dispatches_sequence() {
     let d = parse("sequenceDiagram\nA->>B: hi\n").unwrap();
     match d {
         Diagram::Sequence(s) => {
-            assert_eq!(s.messages.len(), 1);
-            assert_eq!(s.messages[0].arrow, ArrowKind::SolidArrow);
+            assert_eq!(s.items.len(), 1);
+            if let SequenceItem::Message(m) = &s.items[0] {
+                assert_eq!(m.arrow, ArrowKind::SolidArrow);
+            } else {
+                panic!("first item must be a message");
+            }
         }
         _ => panic!("expected sequence"),
     }
@@ -55,7 +59,12 @@ fn real_world_sequence() {
     assert_eq!(d.title.as_deref(), Some("API call"));
     assert_eq!(d.participants.len(), 3);
     assert_eq!(d.participants[0].kind, ParticipantKind::Actor);
-    assert_eq!(d.messages.len(), 4);
+    let n_msgs = d
+        .items
+        .iter()
+        .filter(|i| matches!(i, SequenceItem::Message(_)))
+        .count();
+    assert_eq!(n_msgs, 4);
 }
 
 #[test]

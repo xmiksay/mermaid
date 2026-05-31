@@ -32,7 +32,8 @@ pub struct PieEntry {
 pub struct SequenceDiagram {
     pub title: Option<String>,
     pub participants: Vec<Participant>,
-    pub messages: Vec<Message>,
+    pub items: Vec<SequenceItem>,
+    pub autonumber: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,58 @@ pub struct Participant {
 pub enum ParticipantKind {
     Participant,
     Actor,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SequenceItem {
+    Message(Message),
+    Note(SequenceNote),
+    Activate(String),
+    Deactivate(String),
+    /// `alt label / else label / end`
+    Alt(Vec<AltBranch>),
+    /// `loop label ... end`
+    Loop(SequenceBlock),
+    /// `par label / and label / end`
+    Par(Vec<AltBranch>),
+    /// `opt label ... end`
+    Opt(SequenceBlock),
+    /// `critical label / option label / end`
+    Critical(Vec<AltBranch>),
+    /// `box label ... end` — wraps participants
+    Box(SequenceBox),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AltBranch {
+    pub label: String,
+    pub items: Vec<SequenceItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SequenceBlock {
+    pub label: String,
+    pub items: Vec<SequenceItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SequenceBox {
+    pub label: String,
+    pub participant_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SequenceNote {
+    pub position: NotePosition,
+    pub participants: Vec<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotePosition {
+    Over,
+    LeftOf,
+    RightOf,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +132,7 @@ pub struct FlowchartDiagram {
     pub direction: FlowDirection,
     pub nodes: Vec<FlowNode>,
     pub edges: Vec<FlowEdge>,
+    pub subgraphs: Vec<Subgraph>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -111,10 +165,22 @@ pub enum NodeShape {
     Cylinder,
     /// `((text))` — circle
     Circle,
+    /// `(((text)))` — double circle
+    DoubleCircle,
     /// `{text}` — rhombus (decision)
     Rhombus,
     /// `{{text}}` — hexagon
     Hexagon,
+    /// `[/text/]` — parallelogram (input/output)
+    Parallelogram,
+    /// `[\text\]` — parallelogram opposite
+    ParallelogramAlt,
+    /// `[/text\]` — trapezoid (manual input)
+    Trapezoid,
+    /// `[\text/]` — trapezoid alt (manual output)
+    TrapezoidAlt,
+    /// `>text]` — asymmetric flag
+    Asymmetric,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,19 +188,39 @@ pub struct FlowEdge {
     pub from: String,
     pub to: String,
     pub label: Option<String>,
-    pub kind: EdgeKind,
+    pub line: EdgeLine,
+    pub head: EdgeHead,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EdgeKind {
-    /// `-->` solid line with arrow
+pub enum EdgeLine {
+    /// `-` solid
     Solid,
-    /// `---` solid line, no arrow
-    SolidNoArrow,
-    /// `-.->` dotted line with arrow
+    /// `.` dotted
     Dotted,
-    /// `==>` thick line with arrow
+    /// `=` thick
     Thick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeHead {
+    /// `---` no head
+    None,
+    /// `-->` filled arrow head
+    Arrow,
+    /// `--o` open circle head
+    Circle,
+    /// `--x` cross head
+    Cross,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subgraph {
+    pub id: String,
+    pub label: String,
+    pub direction: Option<FlowDirection>,
+    pub node_ids: Vec<String>,
+    pub child_subgraph_ids: Vec<String>,
 }
 
 // ---- state diagram ---------------------------------------------------------
@@ -144,6 +230,8 @@ pub struct StateDiagram {
     pub direction: FlowDirection,
     pub states: Vec<State>,
     pub transitions: Vec<StateTransition>,
+    pub composites: Vec<CompositeState>,
+    pub notes: Vec<StateNote>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,12 +258,29 @@ pub struct StateTransition {
     pub label: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositeState {
+    pub id: String,
+    /// Each region is an ordered list of child state ids (multi-region
+    /// composites use the `--` separator to split into parallel regions).
+    pub regions: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateNote {
+    pub target: String,
+    pub position: NotePosition,
+    pub text: String,
+}
+
 // ---- class diagram ---------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClassDiagram {
+    pub direction: FlowDirection,
     pub classes: Vec<UmlClass>,
     pub relations: Vec<ClassRelation>,
+    pub namespaces: Vec<Namespace>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,7 +323,7 @@ pub struct ClassRelation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassRelationKind {
-    /// `<|--` inheritance (from extends to)
+    /// `<|--` inheritance
     Inheritance,
     /// `*--` composition
     Composition,
@@ -234,6 +339,12 @@ pub enum ClassRelationKind {
     Realization,
     /// `..>` dependency (dashed)
     Dependency,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Namespace {
+    pub name: String,
+    pub class_names: Vec<String>,
 }
 
 // ---- ER diagram ------------------------------------------------------------
@@ -255,6 +366,7 @@ pub struct EntityAttribute {
     pub type_: String,
     pub name: String,
     pub key: Option<String>,
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -286,6 +398,8 @@ pub struct GanttDiagram {
     pub title: Option<String>,
     pub date_format: Option<String>,
     pub axis_format: Option<String>,
+    pub excludes: Vec<String>,
+    pub today_marker: Option<String>,
     pub sections: Vec<GanttSection>,
 }
 

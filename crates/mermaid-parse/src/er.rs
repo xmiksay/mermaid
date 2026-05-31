@@ -76,7 +76,20 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
 }
 
 fn parse_attribute(line: &str) -> EntityAttribute {
-    let mut parts = line.split_whitespace();
+    // Trailing "comment" may be a quoted string after the key (or after the name).
+    let (head, comment) = if let Some(start) = line.find('"') {
+        if let Some(end_rel) = line[start + 1..].find('"') {
+            let end = start + 1 + end_rel;
+            let comment = line[start + 1..end].to_string();
+            let head = format!("{}{}", &line[..start], &line[end + 1..]);
+            (head, Some(comment))
+        } else {
+            (line.to_string(), None)
+        }
+    } else {
+        (line.to_string(), None)
+    };
+    let mut parts = head.split_whitespace();
     let ty = parts.next().unwrap_or("").to_string();
     let name = parts.next().unwrap_or("").to_string();
     let key = parts.next().map(|k| k.to_string());
@@ -84,6 +97,7 @@ fn parse_attribute(line: &str) -> EntityAttribute {
         type_: ty,
         name,
         key,
+        comment,
     }
 }
 

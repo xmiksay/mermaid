@@ -78,6 +78,29 @@ pub(crate) fn render(d: &GanttDiagram) -> String {
         tick += tick_step;
     }
 
+    // Today marker
+    if let Some(today_raw) = &d.today_marker {
+        if let Some(today_day) = ymd_or_none(today_raw) {
+            let rel = today_day - start_day;
+            if rel >= 0.0 && rel <= total_days {
+                let x = body_x + (rel / total_days) * body_w;
+                svg.line(
+                    x,
+                    axis_y,
+                    x,
+                    HEADER_H + AXIS_H + body_h,
+                    "stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\"",
+                );
+                svg.text(
+                    x + 4.0,
+                    axis_y + 12.0,
+                    &format!("fill=\"#d33\" font-size=\"11\" font-weight=\"bold\""),
+                    "today",
+                );
+            }
+        }
+    }
+
     // Body
     let mut y = HEADER_H + AXIS_H;
     let mut flat_idx = 0;
@@ -194,6 +217,18 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
         }
     }
     out
+}
+
+fn ymd_or_none(s: &str) -> Option<f64> {
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: i32 = parts[0].parse().ok()?;
+    let m: i32 = parts[1].parse().ok()?;
+    let dd: i32 = parts[2].parse().ok()?;
+    const TBL: [f64; 12] = [0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.];
+    Some((y as f64) * 365.25 + TBL[(m.clamp(1, 12) - 1) as usize] + (dd as f64))
 }
 
 fn pick_tick_step(total_days: f64) -> f64 {

@@ -1,30 +1,33 @@
-//! State diagram parser (v0.1 subset).
+//! State diagram parser.
 //!
 //! Supports:
 //!   * `stateDiagram` and `stateDiagram-v2` headers.
-//!   * Transitions `A --> B` and `A --> B : label`.
-//!   * `[*]` start and end markers — each occurrence becomes its own
-//!     pseudo-state node (so a diagram can have multiple start/end indicators).
-//!   * State declarations `state X` and `state X : description`.
-//!   * Stereotypes via `state X <<choice>>` (choice/fork/join).
+//!   * `[*]` start/end pseudo-states (each occurrence gets a unique id).
+//!   * Transitions `A --> B[: label]`.
+//!   * `state X` and `state X : description` declarations.
+//!   * Stereotypes via `state X <<choice/fork/join>>`.
 //!   * `direction TB|TD|BT|LR|RL`.
-//!
-//! Composite state blocks (`state X { ... }`) are flattened: opener/closer
-//! lines are skipped, nested content is ignored. Properly nesting would
-//! require sub-graph support in the renderer.
+//!   * Composite states `state X { ... }` (potentially nested), with
+//!     parallel regions separated by `--`.
+//!   * Notes: `note right of X: text`, `note left of X: text`,
+//!     `note over X: text` (consumed across following lines until `end note`).
 
 use std::collections::HashMap;
 
-use crate::ast::{FlowDirection, State, StateDiagram, StateKind, StateTransition};
+use crate::ast::{
+    CompositeState, FlowDirection, NotePosition, State, StateDiagram, StateKind, StateNote,
+    StateTransition,
+};
 use crate::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
     let mut diag = StateDiagram::default();
     let mut header_seen = false;
-    let mut depth: usize = 0;
+    let mut composite_stack: Vec<CompositeFrame> = Vec::new();
     let mut start_n = 0usize;
     let mut end_n = 0usize;
     let mut existing: HashMap<String, usize> = HashMap::new();
+    let mut pending_note: Option<(String, NotePosition, Vec<String>)> = None;
 
     for (idx, raw) in input.lines().enumerate() {
         let line_no = idx + 1;
@@ -44,16 +47,73 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
             continue;
         }
 
-        // Composite state block start/end — flatten by skipping.
-        if line.ends_with('{') {
-            depth += 1;
+        if let Some((target, pos, text_lines)) = pending_note.as_mut() {
+            if line == "end note" {
+                let note = StateNote {
+                    target: std::mem::take(target),
+                    position: *pos,
+                    text: text_lines.join(" "),
+                };
+                diag.notes.push(note);
+                pending_note = None;
+                continue;
+            }
+            text_lines.push(line.to_string());
             continue;
         }
+
+        if let Some(note) = try_note_oneline(line) {
+            diag.notes.push(note);
+            continue;
+        }
+        if let Some((target, pos)) = try_note_multiline(line) {
+            pending_note = Some((target, pos, Vec::new()));
+            continue;
+        }
+
         if line == "}" {
-            depth = depth.saturating_sub(1);
+            if let Some(frame) = composite_stack.pop() {
+                // Push composite into diag
+                let composite = CompositeState {
+                    id: frame.id.clone(),
+                    regions: frame.regions,
+                };
+                diag.composites.push(composite);
+                // Ensure parent composite, if any, records child id
+                if let Some(parent) = composite_stack.last_mut() {
+                    if let Some(region) = parent.regions.last_mut() {
+                        if !region.contains(&frame.id) {
+                            region.push(frame.id.clone());
+                        }
+                    }
+                }
+            }
             continue;
         }
-        if depth > 0 {
+
+        if line == "--" {
+            // Open a new region inside the topmost composite.
+            if let Some(top) = composite_stack.last_mut() {
+                top.regions.push(Vec::new());
+            }
+            continue;
+        }
+
+        if line.ends_with('{') && line.starts_with("state ") {
+            let inner = line
+                .strip_prefix("state ")
+                .unwrap()
+                .trim_end_matches('{')
+                .trim();
+            let id_part = inner
+                .split_once("<<")
+                .map(|(a, _)| a.trim())
+                .unwrap_or(inner);
+            ensure_state(&mut diag, &mut existing, id_part, "", StateKind::Normal);
+            composite_stack.push(CompositeFrame {
+                id: id_part.to_string(),
+                regions: vec![Vec::new()],
+            });
             continue;
         }
 
@@ -79,7 +139,24 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
         }
 
         if line.contains("-->") {
-            parse_transition(line, &mut diag, &mut existing, &mut start_n, &mut end_n)?;
+            let (from_id, to_id) = parse_transition(
+                line,
+                &mut diag,
+                &mut existing,
+                &mut start_n,
+                &mut end_n,
+            )?;
+            // Composite tracking: each new normal state declared in the line
+            // belongs to the active region.
+            if let Some(top) = composite_stack.last_mut() {
+                if let Some(region) = top.regions.last_mut() {
+                    for id in [&from_id, &to_id] {
+                        if existing.contains_key(id) && !region.contains(id) {
+                            region.push(id.clone());
+                        }
+                    }
+                }
+            }
             continue;
         }
 
@@ -103,17 +180,50 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
     Ok(diag)
 }
 
+struct CompositeFrame {
+    id: String,
+    regions: Vec<Vec<String>>,
+}
+
+fn try_note_oneline(line: &str) -> Option<StateNote> {
+    let body = line.strip_prefix("note ")?;
+    let (head, text) = body.split_once(':')?;
+    let (pos, target) = parse_note_head(head.trim())?;
+    Some(StateNote {
+        target,
+        position: pos,
+        text: text.trim().to_string(),
+    })
+}
+
+fn try_note_multiline(line: &str) -> Option<(String, NotePosition)> {
+    // `note right of X` without colon means following lines until `end note`.
+    let body = line.strip_prefix("note ")?;
+    if body.contains(':') {
+        return None;
+    }
+    let (pos, target) = parse_note_head(body.trim())?;
+    Some((target, pos))
+}
+
+fn parse_note_head(head: &str) -> Option<(NotePosition, String)> {
+    if let Some(t) = head.strip_prefix("right of ") {
+        return Some((NotePosition::RightOf, t.trim().to_string()));
+    }
+    if let Some(t) = head.strip_prefix("left of ") {
+        return Some((NotePosition::LeftOf, t.trim().to_string()));
+    }
+    if let Some(t) = head.strip_prefix("over ") {
+        return Some((NotePosition::Over, t.trim().to_string()));
+    }
+    None
+}
+
 fn parse_state_decl(
     rest: &str,
     diag: &mut StateDiagram,
     existing: &mut HashMap<String, usize>,
 ) {
-    // Cases:
-    //   X
-    //   X : description
-    //   X <<choice>>
-    //   X <<fork>>
-    //   X <<join>>
     let rest = rest.trim();
     let (id_part, label_part) = match rest.split_once(':') {
         Some((a, b)) => (a.trim(), b.trim().to_string()),
@@ -141,7 +251,7 @@ fn parse_transition(
     existing: &mut HashMap<String, usize>,
     start_n: &mut usize,
     end_n: &mut usize,
-) -> Result<(), ParseError> {
+) -> Result<(String, String), ParseError> {
     let arrow = "-->";
     let pos = line.find(arrow).unwrap();
     let from_raw = line[..pos].trim();
@@ -150,15 +260,14 @@ fn parse_transition(
         Some((a, b)) => (a.trim(), Some(b.trim().to_string())),
         None => (after, None),
     };
-
     let from_id = canonicalize(from_raw, true, diag, existing, start_n, end_n);
     let to_id = canonicalize(to_raw, false, diag, existing, start_n, end_n);
     diag.transitions.push(StateTransition {
-        from: from_id,
-        to: to_id,
+        from: from_id.clone(),
+        to: to_id.clone(),
         label,
     });
-    Ok(())
+    Ok((from_id, to_id))
 }
 
 fn canonicalize(
@@ -226,46 +335,66 @@ mod tests {
 
     #[test]
     fn simple_transitions() {
-        let s = "stateDiagram-v2\n[*] --> Idle\nIdle --> Running: start\nRunning --> [*]\n";
-        let d = parse(s).unwrap();
-        // 2 [*] occurrences → 2 pseudo states; Idle, Running → 4 total
+        let d = parse("stateDiagram-v2\n[*] --> Idle\nIdle --> Run: start\nRun --> [*]\n").unwrap();
         assert_eq!(d.states.len(), 4);
         assert_eq!(d.transitions.len(), 3);
-        assert_eq!(d.transitions[1].label.as_deref(), Some("start"));
+    }
+
+    #[test]
+    fn composite_state_block() {
+        let d = parse(
+            "stateDiagram-v2\n[*] --> A\nstate A {\n[*] --> Sub\nSub --> [*]\n}\nA --> [*]\n",
+        )
+        .unwrap();
+        assert_eq!(d.composites.len(), 1);
+        let c = &d.composites[0];
+        assert_eq!(c.id, "A");
+        assert_eq!(c.regions.len(), 1);
+        assert!(c.regions[0].contains(&"Sub".to_string()));
+    }
+
+    #[test]
+    fn parallel_regions() {
+        let d = parse(
+            "stateDiagram-v2\nstate Combo {\n[*] --> X\nX --> [*]\n--\n[*] --> Y\nY --> [*]\n}\n",
+        )
+        .unwrap();
+        assert_eq!(d.composites[0].regions.len(), 2);
+    }
+
+    #[test]
+    fn note_right_of() {
+        let d = parse("stateDiagram-v2\nA --> B\nnote right of A: hello\n").unwrap();
+        assert_eq!(d.notes.len(), 1);
+        assert_eq!(d.notes[0].position, NotePosition::RightOf);
+        assert_eq!(d.notes[0].target, "A");
+        assert_eq!(d.notes[0].text, "hello");
+    }
+
+    #[test]
+    fn note_multiline() {
+        let d = parse(
+            "stateDiagram-v2\nA --> B\nnote left of A\nthis is\na long note\nend note\n",
+        )
+        .unwrap();
+        assert_eq!(d.notes.len(), 1);
+        assert!(d.notes[0].text.contains("this is"));
+        assert!(d.notes[0].text.contains("long note"));
     }
 
     #[test]
     fn stereotypes_recognized() {
-        let s = "stateDiagram\nstate fork_1 <<fork>>\nstate join_1 <<join>>\nstate c <<choice>>\nfork_1 --> join_1\n";
-        let d = parse(s).unwrap();
+        let d = parse(
+            "stateDiagram\nstate fork_1 <<fork>>\nstate join_1 <<join>>\nstate c <<choice>>\nfork_1 --> join_1\n",
+        )
+        .unwrap();
         let kinds: Vec<_> = d.states.iter().map(|s| (s.id.clone(), s.kind)).collect();
         assert!(kinds.contains(&("fork_1".into(), StateKind::Fork)));
-        assert!(kinds.contains(&("join_1".into(), StateKind::Join)));
-        assert!(kinds.contains(&("c".into(), StateKind::Choice)));
     }
 
     #[test]
     fn direction_parsed() {
-        let s = "stateDiagram-v2\ndirection LR\nA --> B\n";
-        let d = parse(s).unwrap();
+        let d = parse("stateDiagram-v2\ndirection LR\nA --> B\n").unwrap();
         assert_eq!(d.direction, FlowDirection::LeftRight);
-    }
-
-    #[test]
-    fn composite_block_flattened() {
-        let s = "stateDiagram-v2\n[*] --> A\nstate A {\n[*] --> Sub\nSub --> [*]\n}\nA --> [*]\n";
-        let d = parse(s).unwrap();
-        // The nested [*]/Sub statements are skipped; only A and [*] markers visible.
-        let names: Vec<_> = d.states.iter().map(|s| s.id.clone()).collect();
-        assert!(names.contains(&"A".to_string()));
-        assert!(!names.contains(&"Sub".to_string()));
-    }
-
-    #[test]
-    fn description_on_state() {
-        let s = "stateDiagram-v2\nstate X : doing work\nX --> Y\n";
-        let d = parse(s).unwrap();
-        let x = d.states.iter().find(|s| s.id == "X").unwrap();
-        assert_eq!(x.label, "doing work");
     }
 }

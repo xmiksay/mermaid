@@ -47,6 +47,25 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
             diag.axis_format = Some(rest.trim().to_string());
             continue;
         }
+        if let Some(rest) = line.strip_prefix("excludes ") {
+            for tok in rest.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                diag.excludes.push(tok.to_string());
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("todayMarker ") {
+            diag.today_marker = Some(rest.trim().to_string());
+            continue;
+        }
+        // `today YYYY-MM-DD` shorthand used by some examples.
+        if let Some(rest) = line.strip_prefix("today ") {
+            diag.today_marker = Some(rest.trim().to_string());
+            continue;
+        }
+        if line.starts_with("includes ") || line.starts_with("weekday ") {
+            // Accepted but currently informational only.
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("section ") {
             diag.sections.push(GanttSection {
                 name: rest.trim().to_string(),

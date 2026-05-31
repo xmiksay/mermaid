@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use mermaid_parse::{
-    ClassDiagram, ClassRelation, ClassRelationKind, MemberKind, UmlClass, Visibility,
+    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, UmlClass,
+    Visibility,
 };
 use sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
@@ -27,6 +28,7 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
         return svg.finish();
     }
 
+    let dir = d.direction;
     let sizes: Vec<(f64, f64)> = d.classes.iter().map(class_size).collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .classes
@@ -44,7 +46,14 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
         .classes
         .iter()
         .enumerate()
-        .map(|(i, _)| (i as NodeId, sizes[i]))
+        .map(|(i, _)| {
+            let (w, h) = sizes[i];
+            let s = match dir {
+                FlowDirection::LeftRight | FlowDirection::RightLeft => (h, w),
+                _ => (w, h),
+            };
+            (i as NodeId, s)
+        })
         .collect();
 
     let g = Graph {
@@ -53,11 +62,24 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
         node_size: node_size_su,
     };
     let layout = layout_with(&g, &LayoutConfig::default()).unwrap_or_default();
+    let (raw_w, raw_h) = (layout.width, layout.height);
+    let (canvas_w, canvas_h) = match dir {
+        FlowDirection::TopDown | FlowDirection::BottomTop => (raw_w, raw_h),
+        FlowDirection::LeftRight | FlowDirection::RightLeft => (raw_h, raw_w),
+    };
 
-    let width = layout.width + CANVAS_PAD * 2.0;
-    let height = layout.height + CANVAS_PAD * 2.0;
+    let width = canvas_w + CANVAS_PAD * 2.0;
+    let height = canvas_h + CANVAS_PAD * 2.0;
 
-    let transform = |(x, y): (f64, f64)| -> (f64, f64) { (x + CANVAS_PAD, y + CANVAS_PAD) };
+    let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
+        let (tx, ty) = match dir {
+            FlowDirection::TopDown => (sx, sy),
+            FlowDirection::BottomTop => (sx, raw_h - sy),
+            FlowDirection::LeftRight => (sy, sx),
+            FlowDirection::RightLeft => (raw_h - sy, sx),
+        };
+        (tx + CANVAS_PAD, ty + CANVAS_PAD)
+    };
 
     let mut svg = SvgBuilder::new(width, height);
     define_markers(&mut svg);
@@ -81,6 +103,47 @@ pub(crate) fn render(d: &ClassDiagram) -> String {
     for (i, c) in d.classes.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
         draw_class(&mut svg, center, sizes[i], c);
+    }
+
+    // Namespace frames around their member classes.
+    for ns in &d.namespaces {
+        let mut min_x = f64::INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        for name in &ns.class_names {
+            let Some(&u) = id_to_u32.get(name) else {
+                continue;
+            };
+            let (cx, cy) = transform(layout.node_pos[&u]);
+            let (w, h) = sizes[u as usize];
+            min_x = min_x.min(cx - w / 2.0);
+            max_x = max_x.max(cx + w / 2.0);
+            min_y = min_y.min(cy - h / 2.0);
+            max_y = max_y.max(cy + h / 2.0);
+        }
+        if !min_x.is_finite() {
+            continue;
+        }
+        let pad = 12.0;
+        let header_h = 18.0;
+        let x = min_x - pad;
+        let y = min_y - pad - header_h;
+        let w = (max_x - min_x) + pad * 2.0;
+        let h = (max_y - min_y) + pad * 2.0 + header_h;
+        svg.rect(
+            x,
+            y,
+            w,
+            h,
+            "fill=\"none\" stroke=\"#888\" stroke-width=\"1\" rx=\"4\" stroke-dasharray=\"4 3\"",
+        );
+        svg.text(
+            x + 8.0,
+            y + 14.0,
+            &format!("fill=\"{FG}\" font-size=\"12\" font-style=\"italic\""),
+            &ns.name,
+        );
     }
 
     svg.finish()

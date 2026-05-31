@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use mermaid_parse::{FlowDirection, State, StateDiagram, StateKind, StateTransition};
+use mermaid_parse::{
+    FlowDirection, NotePosition, State, StateDiagram, StateKind, StateNote, StateTransition,
+};
 use sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use crate::svg::{fnum, SvgBuilder};
@@ -97,7 +99,94 @@ pub(crate) fn render(d: &StateDiagram) -> String {
         draw_state(&mut svg, center, sizes[i], state);
     }
 
+    // Composite outlines: bounding box of all child state positions, drawn
+    // under or above nodes. We draw on top with no fill so labels remain
+    // visible.
+    for comp in &d.composites {
+        let mut min_x = f64::INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        let mut count = 0;
+        for region in &comp.regions {
+            for child_id in region {
+                if let Some(&u) = id_to_u32.get(child_id) {
+                    let (cx, cy) = transform(layout.node_pos[&u]);
+                    let (w, h) = sizes[u as usize];
+                    min_x = min_x.min(cx - w / 2.0);
+                    max_x = max_x.max(cx + w / 2.0);
+                    min_y = min_y.min(cy - h / 2.0);
+                    max_y = max_y.max(cy + h / 2.0);
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 || !min_x.is_finite() {
+            continue;
+        }
+        let pad_inner = 14.0;
+        let header_h = 18.0;
+        let x = min_x - pad_inner;
+        let y = min_y - pad_inner - header_h;
+        let w = (max_x - min_x) + pad_inner * 2.0;
+        let h = (max_y - min_y) + pad_inner * 2.0 + header_h;
+        svg.rect(
+            x,
+            y,
+            w,
+            h,
+            "fill=\"none\" stroke=\"#999\" stroke-width=\"1\" rx=\"10\" stroke-dasharray=\"5 3\"",
+        );
+        svg.text(
+            x + 10.0,
+            y + 14.0,
+            &format!("fill=\"{FG}\" font-size=\"12\" font-weight=\"bold\""),
+            &comp.id,
+        );
+    }
+
+    // Notes attached to states.
+    for note in &d.notes {
+        draw_state_note(&mut svg, note, &id_to_u32, &sizes, &layout, &transform);
+    }
+
     svg.finish()
+}
+
+fn draw_state_note(
+    svg: &mut SvgBuilder,
+    note: &StateNote,
+    id_to_u32: &HashMap<String, NodeId>,
+    sizes: &[(f64, f64)],
+    layout: &sugiyama::Layout,
+    transform: &impl Fn((f64, f64)) -> (f64, f64),
+) {
+    let Some(&u) = id_to_u32.get(&note.target) else {
+        return;
+    };
+    let (cx, cy) = transform(layout.node_pos[&u]);
+    let (w, h) = sizes[u as usize];
+    let chars = note.text.chars().count() as f64;
+    let nw = (chars * 7.0 + 20.0).max(80.0);
+    let nh = 32.0;
+    let (nx, ny) = match note.position {
+        NotePosition::RightOf => (cx + w / 2.0 + 14.0, cy - nh / 2.0),
+        NotePosition::LeftOf => (cx - w / 2.0 - 14.0 - nw, cy - nh / 2.0),
+        NotePosition::Over => (cx - nw / 2.0, cy - h / 2.0 - nh - 8.0),
+    };
+    svg.rect(
+        nx,
+        ny,
+        nw,
+        nh,
+        "fill=\"#FFF5AD\" stroke=\"#aaaa33\" stroke-width=\"1\"",
+    );
+    svg.text(
+        nx + nw / 2.0,
+        ny + nh / 2.0 + 4.0,
+        &format!("text-anchor=\"middle\" fill=\"{FG}\" font-size=\"12\""),
+        &note.text,
+    );
 }
 
 fn state_size(s: &State) -> (f64, f64) {

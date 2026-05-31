@@ -18,7 +18,8 @@
 use std::collections::HashMap;
 
 use crate::ast::{
-    ClassDiagram, ClassMember, ClassRelation, ClassRelationKind, MemberKind, UmlClass, Visibility,
+    ClassDiagram, ClassMember, ClassRelation, ClassRelationKind, FlowDirection, MemberKind,
+    Namespace, UmlClass, Visibility,
 };
 use crate::{strip_comment, ParseError};
 
@@ -44,6 +45,7 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
     let mut header_seen = false;
     let mut by_name: HashMap<String, usize> = HashMap::new();
     let mut in_block: Option<String> = None;
+    let mut namespace_stack: Vec<String> = Vec::new();
 
     for (idx, raw) in input.lines().enumerate() {
         let line_no = idx + 1;
@@ -60,6 +62,37 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
                 });
             }
             header_seen = true;
+            continue;
+        }
+
+        if let Some(d) = line.strip_prefix("direction ") {
+            diag.direction = match d.trim() {
+                "TB" | "TD" => FlowDirection::TopDown,
+                "BT" => FlowDirection::BottomTop,
+                "LR" => FlowDirection::LeftRight,
+                "RL" => FlowDirection::RightLeft,
+                other => {
+                    return Err(ParseError::Syntax {
+                        message: format!("unknown direction: '{other}'"),
+                        line: line_no,
+                    })
+                }
+            };
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("namespace ") {
+            let inner = rest.trim().trim_end_matches('{').trim();
+            namespace_stack.push(inner.to_string());
+            diag.namespaces.push(Namespace {
+                name: inner.to_string(),
+                class_names: Vec::new(),
+            });
+            continue;
+        }
+
+        if line == "}" && in_block.is_none() && !namespace_stack.is_empty() {
+            namespace_stack.pop();
             continue;
         }
 
@@ -81,7 +114,14 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if let Some(rest) = line.strip_prefix("class ") {
-            handle_class_decl(rest, &mut diag, &mut by_name, &mut in_block);
+            let added_name = handle_class_decl(rest, &mut diag, &mut by_name, &mut in_block);
+            if let Some(ns_name) = namespace_stack.last() {
+                if let Some(ns) = diag.namespaces.iter_mut().find(|n| n.name == *ns_name) {
+                    if !ns.class_names.contains(&added_name) {
+                        ns.class_names.push(added_name);
+                    }
+                }
+            }
             continue;
         }
 
@@ -144,7 +184,7 @@ fn handle_class_decl(
     diag: &mut ClassDiagram,
     by_name: &mut HashMap<String, usize>,
     in_block: &mut Option<String>,
-) {
+) -> String {
     let rest = rest.trim();
     let (name_part, after_brace) = match rest.split_once('{') {
         Some((a, b)) => (a.trim(), Some(b)),
@@ -164,6 +204,7 @@ fn handle_class_decl(
     if let Some(_remaining_after_brace) = after_brace {
         *in_block = Some(name.to_string());
     }
+    name.to_string()
 }
 
 fn take_stereotype(line: &str) -> Option<String> {

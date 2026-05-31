@@ -84,11 +84,27 @@ Edge clipping (`clip_to_node`) má per-shape variantu:
 
 ## Co je třeba pamatovat
 
-- `mermaid-parse` neumí asymetrické tvary `[/text/]`, `[\text\]` atd. — `(` `[`
-  `{` `((` `{{` `[[` `[(` `([` jsou jediné podporované.
-- Flowchart parser tichounce přeskakuje `subgraph`/`end`/`style`/`classDef`/
-  `class`/`click`/`linkStyle`. Nejsou implementované, ale parser nepadne.
-- `sequence_diagram` neumí `alt`/`loop`/`par`/`opt` bloky, notes, activate/
-  deactivate, autonumber.
 - Sugiyama waypoints obsahují **endpointy** (center src, center dst). SVG
   renderer si je sám clipuje na boundary nodu.
+- Flowchart `FlowEdge` má separátní `line` (Solid/Dotted/Thick) a `head`
+  (None/Arrow/Circle/Cross) — kombinace `-->`, `---`, `-.->`, `==>`, `--o`,
+  `--x` plus všechny no-head varianty.
+- `A & B --> C & D` vytvoří 4 hrany (cross product) — multi-source/target.
+- Flowchart `subgraph` se trackuje v `FlowchartDiagram.subgraphs`, vč. nestingu.
+  Renderer kreslí bounding rect kolem skupiny.
+- Sequence parser má **nested items** (`Vec<SequenceItem>`) — bloky `Alt`/`Par`/
+  `Critical` mají větve, `Loop`/`Opt` mají label + items. Renderer kreslí
+  rámečky s tabovým labelem.
+- Sequence `autonumber` přidá pořadové číslo před text každé zprávy.
+- Sequence `activate`/`deactivate` páruje a kreslí activation band na lifeline.
+- State `state X { ... }` se ukládá do `composites`, parallel regions oddělené
+  `--`. Renderer kreslí stroked-dashed rounded outline s labelem.
+- State `note right of X: text` (one-liner) i `note left of X\n...\nend note`
+  (multi-line) jsou v `notes`.
+- Class `namespace X { class A; class B }` se ukládá do `namespaces`, renderer
+  kreslí dashed rect kolem členů.
+- Class `direction` (TD/BT/LR/RL) řídí transpose podobně jako flowchart.
+- ER `EntityAttribute.comment` se naplní z quoted řetězce za atributem
+  (`string name "the customer name"`).
+- Gantt `excludes` (víkendy) a `todayMarker YYYY-MM-DD` jsou v AST; today
+  marker renderer kreslí jako červenou svislou čáru.

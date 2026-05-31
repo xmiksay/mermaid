@@ -30,22 +30,33 @@ fn pie_end_to_end() {
 #[test]
 fn sequence_end_to_end() {
     let src = r#"sequenceDiagram
-title API call
+title API call with blocks
+autonumber
 actor user as User
 participant api as API
 participant db as DB
 user->>api: GET /users
+activate api
 api->>db: SELECT
 db-->>api: rows
-api-->>user: 200 OK
+deactivate api
+alt cached
+    api-->>user: 200 OK (cache)
+else miss
+    Note over api,db: warm cache
+    api-->>user: 200 OK
+end
+loop every 30s
+    api->>db: heartbeat
+end
 "#;
     let svg = render(src).unwrap();
     assert!(svg.starts_with("<svg"));
-    assert!(svg.ends_with("</svg>"));
     assert!(svg.contains("User"));
-    assert!(svg.contains("API"));
-    assert!(svg.contains("DB"));
-    assert!(svg.contains("GET /users"));
+    assert!(svg.contains(">alt<"));
+    assert!(svg.contains(">loop<"));
+    assert!(svg.contains(">warm cache<"));
+    assert!(svg.contains("1. GET /users"));
     let p = samples_dir().join("sequence_api.svg");
     fs::write(&p, &svg).unwrap();
 }
@@ -55,14 +66,15 @@ fn flowchart_end_to_end() {
     let src = r#"flowchart TD
     Start([Start]) --> Input[/Read input/]
     Input --> Valid{Valid?}
-    Valid -->|yes| Process[Process]
-    Valid -->|no| Error[Error]
-    Process --> End([End])
+    Valid -->|yes| Process[Process] & Audit[(Audit log)]
+    Valid -->|no| Error>Error]
+    subgraph Cleanup [Cleanup phase]
+        Process --> End([End])
+        Audit --> End
+    end
     Error --> End
 "#;
-    // The /text/ asymmetric shape isn't supported in the v0.1 parser; replace.
-    let src = src.replace("[/Read input/]", "[Read input]");
-    let svg = render(&src).unwrap();
+    let svg = render(src).unwrap();
     assert!(svg.starts_with("<svg"));
     assert!(svg.ends_with("</svg>"));
     assert!(svg.contains("Start"));
@@ -97,9 +109,18 @@ fn state_end_to_end() {
     Running --> [*] : crash
     state choose <<choice>>
     Idle --> choose
+    state Workflow {
+        [*] --> Step1
+        Step1 --> Step2
+        Step2 --> [*]
+    }
+    Idle --> Workflow
+    note right of Idle: waiting state
 "#;
     let svg = render(src).unwrap();
     assert!(svg.contains(">Running<"));
+    assert!(svg.contains(">Workflow<"));
+    assert!(svg.contains(">waiting state<"));
     let p = samples_dir().join("state_lifecycle.svg");
     fs::write(&p, &svg).unwrap();
 }
@@ -107,16 +128,18 @@ fn state_end_to_end() {
 #[test]
 fn class_end_to_end() {
     let src = r#"classDiagram
-    class Animal {
-        <<abstract>>
-        +String name
-        +int age
-        +eat()
-        +sleep()
-    }
-    class Dog {
-        +String breed
-        +bark()
+    namespace Domain {
+        class Animal {
+            <<abstract>>
+            +String name
+            +int age
+            +eat()
+            +sleep()
+        }
+        class Dog {
+            +String breed
+            +bark()
+        }
     }
     class Cat {
         +bool indoor
@@ -128,7 +151,7 @@ fn class_end_to_end() {
 "#;
     let svg = render(src).unwrap();
     assert!(svg.contains(">Animal<"));
-    assert!(svg.contains(">Dog<"));
+    assert!(svg.contains(">Domain<"));
     let p = samples_dir().join("class_uml.svg");
     fs::write(&p, &svg).unwrap();
 }
@@ -137,8 +160,8 @@ fn class_end_to_end() {
 fn er_end_to_end() {
     let src = r#"erDiagram
     CUSTOMER {
-        string name
-        string email PK
+        string name "customer full name"
+        string email PK "primary identity"
         string phone
     }
     ORDER {
@@ -166,6 +189,8 @@ fn gantt_end_to_end() {
     let src = r#"gantt
     title Release plan
     dateFormat YYYY-MM-DD
+    excludes weekends
+    todayMarker 2026-01-10
     section Design
     Spec : a1, 2026-01-01, 5d
     Review : after a1, 2d
@@ -177,6 +202,7 @@ fn gantt_end_to_end() {
     let svg = render(src).unwrap();
     assert!(svg.contains(">Release plan<"));
     assert!(svg.contains(">Backend<"));
+    assert!(svg.contains(">today<"));
     let p = samples_dir().join("gantt_release.svg");
     fs::write(&p, &svg).unwrap();
 }
