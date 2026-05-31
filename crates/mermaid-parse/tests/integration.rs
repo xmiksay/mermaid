@@ -30,9 +30,9 @@ fn rejects_empty() {
 
 #[test]
 fn rejects_unknown_diagram() {
-    let err = parse("erDiagram\n").unwrap_err();
+    let err = parse("journey\n").unwrap_err();
     match err {
-        ParseError::UnknownDiagramType(s) => assert_eq!(s, "erDiagram"),
+        ParseError::UnknownDiagramType(s) => assert_eq!(s, "journey"),
         e => panic!("unexpected: {e:?}"),
     }
 }

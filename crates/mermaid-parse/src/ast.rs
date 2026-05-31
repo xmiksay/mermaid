@@ -5,6 +5,10 @@ pub enum Diagram {
     Pie(PieDiagram),
     Sequence(SequenceDiagram),
     Flowchart(FlowchartDiagram),
+    State(StateDiagram),
+    Class(ClassDiagram),
+    Er(ErDiagram),
+    Gantt(GanttDiagram),
 }
 
 // ---- pie -------------------------------------------------------------------
@@ -131,4 +135,187 @@ pub enum EdgeKind {
     Dotted,
     /// `==>` thick line with arrow
     Thick,
+}
+
+// ---- state diagram ---------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StateDiagram {
+    pub direction: FlowDirection,
+    pub states: Vec<State>,
+    pub transitions: Vec<StateTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct State {
+    pub id: String,
+    pub label: String,
+    pub kind: StateKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateKind {
+    Normal,
+    Start,
+    End,
+    Choice,
+    Fork,
+    Join,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateTransition {
+    pub from: String,
+    pub to: String,
+    pub label: Option<String>,
+}
+
+// ---- class diagram ---------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClassDiagram {
+    pub classes: Vec<UmlClass>,
+    pub relations: Vec<ClassRelation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UmlClass {
+    pub name: String,
+    pub stereotype: Option<String>,
+    pub members: Vec<ClassMember>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassMember {
+    pub visibility: Visibility,
+    pub text: String,
+    pub kind: MemberKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    #[default]
+    Default,
+    Public,
+    Private,
+    Protected,
+    Package,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberKind {
+    Attribute,
+    Method,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassRelation {
+    pub from: String,
+    pub to: String,
+    pub kind: ClassRelationKind,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassRelationKind {
+    /// `<|--` inheritance (from extends to)
+    Inheritance,
+    /// `*--` composition
+    Composition,
+    /// `o--` aggregation
+    Aggregation,
+    /// `-->` association with arrow
+    Association,
+    /// `--` plain link
+    Link,
+    /// `..` dashed link
+    LinkDashed,
+    /// `..|>` realization (dashed)
+    Realization,
+    /// `..>` dependency (dashed)
+    Dependency,
+}
+
+// ---- ER diagram ------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ErDiagram {
+    pub entities: Vec<Entity>,
+    pub relations: Vec<ErRelation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entity {
+    pub name: String,
+    pub attributes: Vec<EntityAttribute>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityAttribute {
+    pub type_: String,
+    pub name: String,
+    pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ErRelation {
+    pub left: String,
+    pub right: String,
+    pub left_card: Cardinality,
+    pub right_card: Cardinality,
+    pub identifying: bool,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cardinality {
+    /// `||` exactly one
+    ExactlyOne,
+    /// `o|` zero or one
+    ZeroOrOne,
+    /// `|{` one or more
+    OneOrMore,
+    /// `o{` zero or more
+    ZeroOrMore,
+}
+
+// ---- gantt -----------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GanttDiagram {
+    pub title: Option<String>,
+    pub date_format: Option<String>,
+    pub axis_format: Option<String>,
+    pub sections: Vec<GanttSection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GanttSection {
+    pub name: String,
+    pub tasks: Vec<GanttTask>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GanttTask {
+    pub name: String,
+    pub id: Option<String>,
+    pub start: TaskStart,
+    pub duration_days: f64,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskStart {
+    Date(String),
+    AfterId(String),
+    AfterPrevious,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskStatus {
+    #[default]
+    Normal,
+    Active,
+    Done,
+    Crit,
 }

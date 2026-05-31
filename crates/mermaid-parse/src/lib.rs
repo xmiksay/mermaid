@@ -11,9 +11,13 @@
 //! locations or grammar reuse.
 
 pub mod ast;
+mod class;
+mod er;
 mod flowchart;
+mod gantt;
 mod pie;
 mod sequence;
+mod state;
 
 pub use ast::*;
 
@@ -45,6 +49,10 @@ pub fn parse(input: &str) -> Result<Diagram, ParseError> {
         "pie" => pie::parse(input).map(Diagram::Pie),
         "sequenceDiagram" => sequence::parse(input).map(Diagram::Sequence),
         "flowchart" | "graph" => flowchart::parse(input).map(Diagram::Flowchart),
+        "stateDiagram" | "stateDiagram-v2" => state::parse(input).map(Diagram::State),
+        "classDiagram" => class::parse(input).map(Diagram::Class),
+        "erDiagram" => er::parse(input).map(Diagram::Er),
+        "gantt" => gantt::parse(input).map(Diagram::Gantt),
         other => Err(ParseError::UnknownDiagramType(other.to_string())),
     }
 }

@@ -20,15 +20,15 @@ Cargo workspace v `Cargo.toml`. Žádné jiné build systémy.
 | Fáze | Crate | Status |
 |---|---|---|
 | 1 | sugiyama | hotová |
-| 2 (sequence+pie) | mermaid-parse | hotová |
-| 2 (flowchart) | mermaid-parse | hotová |
-| 3 (sequence+pie) | mermaid-svg | hotová |
-| 5 (flowchart) | mermaid-svg | hotová |
-| 4 (HTTP server) | mermaid-server | **nedělané** |
-| 6 (class diagram) | mermaid-parse + svg | nedělané |
-| 7 (ER diagram) | mermaid-parse + svg | nedělané |
-| 8 (PNG via resvg) | mermaid-svg | nedělané |
-| 9 (themes + config) | mermaid-svg | nedělané (jen default theme) |
+| 2 + 3 sequence/pie | mermaid-parse + svg | hotová |
+| 5 flowchart | mermaid-parse + svg | hotová |
+| 6 state diagram | mermaid-parse + svg | hotová |
+| 6 class diagram | mermaid-parse + svg | hotová |
+| 7 ER diagram | mermaid-parse + svg | hotová |
+| ext. gantt | mermaid-parse + svg | hotová |
+| 4 HTTP server | mermaid-server | **nedělané** |
+| 8 PNG via resvg | mermaid-svg | nedělané |
+| 9 themes + config | mermaid-svg | nedělané (jen default theme) |
 
 ## Build & test
 
@@ -40,7 +40,12 @@ cargo test -p sugiyama   # jen jeden crate
 
 Integration testy v `mermaid-svg` zapisují sample SVG do
 `crates/mermaid-svg/target/test-samples/`:
-- `pie_browsers.svg`, `sequence_api.svg`, `flowchart_td.svg`, `flowchart_lr.svg`
+- `pie_browsers.svg`, `sequence_api.svg`
+- `flowchart_td.svg`, `flowchart_lr.svg`
+- `state_lifecycle.svg`
+- `class_uml.svg`
+- `er_customer.svg`
+- `gantt_release.svg`
 
 ## Známé odchylky od plánu
 

@@ -7,9 +7,13 @@
 use mermaid_parse::{parse, Diagram, ParseError};
 use thiserror::Error;
 
+mod class;
+mod er;
 mod flowchart;
+mod gantt;
 mod pie;
 mod sequence;
+mod state;
 mod svg;
 mod theme;
 
@@ -33,5 +37,9 @@ pub fn render_diagram(d: &Diagram) -> Result<String, RenderError> {
         Diagram::Pie(p) => pie::render(p),
         Diagram::Sequence(s) => sequence::render(s),
         Diagram::Flowchart(f) => flowchart::render(f),
+        Diagram::State(s) => state::render(s),
+        Diagram::Class(c) => class::render(c),
+        Diagram::Er(e) => er::render(e),
+        Diagram::Gantt(g) => gantt::render(g),
     })
 }
