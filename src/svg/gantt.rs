@@ -50,7 +50,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let width = LABEL_COL_W + time_col_w + PAD * 2.0;
     let height = HEADER_H + AXIS_H + body_h + PAD * 2.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     // Title
     if let Some(t) = &d.title {

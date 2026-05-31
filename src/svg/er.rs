@@ -22,7 +22,9 @@ const KEY_CHAR_W: f64 = 8.0; // PK/FK are bold — wider per char
 
 pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     if d.entities.is_empty() {
-        return SvgBuilder::new(40.0, 40.0).finish();
+        return SvgBuilder::new(40.0, 40.0)
+            .font(theme.font_family, theme.font_size)
+            .finish();
     }
 
     let sizes: Vec<(f64, f64)> = d.entities.iter().map(entity_size).collect();
@@ -56,7 +58,7 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 
     let transform = |(x, y): (f64, f64)| -> (f64, f64) { (x + CANVAS_PAD, y + CANVAS_PAD) };
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.left), id_to_u32.get(&rel.right)) else {

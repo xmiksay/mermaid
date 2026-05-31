@@ -95,7 +95,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
 
     let width = (max_x + PAD).max(600.0);
     let height = (max_y + PAD).max(220.0);
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     let arrow_color = theme.flow_edge_stroke;
     svg.defs_raw(&format!(

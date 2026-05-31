@@ -26,7 +26,7 @@ struct Laid {
 
 pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let Some(root) = d.root.clone() else {
-        let mut svg = SvgBuilder::new(200.0, 80.0);
+        let mut svg = SvgBuilder::new(200.0, 80.0).font(theme.font_family, theme.font_size);
         svg.text(
             100.0,
             40.0,
@@ -48,7 +48,7 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let width = max_x + 30.0;
     let height = (max_y + 30.0).max(total_h + 60.0);
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     draw_edges(&laid, &mut svg, theme);
     draw_nodes(&laid, &mut svg, theme, 0);

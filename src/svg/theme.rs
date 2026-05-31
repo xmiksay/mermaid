@@ -18,6 +18,11 @@ pub struct Theme {
     pub flow_edge_stroke: &'static str,
     pub flow_label_bg: &'static str,
     pub pie_palette: &'static [&'static str],
+    /// CSS `font-family` applied to the root `<svg>`; cascades to all text.
+    pub font_family: &'static str,
+    /// Base `font-size` (px) on the root `<svg>`; individual labels may
+    /// override it with their own `font-size`.
+    pub font_size: f64,
 }
 
 impl Theme {
@@ -35,6 +40,8 @@ impl Theme {
             flow_edge_stroke: "#333",
             flow_label_bg: "#fff",
             pie_palette: &PALETTE_DEFAULT,
+            font_family: "sans-serif",
+            font_size: 14.0,
         }
     }
 
@@ -52,6 +59,8 @@ impl Theme {
             flow_edge_stroke: "#E0E0E0",
             flow_label_bg: "#1E1E1E",
             pie_palette: &PALETTE_DARK,
+            font_family: "sans-serif",
+            font_size: 14.0,
         }
     }
 
@@ -69,6 +78,8 @@ impl Theme {
             flow_edge_stroke: "#1E3A1E",
             flow_label_bg: "#F0F8F0",
             pie_palette: &PALETTE_FOREST,
+            font_family: "sans-serif",
+            font_size: 14.0,
         }
     }
 
@@ -86,6 +97,8 @@ impl Theme {
             flow_edge_stroke: "#222",
             flow_label_bg: "#fff",
             pie_palette: &PALETTE_NEUTRAL,
+            font_family: "sans-serif",
+            font_size: 14.0,
         }
     }
 
@@ -101,6 +114,18 @@ impl Theme {
 
     pub fn pie_color(&self, i: usize) -> &'static str {
         self.pie_palette[i % self.pie_palette.len()]
+    }
+
+    /// Override the root `font-family` (e.g. `"Inter, sans-serif"`).
+    pub const fn with_font(mut self, family: &'static str) -> Self {
+        self.font_family = family;
+        self
+    }
+
+    /// Override the base `font-size` in pixels.
+    pub const fn with_font_size(mut self, size: f64) -> Self {
+        self.font_size = size;
+        self
     }
 }
 

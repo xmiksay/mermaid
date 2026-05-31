@@ -26,7 +26,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     let chart_bottom = chart_top + CHART_H;
     let chart_right = chart_left + CHART_W;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

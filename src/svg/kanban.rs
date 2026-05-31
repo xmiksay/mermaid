@@ -23,7 +23,7 @@ pub(crate) fn render(d: &KanbanDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + cols as f64 * COL_W + (cols.saturating_sub(1) as f64) * COL_GAP;
     let height = PAD * 2.0 + HEAD_H + max_tasks.max(1) as f64 * (CARD_H + CARD_GAP) + 30.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     for (i, col) in d.columns.iter().enumerate() {
         let x = PAD + i as f64 * (COL_W + COL_GAP);

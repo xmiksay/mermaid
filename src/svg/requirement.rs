@@ -134,7 +134,8 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     let width = max_x + PAD;
     let height = max_y + PAD;
 
-    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0));
+    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0))
+        .font(theme.font_family, theme.font_size);
 
     svg.defs_raw(&format!(
         "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \

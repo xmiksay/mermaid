@@ -20,7 +20,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     let chart_left = PAD + 30.0;
     let chart_top = PAD + title_h;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

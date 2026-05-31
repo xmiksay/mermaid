@@ -35,7 +35,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     let lifeline = theme.lifeline;
     if d.participants.is_empty() {
-        let mut svg = SvgBuilder::new(200.0, 60.0);
+        let mut svg = SvgBuilder::new(200.0, 60.0).font(theme.font_family, theme.font_size);
         if let Some(t) = &d.title {
             svg.text(
                 100.0,
@@ -80,7 +80,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let footer_bottom = footer_top + ACTOR_H;
     let height = footer_bottom + PAD;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
 
     if let Some(t) = &d.title {

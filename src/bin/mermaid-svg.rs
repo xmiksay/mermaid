@@ -18,6 +18,8 @@ ARGS:
 
 OPTIONS:
     -t, --theme <NAME>    Theme: default, dark, forest, neutral [default: default]
+    -f, --font <FAMILY>   CSS font-family for all text [default: sans-serif]
+        --font-size <PX>  Base font size in pixels [default: 14]
     -h, --help            Print help
     -V, --version         Print version
 
@@ -25,6 +27,7 @@ EXAMPLES:
     mermaid-svg < diagram.mmd > diagram.svg
     mermaid-svg diagram.mmd diagram.svg
     mermaid-svg --theme dark diagram.mmd > diagram.svg
+    mermaid-svg --font 'Inter, sans-serif' diagram.mmd > diagram.svg
     echo 'pie\\n\"A\":1\\n\"B\":2' | mermaid-svg
 ";
 
@@ -40,6 +43,8 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let mut theme_name = "default".to_string();
+    let mut font: Option<String> = None;
+    let mut font_size: Option<f64> = None;
     let mut positional: Vec<String> = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -61,6 +66,24 @@ fn run() -> Result<(), String> {
             s if s.starts_with("--theme=") => {
                 theme_name = s["--theme=".len()..].to_string();
             }
+            "-f" | "--font" => {
+                font = Some(
+                    args.next()
+                        .ok_or_else(|| "--font requires a value".to_string())?,
+                );
+            }
+            s if s.starts_with("--font=") => {
+                font = Some(s["--font=".len()..].to_string());
+            }
+            "--font-size" => {
+                font_size =
+                    Some(parse_font_size(&args.next().ok_or_else(|| {
+                        "--font-size requires a value".to_string()
+                    })?)?);
+            }
+            s if s.starts_with("--font-size=") => {
+                font_size = Some(parse_font_size(&s["--font-size=".len()..])?);
+            }
             s if s.starts_with('-') && s != "-" => {
                 return Err(format!("unknown option: {s} (try --help)"));
             }
@@ -68,9 +91,16 @@ fn run() -> Result<(), String> {
         }
     }
 
-    let theme = Theme::by_name(&theme_name).ok_or_else(|| {
+    let mut theme = Theme::by_name(&theme_name).ok_or_else(|| {
         format!("unknown theme '{theme_name}' (valid: default, dark, forest, neutral)")
     })?;
+    if let Some(font) = font {
+        // Leak: the process is short-lived and `Theme` holds `&'static str`.
+        theme = theme.with_font(Box::leak(font.into_boxed_str()));
+    }
+    if let Some(size) = font_size {
+        theme = theme.with_font_size(size);
+    }
 
     let input_path = positional.first().map(String::as_str);
     let output_path = positional.get(1).map(String::as_str);
@@ -79,6 +109,17 @@ fn run() -> Result<(), String> {
     let svg = render_with(&input, &theme).map_err(|e| e.to_string())?;
     write_output(output_path, &svg)?;
     Ok(())
+}
+
+fn parse_font_size(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("invalid --font-size '{s}' (expected a number)"))?;
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("invalid --font-size '{s}' (must be positive)"))
+    }
 }
 
 fn read_input(path: Option<&str>) -> Result<String, String> {

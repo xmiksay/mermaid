@@ -32,7 +32,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + AXIS_PAD_LEFT + chart_w;
     let height = PAD * 2.0 + title_h + SECTION_BAND + CHART_HEIGHT + legend_h + 30.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

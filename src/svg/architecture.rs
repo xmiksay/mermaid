@@ -207,7 +207,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
 
     let width = (max_x + PAD).max(300.0);
     let height = (group_y - GROUP_GAP + PAD).max(160.0);
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     svg.defs_raw(&format!(
         "<marker id=\"arch-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \

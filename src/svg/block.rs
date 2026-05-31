@@ -28,7 +28,8 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD);
     let width = PAD * 2.0 + total_w;
     let height = PAD * 2.0 + total_h + 20.0;
-    let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0));
+    let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0))
+        .font(theme.font_family, theme.font_size);
 
     // Resolve block centers (recursively) for edges.
     let mut centers: BTreeMap<String, (f64, f64)> = BTreeMap::new();

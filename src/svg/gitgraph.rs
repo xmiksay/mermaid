@@ -142,7 +142,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     };
     let width = PAD * 2.0 + chart_w + 80.0;
     let height = PAD * 2.0 + title_h + chart_h;
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

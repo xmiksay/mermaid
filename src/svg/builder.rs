@@ -10,6 +10,8 @@ pub struct SvgBuilder {
     pub defs: String,
     pub width: f64,
     pub height: f64,
+    pub font_family: &'static str,
+    pub font_size: f64,
 }
 
 impl SvgBuilder {
@@ -19,7 +21,17 @@ impl SvgBuilder {
             defs: String::new(),
             width,
             height,
+            font_family: "sans-serif",
+            font_size: 14.0,
         }
+    }
+
+    /// Set the root `font-family`/`font-size` from a theme. Chainable so call
+    /// sites read `SvgBuilder::new(w, h).font(theme.font_family, theme.font_size)`.
+    pub fn font(mut self, family: &'static str, size: f64) -> Self {
+        self.font_family = family;
+        self.font_size = size;
+        self
     }
 
     pub fn finish(self) -> String {
@@ -28,9 +40,11 @@ impl SvgBuilder {
             out,
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
              width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\" \
-             font-family=\"sans-serif\" font-size=\"14\">",
+             font-family=\"{ff}\" font-size=\"{fs}\">",
             w = fnum(self.width),
             h = fnum(self.height),
+            ff = escape(self.font_family),
+            fs = fnum(self.font_size),
         );
         if !self.defs.is_empty() {
             let _ = write!(out, "<defs>{}</defs>", self.defs);
@@ -153,5 +167,16 @@ mod tests {
         assert!(svg.ends_with("</svg>"));
         assert!(svg.contains("viewBox=\"0 0 100 50\""));
         assert!(svg.contains("fill=\"red\""));
+        assert!(svg.contains("font-family=\"sans-serif\""));
+        assert!(svg.contains("font-size=\"14\""));
+    }
+
+    #[test]
+    fn applies_custom_font() {
+        let svg = SvgBuilder::new(10.0, 10.0)
+            .font("Inter, sans-serif", 16.0)
+            .finish();
+        assert!(svg.contains("font-family=\"Inter, sans-serif\""));
+        assert!(svg.contains("font-size=\"16\""));
     }
 }

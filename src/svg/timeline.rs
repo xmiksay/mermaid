@@ -36,7 +36,7 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let events_h = max_events as f64 * (EVENT_BOX_H + EVENT_GAP) + EVENT_GAP;
     let height = PAD * 2.0 + title_h + band_h + AXIS_Y_OFFSET + events_h + 30.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

@@ -23,7 +23,7 @@ const CANVAS_PAD: f64 = 24.0;
 pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     if d.classes.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0);
+        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
         define_markers(&mut svg, theme);
         return svg.finish();
     }
@@ -81,7 +81,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
 
     // Relations first.

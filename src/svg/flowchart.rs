@@ -23,7 +23,7 @@ const SUBGRAPH_PAD: f64 = 16.0;
 
 pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     if d.nodes.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0);
+        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
         define_markers(&mut svg, theme);
         return svg.finish();
     }
@@ -83,7 +83,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
 
     // Subgraph frames (drawn first so they sit under nodes/edges).

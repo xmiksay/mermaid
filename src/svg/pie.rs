@@ -40,7 +40,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + RADIUS * 2.0 + legend_w;
     let height = PAD * 2.0 + title_h + RADIUS * 2.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &p.title {
         svg.text(

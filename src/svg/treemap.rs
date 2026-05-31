@@ -17,7 +17,7 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let width = PAD * 2.0 + CHART_W;
     let height = PAD * 2.0 + title_h + CHART_H;
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

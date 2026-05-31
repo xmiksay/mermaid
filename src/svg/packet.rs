@@ -30,7 +30,7 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + chart_w;
     let height = PAD * 2.0 + title_h + RULER_H + rows as f64 * ROW_H + 10.0;
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(

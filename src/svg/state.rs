@@ -24,7 +24,7 @@ const CANVAS_PAD: f64 = 24.0;
 pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     if d.states.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0);
+        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
         define_marker(&mut svg, theme);
         return svg.finish();
     }
@@ -82,7 +82,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
 
-    let mut svg = SvgBuilder::new(width, height);
+    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_marker(&mut svg, theme);
 
     for tr in &d.transitions {
