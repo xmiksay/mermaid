@@ -363,13 +363,9 @@ fn parse_note(line: &str) -> Option<SequenceNote> {
     //   Note over A[,B]: text
     //   Note right of A: text
     //   Note left of A: text
-    let body = if let Some(b) = line.strip_prefix("Note ") {
-        b
-    } else if let Some(b) = line.strip_prefix("note ") {
-        b
-    } else {
-        return None;
-    };
+    let body = line
+        .strip_prefix("Note ")
+        .or_else(|| line.strip_prefix("note "))?;
     let (head, text) = body.split_once(':')?;
     let head = head.trim();
     let text = text.trim().to_string();
