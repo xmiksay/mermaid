@@ -62,6 +62,14 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
             continue;
         }
 
+        // Styling/layout directives are accepted but not rendered yet.
+        if line.starts_with("UpdateRelStyle")
+            || line.starts_with("UpdateElementStyle")
+            || line.starts_with("UpdateLayoutConfig")
+        {
+            continue;
+        }
+
         // boundaries open with `{` at end of line.
         if let Some((kind, alias, label, btype, has_open)) = parse_boundary_open(&line) {
             let body = collect_until_close(&lines, &mut i);
@@ -181,6 +189,12 @@ fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseE
     while i < body.len() {
         let (line_no, line) = (body[i].0, body[i].1.trim().to_string());
         i += 1;
+        if line.starts_with("UpdateRelStyle")
+            || line.starts_with("UpdateElementStyle")
+            || line.starts_with("UpdateLayoutConfig")
+        {
+            continue;
+        }
         if let Some((kind, alias, label, _, _)) = parse_boundary_open(&line) {
             let mut tmp_i = 0;
             let rest: Vec<(usize, String)> = body[i..].to_vec();
@@ -273,12 +287,13 @@ fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation>, ParseErr
         Some(p) => (&line[..p], &line[p..]),
         None => return Ok(None),
     };
-    let direction = match token {
-        "Rel" | "BiRel" => C4RelDirection::Default,
-        "Rel_U" | "Rel_Up" => C4RelDirection::Up,
-        "Rel_D" | "Rel_Down" => C4RelDirection::Down,
-        "Rel_L" | "Rel_Left" => C4RelDirection::Left,
-        "Rel_R" | "Rel_Right" => C4RelDirection::Right,
+    let (direction, bidirectional) = match token {
+        "Rel" => (C4RelDirection::Default, false),
+        "BiRel" => (C4RelDirection::Default, true),
+        "Rel_U" | "Rel_Up" => (C4RelDirection::Up, false),
+        "Rel_D" | "Rel_Down" => (C4RelDirection::Down, false),
+        "Rel_L" | "Rel_Left" => (C4RelDirection::Left, false),
+        "Rel_R" | "Rel_Right" => (C4RelDirection::Right, false),
         _ => return Ok(None),
     };
     let args_str = rest.trim_start_matches('(').trim_end_matches(')');
@@ -293,6 +308,7 @@ fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation>, ParseErr
         label,
         technology,
         direction,
+        bidirectional,
     }))
 }
 

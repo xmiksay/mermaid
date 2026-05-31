@@ -93,12 +93,13 @@ fn layout(
             ),
         );
         let label = &n.label;
-        if nw > 60.0 && nh > 20.0 {
+        if nw > 24.0 && nh > 16.0 {
+            let font_size = if nw < 60.0 { 10 } else { 12 };
             svg.text(
-                nx + 6.0,
-                ny + 14.0,
+                nx + 4.0,
+                ny + 12.0,
                 &format!(
-                    "fill=\"{}\" font-size=\"12\" font-weight=\"bold\"",
+                    "fill=\"{}\" font-size=\"{font_size}\" font-weight=\"bold\"",
                     if n.children.is_empty() {
                         "#fff"
                     } else {
@@ -108,11 +109,11 @@ fn layout(
                 label,
             );
             if let Some(v) = n.value {
-                if n.children.is_empty() && nh > 32.0 {
+                if n.children.is_empty() && nh > 28.0 {
                     svg.text(
-                        nx + 6.0,
-                        ny + 28.0,
-                        "fill=\"#fff\" font-size=\"10\"",
+                        nx + 4.0,
+                        ny + 24.0,
+                        "fill=\"#fff\" font-size=\"9\"",
                         &format!("{v}"),
                     );
                 }

@@ -28,6 +28,7 @@ const NOTE_HEIGHT: f64 = 40.0;
 const BLOCK_TOP_GAP: f64 = 24.0;
 const BLOCK_BOTTOM_GAP: f64 = 12.0;
 const BLOCK_LABEL_W: f64 = 60.0;
+const BLOCK_TAB_H: f64 = 18.0; // reserved Y-space below the alt/loop tab so first message text doesn't overlap
 const ACTIVATION_W: f64 = 10.0;
 
 pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
@@ -287,6 +288,7 @@ fn emit_simple_block(
             label: block.label.clone(),
         },
     });
+    *cursor += BLOCK_TAB_H;
     layout_items(&block.items, out, cursor, counter, autonumber, x_of);
     *cursor += BLOCK_BOTTOM_GAP;
     out.push(Event {
@@ -315,6 +317,7 @@ fn emit_branched_block(
                 .unwrap_or_default(),
         },
     });
+    *cursor += BLOCK_TAB_H;
     for (i, branch) in branches.iter().enumerate() {
         if i > 0 {
             *cursor += BLOCK_TOP_GAP / 2.0;
@@ -324,6 +327,7 @@ fn emit_branched_block(
                     label: branch.label.clone(),
                 },
             });
+            *cursor += BLOCK_TAB_H / 2.0;
         }
         layout_items(&branch.items, out, cursor, counter, autonumber, x_of);
     }

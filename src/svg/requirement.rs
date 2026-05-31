@@ -1,38 +1,36 @@
-//! requirementDiagram renderer. Tabular boxes with sections.
+//! requirementDiagram renderer. Boxes are placed by sugiyama (layered by
+//! relation edges); connectors follow the routed waypoints with rect clipping.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
+use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::SvgBuilder;
+use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
 const BOX_W: f64 = 220.0;
 const BOX_H_HEAD: f64 = 36.0;
 const ROW_H: f64 = 20.0;
-const COL_GAP: f64 = 80.0;
-const ROW_GAP: f64 = 30.0;
-const COLS: usize = 3;
+
+struct Box {
+    name: String,
+    title_kind: String,
+    rows: Vec<(String, String)>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
 
 pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     let stroke = theme.flow_node_stroke;
     let fill = theme.flow_node_fill;
 
-    // Lay out requirements then elements left-to-right in a grid.
-    struct Box {
-        name: String,
-        title_kind: String,
-        rows: Vec<(String, String)>,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-    }
-
     let mut boxes: Vec<Box> = Vec::new();
-    let mut idx = 0;
 
     for r in &d.requirements {
         let kind_str = match r.kind {
@@ -57,20 +55,15 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             rows.push(("verify".into(), t.clone()));
         }
         let h = BOX_H_HEAD + rows.len() as f64 * ROW_H;
-        let col = idx % COLS;
-        let row = idx / COLS;
-        let x = PAD + col as f64 * (BOX_W + COL_GAP);
-        let y = PAD + row as f64 * (h + ROW_GAP) + 30.0;
         boxes.push(Box {
             name: r.name.clone(),
             title_kind: format!("«{kind_str}»"),
             rows,
-            x,
-            y,
+            x: 0.0,
+            y: 0.0,
             w: BOX_W,
             h,
         });
-        idx += 1;
     }
     for e in &d.elements {
         let mut rows = Vec::new();
@@ -81,39 +74,117 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             rows.push(("docref".into(), t.clone()));
         }
         let h = BOX_H_HEAD + rows.len() as f64 * ROW_H;
-        let col = idx % COLS;
-        let row = idx / COLS;
-        let x = PAD + col as f64 * (BOX_W + COL_GAP);
-        let y = PAD + row as f64 * (h + ROW_GAP) + 30.0;
         boxes.push(Box {
             name: e.name.clone(),
             title_kind: "«element»".into(),
             rows,
-            x,
-            y,
+            x: 0.0,
+            y: 0.0,
             w: BOX_W,
             h,
         });
-        idx += 1;
     }
 
-    let total_rows = (boxes.len() + COLS - 1) / COLS.max(1);
-    let max_box_h = boxes.iter().map(|b| b.h as i64).max().unwrap_or(0) as f64;
-    let width = PAD * 2.0 + COLS as f64 * BOX_W + (COLS.saturating_sub(1) as f64) * COL_GAP;
-    let height = PAD * 2.0 + total_rows.max(1) as f64 * (max_box_h.max(60.0) + ROW_GAP) + 30.0;
-
-    let mut svg = SvgBuilder::new(width, height);
-
-    let by_name: BTreeMap<String, (f64, f64)> = boxes
+    let name_to_id: HashMap<String, NodeId> = boxes
         .iter()
-        .map(|b| (b.name.clone(), (b.x + b.w / 2.0, b.y + b.h / 2.0)))
+        .enumerate()
+        .map(|(i, b)| (b.name.clone(), i as NodeId))
         .collect();
 
-    // Relations.
+    let mut g = Graph::default();
+    for (i, b) in boxes.iter().enumerate() {
+        g.nodes.push(i as NodeId);
+        g.node_size.insert(i as NodeId, (b.w, b.h));
+    }
+    for rel in &d.relations {
+        if let (Some(&u), Some(&v)) = (name_to_id.get(&rel.from), name_to_id.get(&rel.to)) {
+            g.edges.push((u, v));
+        }
+    }
+
+    let cfg = LayoutConfig {
+        layer_gap: 80.0,
+        node_gap: 50.0,
+        ..LayoutConfig::default()
+    };
+    let layout = layout_with(&g, &cfg).unwrap_or_default();
+
+    let origin = (PAD, PAD);
+    for (i, b) in boxes.iter_mut().enumerate() {
+        let id = i as NodeId;
+        if let Some(&(cx, cy)) = layout.node_pos.get(&id) {
+            b.x = origin.0 + cx - b.w / 2.0;
+            b.y = origin.1 + cy - b.h / 2.0;
+        } else {
+            b.x = origin.0;
+            b.y = origin.1;
+        }
+    }
+
+    let mut max_x: f64 = 0.0;
+    let mut max_y: f64 = 0.0;
+    for b in &boxes {
+        if b.x + b.w > max_x {
+            max_x = b.x + b.w;
+        }
+        if b.y + b.h > max_y {
+            max_y = b.y + b.h;
+        }
+    }
+    let width = max_x + PAD;
+    let height = max_y + PAD;
+
+    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0));
+
+    svg.defs_raw(&format!(
+        "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
+         markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\">\
+         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{stroke}\"/></marker>"
+    ));
+
+    let by_name: HashMap<String, (f64, f64, f64, f64)> = boxes
+        .iter()
+        .map(|b| (b.name.clone(), (b.x, b.y, b.w, b.h)))
+        .collect();
+
     for rel in &d.relations {
         let (Some(a), Some(b)) = (by_name.get(&rel.from), by_name.get(&rel.to)) else {
             continue;
         };
+        let acx = a.0 + a.2 / 2.0;
+        let acy = a.1 + a.3 / 2.0;
+        let bcx = b.0 + b.2 / 2.0;
+        let bcy = b.1 + b.3 / 2.0;
+
+        let pts: Vec<(f64, f64)> =
+            if let (Some(&u), Some(&v)) = (name_to_id.get(&rel.from), name_to_id.get(&rel.to)) {
+                layout
+                    .edge_points
+                    .get(&(u, v))
+                    .map(|raw| {
+                        let mut v: Vec<(f64, f64)> = Vec::with_capacity(raw.len());
+                        v.push((acx, acy));
+                        for (px, py) in &raw[1..raw.len().saturating_sub(1)] {
+                            v.push((origin.0 + *px, origin.1 + *py));
+                        }
+                        v.push((bcx, bcy));
+                        v
+                    })
+                    .unwrap_or_else(|| vec![(acx, acy), (bcx, bcy)])
+            } else {
+                vec![(acx, acy), (bcx, bcy)]
+            };
+
+        let first = clip_rect_to_edge(pts[1], (acx, acy), a.2, a.3);
+        let last_idx = pts.len() - 1;
+        let last = clip_rect_to_edge(pts[last_idx - 1], (bcx, bcy), b.2, b.3);
+        let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(pts.len());
+        clipped.push(first);
+        for p in &pts[1..last_idx] {
+            clipped.push(*p);
+        }
+        clipped.push(last);
+
         let label = match rel.kind {
             ReqRelationKind::Contains => "«contains»",
             ReqRelationKind::Copies => "«copies»",
@@ -123,27 +194,31 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             ReqRelationKind::Refines => "«refines»",
             ReqRelationKind::Traces => "«traces»",
         };
-        let dash = matches!(
+        let dashed = matches!(
             rel.kind,
             ReqRelationKind::Satisfies
                 | ReqRelationKind::Verifies
                 | ReqRelationKind::Refines
                 | ReqRelationKind::Traces
         );
-        let dasharray = if dash { "stroke-dasharray=\"5 3\"" } else { "" };
-        svg.line(
-            a.0,
-            a.1,
-            b.0,
-            b.1,
-            &format!("stroke=\"{stroke}\" stroke-width=\"1.5\" {dasharray}"),
+        let dash_attr = if dashed {
+            " stroke-dasharray=\"5 3\""
+        } else {
+            ""
+        };
+        svg.path(
+            &polyline_path(&clipped),
+            &format!(
+                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#req-arrow)\""
+            ),
         );
-        let mx = (a.0 + b.0) / 2.0;
-        let my = (a.1 + b.1) / 2.0;
+
+        let (mx, my) = polyline_midpoint(&clipped);
+        let lw = (label.chars().count() as f64 * 5.5 + 14.0).max(60.0);
         svg.rect(
-            mx - 40.0,
+            mx - lw / 2.0,
             my - 9.0,
-            80.0,
+            lw,
             16.0,
             &format!(
                 "fill=\"{}\" stroke=\"{stroke}\" stroke-width=\"0.5\" rx=\"3\"",
@@ -158,7 +233,6 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         );
     }
 
-    // Boxes.
     for b in &boxes {
         svg.rect(
             b.x,
@@ -206,6 +280,65 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
+fn polyline_path(pts: &[(f64, f64)]) -> String {
+    let mut s = String::new();
+    for (i, (x, y)) in pts.iter().enumerate() {
+        let cmd = if i == 0 { 'M' } else { 'L' };
+        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
+    }
+    s
+}
+
+fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
+    if pts.len() < 2 {
+        return pts.first().copied().unwrap_or((0.0, 0.0));
+    }
+    let mut segs = Vec::with_capacity(pts.len() - 1);
+    let mut total = 0.0;
+    for w in pts.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dy = w[1].1 - w[0].1;
+        let l = (dx * dx + dy * dy).sqrt();
+        segs.push(l);
+        total += l;
+    }
+    let half = total / 2.0;
+    let mut walked = 0.0;
+    for (i, w) in pts.windows(2).enumerate() {
+        if walked + segs[i] >= half {
+            let t = (half - walked) / segs[i].max(1e-9);
+            return (
+                w[0].0 + t * (w[1].0 - w[0].0),
+                w[0].1 + t * (w[1].1 - w[0].1),
+            );
+        }
+        walked += segs[i];
+    }
+    pts[pts.len() / 2]
+}
+
+fn clip_rect_to_edge(from: (f64, f64), center: (f64, f64), w: f64, h: f64) -> (f64, f64) {
+    let dx = from.0 - center.0;
+    let dy = from.1 - center.1;
+    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
+        return center;
+    }
+    let hw = w / 2.0;
+    let hh = h / 2.0;
+    let tx = if dx.abs() < 1e-9 {
+        f64::INFINITY
+    } else {
+        hw / dx.abs()
+    };
+    let ty = if dy.abs() < 1e-9 {
+        f64::INFINITY
+    } else {
+        hh / dy.abs()
+    };
+    let t = tx.min(ty);
+    (center.0 + dx * t, center.1 + dy * t)
+}
+
 fn truncate(s: &str, n: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= n {
@@ -248,5 +381,6 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">req1<"));
         assert!(svg.contains(">e1<"));
+        assert!(svg.contains("req-arrow"));
     }
 }

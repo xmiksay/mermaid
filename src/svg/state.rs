@@ -198,10 +198,13 @@ fn draw_state_note(
     );
 }
 
+const CHOICE_W: f64 = 60.0;
+const CHOICE_H: f64 = 40.0;
+
 fn state_size(s: &State) -> (f64, f64) {
     match s.kind {
         StateKind::Start | StateKind::End => (PSEUDO_R * 2.0, PSEUDO_R * 2.0),
-        StateKind::Choice => (28.0, 28.0),
+        StateKind::Choice => (CHOICE_W, CHOICE_H),
         StateKind::Fork | StateKind::Join => (80.0, 12.0),
         StateKind::Normal => {
             let n = s.label.chars().count() as f64;
@@ -236,15 +239,23 @@ fn draw_state(
             svg.circle(cx, cy, PSEUDO_R - 4.0, "fill=\"#333\" stroke=\"none\"");
         }
         StateKind::Choice => {
+            let hw = CHOICE_W / 2.0;
+            let hh = CHOICE_H / 2.0;
             let d = format!(
                 "M{cx} {top}L{right} {cy}L{cx} {bot}L{left} {cy}Z",
                 cx = fnum(cx),
-                top = fnum(cy - 14.0),
-                right = fnum(cx + 14.0),
-                bot = fnum(cy + 14.0),
-                left = fnum(cx - 14.0)
+                top = fnum(cy - hh),
+                right = fnum(cx + hw),
+                bot = fnum(cy + hh),
+                left = fnum(cx - hw)
             );
-            svg.path(&d, "fill=\"#fff\" stroke=\"#333\" stroke-width=\"1.5\"");
+            svg.path(
+                &d,
+                &format!(
+                    "fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\"",
+                    theme.flow_node_fill, theme.flow_node_stroke
+                ),
+            );
         }
         StateKind::Fork | StateKind::Join => {
             svg.rect(
@@ -338,7 +349,7 @@ fn clip_to_state(
 ) -> (f64, f64) {
     match kind {
         StateKind::Start | StateKind::End => clip_circle(from, center, PSEUDO_R),
-        StateKind::Choice => clip_rhombus(from, center, (28.0, 28.0)),
+        StateKind::Choice => clip_rhombus(from, center, (CHOICE_W, CHOICE_H)),
         _ => clip_rect(from, center, size),
     }
 }

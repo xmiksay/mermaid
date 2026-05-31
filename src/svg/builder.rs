@@ -93,6 +93,10 @@ impl SvgBuilder {
     pub fn defs_raw(&mut self, raw: &str) {
         self.defs.push_str(raw);
     }
+
+    pub fn raw(&mut self, raw: &str) {
+        self.body.push_str(raw);
+    }
 }
 
 pub fn escape(s: &str) -> String {

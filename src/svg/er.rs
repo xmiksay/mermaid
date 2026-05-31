@@ -17,6 +17,8 @@ const HEADER_H: f64 = 28.0;
 const MIN_W: f64 = 130.0;
 const CANVAS_PAD: f64 = 24.0;
 const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
+const COL_GAP: f64 = 18.0; // gap between type/name/key columns
+const KEY_CHAR_W: f64 = 8.0; // PK/FK are bold — wider per char
 
 pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     if d.entities.is_empty() {
@@ -79,24 +81,42 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 }
 
 fn entity_size(e: &Entity) -> (f64, f64) {
-    let mut max_chars = e.name.chars().count();
-    for a in &e.attributes {
-        let s = format!(
-            "{} {} {}",
-            a.type_,
-            a.name,
-            a.key.clone().unwrap_or_default()
-        );
-        let len = s.chars().count();
-        if len > max_chars {
-            max_chars = len;
-        }
+    let (tw, nw, kw) = col_widths(e);
+    let mut content = tw + nw + COL_GAP;
+    if kw > 0.0 {
+        content += COL_GAP + kw;
     }
-    let w = (max_chars as f64 * CHAR_W + PAD_X * 2.0).max(MIN_W);
+    let title_w = e.name.chars().count() as f64 * CHAR_W;
+    let w = (content.max(title_w) + PAD_X * 2.0).max(MIN_W);
     let h = HEADER_H
         + e.attributes.len() as f64 * LINE_H
         + if e.attributes.is_empty() { 0.0 } else { 8.0 };
     (w, h)
+}
+
+fn col_widths(e: &Entity) -> (f64, f64, f64) {
+    let tw = e
+        .attributes
+        .iter()
+        .map(|a| a.type_.chars().count())
+        .max()
+        .unwrap_or(0) as f64
+        * CHAR_W;
+    let nw = e
+        .attributes
+        .iter()
+        .map(|a| a.name.chars().count())
+        .max()
+        .unwrap_or(0) as f64
+        * CHAR_W;
+    let kw = e
+        .attributes
+        .iter()
+        .filter_map(|a| a.key.as_ref().map(|k| k.chars().count()))
+        .max()
+        .unwrap_or(0) as f64
+        * KEY_CHAR_W;
+    (tw, nw, kw)
 }
 
 fn draw_entity(
@@ -134,24 +154,28 @@ fn draw_entity(
             y + HEADER_H,
             &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
         );
+        let (tw, _nw, _kw) = col_widths(e);
+        let type_x = x + PAD_X;
+        let name_x = type_x + tw + COL_GAP;
+        let key_x = x + w - PAD_X;
         let mut row_y = y + HEADER_H + 6.0;
         for a in &e.attributes {
             row_y += LINE_H - 4.0;
             svg.text(
-                x + 8.0,
+                type_x,
                 row_y,
                 &format!("fill=\"{fg}\" font-size=\"13\""),
                 &a.type_,
             );
             svg.text(
-                x + w / 2.0,
+                name_x,
                 row_y,
                 &format!("fill=\"{fg}\" font-size=\"13\""),
                 &a.name,
             );
             if let Some(k) = &a.key {
                 svg.text(
-                    x + w - 8.0,
+                    key_x,
                     row_y,
                     "text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\"",
                     k,

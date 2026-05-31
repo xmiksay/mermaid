@@ -815,6 +815,7 @@ pub struct C4Relation {
     pub label: String,
     pub technology: Option<String>,
     pub direction: C4RelDirection,
+    pub bidirectional: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
