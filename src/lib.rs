@@ -9,6 +9,10 @@
 //! let svg = mermaid_svg::render("pie\n\"A\" : 1\n\"B\" : 2\n").unwrap();
 //! assert!(svg.starts_with("<svg"));
 //! ```
+//!
+//! A rendered gallery of every supported diagram type follows below
+//! (regenerate with `cargo run --example gen-doc-diagrams`).
+#![doc = include_str!("../assets/gallery.md")]
 
 mod parse;
 mod sugiyama;

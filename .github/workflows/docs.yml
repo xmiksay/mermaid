@@ -28,6 +28,8 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      # assets/gallery.md is committed (kept fresh by the doc_gallery_up_to_date
+      # test), so a plain doc build embeds the diagrams.
       - name: Build documentation
         run: cargo doc --no-deps --lib
         env:
