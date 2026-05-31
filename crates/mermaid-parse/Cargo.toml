@@ -1,0 +1,9 @@
+[package]
+name = "mermaid-parse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parser for Mermaid diagram syntax (subset: sequence, pie; more to come)"
+
+[dependencies]
+thiserror = { workspace = true }
