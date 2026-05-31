@@ -1,24 +1,33 @@
-# mermaid-rs — Implementační plán
+# mermaid-svg — Implementation plan
 
-Cíl: Rust knihovna (`mermaid-svg` crate) pro renderování Mermaid diagramů přímo na SVG. Volitelně HTTP služba kompatibilní s kroki-mermaid protokolem (POST `/svg`, POST `/png`, GET `/health` na portu 8002). Bez Node.js, bez JVM, bez externích binárních závislostí.
+> **Historical design plan from the start of the project. The current
+> architecture is a single `mermaid-svg` crate (no workspace, no separate
+> server crate) — see `README.md` and `.claude/CLAUDE.md` for what actually
+> shipped.**
+
+Goal: Rust library (`mermaid-svg` crate) for rendering Mermaid diagrams
+directly to SVG. Optionally an HTTP service compatible with the
+kroki-mermaid protocol (POST `/svg`, POST `/png`, GET `/health` on port
+8002). No Node.js, no JVM, no external native binaries.
 
 ---
 
-## Architektura
+## Architecture
 
 ```
 mermaid-rs/
 ├── crates/
-│   ├── sugiyama/       # layout engine, pure Rust, bez HTTP
-│   ├── mermaid-parse/  # lexer + parser Mermaid syntaxe
-│   ├── mermaid-svg/    # SVG generátor (hlavní knihovna)
-│   └── mermaid-server/ # Axum HTTP server (volitelný binary)
+│   ├── sugiyama/       # layout engine, pure Rust, no HTTP
+│   ├── mermaid-parse/  # lexer + parser for Mermaid syntax
+│   ├── mermaid-svg/    # SVG generator (the main library)
+│   └── mermaid-server/ # Axum HTTP server (optional binary)
 └── Cargo.toml          # workspace
 ```
 
-Každý crate je samostatně testovatelný. `mermaid-server` je jediný binary crate, ostatní jsou library crates.
+Each crate is independently testable. `mermaid-server` is the only binary
+crate; the others are libraries.
 
-Primární použití jako knihovna:
+Primary use as a library:
 
 ```rust
 use mermaid_svg::render;
@@ -37,32 +46,33 @@ mermaid-server
             └── sugiyama
 ```
 
-`sugiyama` nemá závislost na ničem z projektu — čistý layout engine.
+`sugiyama` has no dependency on anything else in the project — pure layout
+engine.
 
 ---
 
-## Použité Rust crates
+## Rust crates used
 
-| Crate | Účel |
+| Crate | Purpose |
 |---|---|
-| `axum` | HTTP server (pouze mermaid-server) |
-| `tokio` | async runtime (pouze mermaid-server) |
-| `petgraph` | graph datové struktury pro sugiyama |
-| `pest` | PEG parser pro Mermaid syntaxi |
+| `axum` | HTTP server (mermaid-server only) |
+| `tokio` | async runtime (mermaid-server only) |
+| `petgraph` | graph data structures for sugiyama |
+| `pest` | PEG parser for Mermaid syntax |
 | `quick-xml` | XML/SVG builder |
-| `resvg` | SVG rasterizer pro PNG výstup |
-| `serde` / `serde_json` | konfigurace, error response |
+| `resvg` | SVG rasterizer for PNG output |
+| `serde` / `serde_json` | configuration, error response |
 | `tracing` | structured logging |
-| `thiserror` | error typy |
+| `thiserror` | error types |
 
 ---
 
-## Fáze 1 — `sugiyama` crate
+## Phase 1 — `sugiyama` crate
 
-Vstup: orientovaný graf (může být cyklický), rozměry nodů.
-Výstup: `(x, y)` pro každý nod, waypoints pro každou hranu.
+Input: directed graph (possibly cyclic), node sizes.
+Output: `(x, y)` for each node, waypoints for each edge.
 
-### 1.1 Datové typy
+### 1.1 Data types
 
 ```rust
 pub struct Graph {
@@ -77,76 +87,82 @@ pub struct Layout {
 }
 ```
 
-### 1.2 Cycle Removal
+### 1.2 Cycle removal
 
-- DFS traversal grafu
-- Back edges (hrany zpět v DFS stromu) se označí jako reversed
-- Po layoutu se reversed hrany vrátí (waypoints se invertují)
-- Implementace: rekurzivní DFS s `visited` a `stack` bitmapou nad `petgraph::Graph`
+- DFS traversal of the graph
+- Back edges (edges going up the DFS tree) are marked as reversed
+- After layout, reversed edges are restored (waypoints inverted)
+- Implementation: recursive DFS with `visited` and `stack` bitmaps over
+  `petgraph::Graph`
 
-### 1.3 Layer Assignment
+### 1.3 Layer assignment
 
-Implementovat **Longest Path** jako základ:
+Implement **Longest Path** as the baseline:
 
-- Nody bez příchozích hran → rank 0
-- Iterativní propagace: `rank[v] = max(rank[u] + 1)` pro každého předchůdce `u`
-- Hrany přeskakující více vrstev → vložit dummy nody na každé mezilehlé vrstvě
-- Dummy nody mají `size = (0, 0)` a jsou odstraněny po layoutu
+- Nodes with no incoming edges → rank 0
+- Iterative propagation: `rank[v] = max(rank[u] + 1)` for each predecessor `u`
+- Edges spanning multiple layers → insert dummy nodes on each intermediate
+  layer
+- Dummy nodes have `size = (0, 0)` and are removed after layout
 
-### 1.4 Crossing Minimization
+### 1.4 Crossing minimization
 
-Iterativní barycenter sweep:
+Iterative barycenter sweep:
 
 ```
 for iter in 0..MAX_ITER:
-    sweep nahoru (od vrstvy 0):
-        pro každý nod v vrstvě L:
-            barycenter = průměr pozic sousedů ve vrstvě L-1
-        seřadit nody vrstvy L podle barycenter
-    sweep dolů (od poslední vrstvy):
-        stejně, ale sousedé ve vrstvě L+1
+    sweep up (from layer 0):
+        for each node v in layer L:
+            barycenter = mean of positions of neighbors in layer L-1
+        sort nodes of layer L by barycenter
+    sweep down (from the last layer):
+        same, but neighbors in layer L+1
     if no improvement: break
 ```
 
-### 1.5 Node Positioning — Brandes-Köpf
+### 1.5 Node positioning — Brandes-Köpf
 
-Čtyři průchody kombinací `{left, right} × {up, down}`:
+Four passes combining `{left, right} × {up, down}`:
 
-1. Označit type 1 conflicts — křížení hran mezi inner segments (dummy→dummy)
-2. Vertical alignment — každý nod se zarovná ke svému mediánovému sousedu pokud není konflikt
-3. Horizontal compaction — přiřadit X souřadnice v rámci bloků
-4. Zprůměrovat výsledky čtyř průchodů
+1. Mark type-1 conflicts — crossings of edges between inner segments
+   (dummy→dummy)
+2. Vertical alignment — each node aligns to its median neighbor unless there
+   is a conflict
+3. Horizontal compaction — assign X coordinates within blocks
+4. Average the results of the four passes
 
-### 1.6 Edge Routing
+### 1.6 Edge routing
 
-- Waypoints hrany = souřadnice dummy nodů na trase
-- Odstranit dummy nody z výsledku
-- Cubic Bezier přes waypoints (de Casteljau)
-- Orthogonální routing jako alternativa
+- Edge waypoints = coordinates of dummy nodes along the path
+- Remove dummy nodes from the output
+- Cubic Bezier through waypoints (de Casteljau)
+- Orthogonal routing as an alternative
 
-### 1.7 Testování
+### 1.7 Testing
 
-Unit testy na každý krok samostatně + integration test: jednoduchý graf → validní `Layout` struct.
+Unit tests on each step separately + integration test: simple graph → valid
+`Layout` struct.
 
 ---
 
-## Fáze 2 — `mermaid-parse` crate
+## Phase 2 — `mermaid-parse` crate
 
-PEG gramatika přes `pest`. Referenční gramatika je v Mermaid.js repozitáři (`packages/mermaid/src/diagrams/`).
+PEG grammar via `pest`. The reference grammar is in the Mermaid.js repo
+(`packages/mermaid/src/diagrams/`).
 
-### 2.1 Podporované typy (priorita)
+### 2.1 Supported types (priority)
 
-| Typ | Layout |
+| Type | Layout |
 |---|---|
-| `sequenceDiagram` | vlastní (lineární) |
-| `pie` | vlastní (kruh) |
-| `gantt` | vlastní (časová osa) |
+| `sequenceDiagram` | custom (linear) |
+| `pie` | custom (circle) |
+| `gantt` | custom (timeline) |
 | `flowchart` / `graph` | sugiyama |
-| `classDiagram` | sugiyama + UML symboly |
-| `erDiagram` | sugiyama + kardinalita |
+| `classDiagram` | sugiyama + UML symbols |
+| `erDiagram` | sugiyama + cardinality |
 | `stateDiagram` | sugiyama |
 
-### 2.2 AST typy
+### 2.2 AST types
 
 ```rust
 pub enum Diagram {
@@ -160,29 +176,31 @@ pub enum Diagram {
 }
 ```
 
-### 2.3 Class diagram specifika
+### 2.3 Class diagram specifics
 
-AST zachytí:
-- Třídy s atributy a metodami (viditelnost: `+`, `-`, `#`, `~`)
-- Vztahy: inheritance (`<|--`), composition (`*--`), aggregation (`o--`), association (`-->`), dependency (`..>`), realization (`<|..`)
-- Interface, abstract modifikátory
-- Anotace (`<<interface>>`, `<<abstract>>`, vlastní)
-- Namespace bloky
+AST captures:
+- Classes with attributes and methods (visibility: `+`, `-`, `#`, `~`)
+- Relations: inheritance (`<|--`), composition (`*--`), aggregation (`o--`),
+  association (`-->`), dependency (`..>`), realization (`<|..`)
+- Interface, abstract modifiers
+- Annotations (`<<interface>>`, `<<abstract>>`, custom)
+- Namespace blocks
 
-### 2.4 ER diagram specifika
+### 2.4 ER diagram specifics
 
-AST zachytí:
-- Entity s atributy (typ, název, klíč: PK/FK/UK)
-- Vztahy s kardinalitou (`||--o{`, `}o--||`, atd.) — 8 kombinací Crow's Foot notace
+AST captures:
+- Entities with attributes (type, name, key: PK/FK/UK)
+- Relations with cardinality (`||--o{`, `}o--||`, etc.) — 8 combinations of
+  Crow's Foot notation
 - Relationship label
 
 ---
 
-## Fáze 3 — `mermaid-svg` crate
+## Phase 3 — `mermaid-svg` crate
 
-Převod AST → SVG string přes `quick-xml`.
+AST → SVG string via `quick-xml`.
 
-### 3.1 SVG infrastruktura
+### 3.1 SVG infrastructure
 
 ```rust
 pub struct SvgCanvas {
@@ -193,35 +211,39 @@ pub struct SvgCanvas {
 }
 ```
 
-Markery v `<defs>` pro šipky — jednou definovat, referencovat přes `marker-url`.
+Markers in `<defs>` for arrows — defined once, referenced via `marker-url`.
 
-### 3.2 Renderer per typ
+### 3.2 Per-type renderer
 
-**Sequence** — bez sugiyama: lifelines, šipky, activation boxy, Alt/loop/par bloky.
+**Sequence** — no sugiyama: lifelines, arrows, activation boxes, alt/loop/par
+blocks.
 
-**Pie** — bez sugiyama: SVG `<path>` arc segmenty, legend.
+**Pie** — no sugiyama: SVG `<path>` arc segments, legend.
 
-**Gantt** — bez sugiyama: časová osa, obdélníky per task.
+**Gantt** — no sugiyama: timeline, rectangles per task.
 
-**Flowchart** — sugiyama: nody dle syntaxe `[]`, `()`, `{}`, `(())`, hrany dle typu.
+**Flowchart** — sugiyama: nodes by `[]`, `()`, `{}`, `(())` syntax, edges by
+type.
 
-**Class** — sugiyama + UML: tři sekce (název/atributy/metody), vztahové markery v `<defs>`.
+**Class** — sugiyama + UML: three sections (name/attributes/methods), relation
+markers in `<defs>`.
 
-**ER** — sugiyama + Crow's Foot: entita jako tabulka, Crow's Foot markery na obou koncích hran.
+**ER** — sugiyama + Crow's Foot: entity as a table, Crow's Foot markers on
+both edge ends.
 
-### 3.3 Témata
+### 3.3 Themes
 
-Konstanty pro `default`, `dark`, `forest`, `neutral` — barvy a fonty.
+Constants for `default`, `dark`, `forest`, `neutral` — colors and fonts.
 
-### 3.4 PNG výstup
+### 3.4 PNG output
 
-`resvg` — čistý Rust SVG rasterizer, žádná systémová závislost.
+`resvg` — pure-Rust SVG rasterizer, no system dependency.
 
 ---
 
-## Fáze 4 — `mermaid-server` binary (volitelné)
+## Phase 4 — `mermaid-server` binary (optional)
 
-### 4.1 HTTP rozhraní (kroki-mermaid kompatibilní)
+### 4.1 HTTP interface (kroki-mermaid compatible)
 
 ```
 POST /svg
@@ -229,7 +251,7 @@ POST /png
 GET  /health
 ```
 
-### 4.2 Error response formát
+### 4.2 Error response format
 
 ```json
 {
@@ -241,35 +263,35 @@ GET  /health
 
 HTTP status: 400 parse error, 408 timeout, 500 internal.
 
-### 4.3 Konfigurace (env proměnné)
+### 4.3 Configuration (env vars)
 
-| Proměnná | Default | Popis |
+| Variable | Default | Description |
 |---|---|---|
 | `KROKI_MERMAID_PORT` | `8002` | Listen port |
 | `KROKI_MERMAID_CONVERT_TIMEOUT` | `10000` | Timeout ms |
 | `KROKI_MAX_BODY_SIZE` | `1048576` | Max body bytes |
-| `KROKI_MERMAID_THEME` | `default` | Výchozí téma |
+| `KROKI_MERMAID_THEME` | `default` | Default theme |
 
 ---
 
-## Implementační pořadí
+## Implementation order
 
-1. `sugiyama` crate — layout engine s unit testy
+1. `sugiyama` crate — layout engine with unit tests
 2. `mermaid-parse` — sequence + pie
 3. `mermaid-svg` — sequence + pie renderer
-4. `mermaid-server` — HTTP vrstva (volitelné)
-5. `mermaid-parse` + `mermaid-svg` — flowchart (první využití sugiyama)
+4. `mermaid-server` — HTTP layer (optional)
+5. `mermaid-parse` + `mermaid-svg` — flowchart (first use of sugiyama)
 6. class diagram
 7. ER diagram
-8. PNG výstup přes `resvg`
-9. Témata, konfigurace, edge cases
+8. PNG output via `resvg`
+9. Themes, configuration, edge cases
 
 ---
 
-## Referenční materiály
+## Reference material
 
 - Sugiyama et al. 1981 — *Methods for Visual Understanding of Hierarchical System Structures*
 - Brandes & Köpf 2001 — *Fast and Simple Horizontal Coordinate Assignment*
-- Dagre JS — referenční implementace pro každý krok Sugiyama
-- Mermaid.js `packages/mermaid/src/diagrams/` — gramatiky a AST struktury
-- kroki-mermaid `src/index.js` — protokol reference
+- Dagre JS — reference implementation for each step of Sugiyama
+- Mermaid.js `packages/mermaid/src/diagrams/` — grammars and AST structures
+- kroki-mermaid `src/index.js` — protocol reference

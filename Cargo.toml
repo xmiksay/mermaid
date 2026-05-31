@@ -1,13 +1,14 @@
-[workspace]
-resolver = "2"
-members = ["crates/sugiyama", "crates/mermaid-parse", "crates/mermaid-svg"]
-
-[workspace.package]
+[package]
+name = "mermaid-svg"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/sourcelab/mermaid-rs"
+description = "Render Mermaid diagrams (pie, sequence, flowchart, state, class, ER, gantt) to SVG. Pure Rust, no Node.js or native deps."
+repository = "https://github.com/xmiksay/mermaid"
+readme = "README.md"
+keywords = ["mermaid", "diagram", "svg", "flowchart", "uml"]
+categories = ["visualization", "rendering", "parser-implementations"]
 
-[workspace.dependencies]
+[dependencies]
 petgraph = "0.6"
 thiserror = "1"

@@ -1,110 +1,126 @@
-# mermaid-rs
+# mermaid-svg
 
-Rust knihovny pro renderování Mermaid diagramů do SVG. Bez Node.js / JVM / nativních
-binárek. Implementace dle `plan.md` (kořen projektu).
+Single-crate Rust library that renders [Mermaid](https://mermaid.js.org/)
+diagrams to SVG. No Node.js, no JVM, no native binaries.
 
-## Workspace
+## Layout
 
 ```
-crates/
-├── sugiyama/       layered layout engine (no deps on the rest)
-├── mermaid-parse/  Mermaid syntax → AST
-├── mermaid-svg/    AST → SVG (sequence, pie, flowchart)
-└── (mermaid-server, mermaid-rs nejsou hotové)
+src/
+├── lib.rs           public API: render(), parse(), Diagram, ast::*, errors
+├── parse/           Mermaid source → Diagram AST  (line-oriented scanners)
+│   ├── mod.rs       parse() dispatcher, ParseError, ast re-export
+│   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`)
+│   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
+├── svg/             Diagram AST → SVG string
+│   ├── mod.rs       render() / render_diagram() dispatcher, RenderError
+│   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
+│   ├── theme.rs     default colors
+│   └── {pie,sequence,flowchart,state,class,er,gantt}.rs
+├── sugiyama/        layered graph layout (private — no public API surface)
+│   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
+│   ├── tests.rs     unit tests (private API)
+│   └── {cycle,layer,order,coord,route,work}.rs
+examples/render_user.rs   throwaway one-off; safe to delete
+tests/integration.rs      end-to-end tests; writes samples to target/test-samples/
 ```
 
-Cargo workspace v `Cargo.toml`. Žádné jiné build systémy.
+Cargo manifest: single `[package]` (not `[workspace]`). Crate is published to
+crates.io as `mermaid-svg`. The historical 3-crate split (`sugiyama` +
+`mermaid-parse` + `mermaid-svg`) was consolidated — see `plan.md` for the
+original design.
 
-## Co je hotové
+## Done
 
-| Fáze | Crate | Status |
-|---|---|---|
-| 1 | sugiyama | hotová |
-| 2 + 3 sequence/pie | mermaid-parse + svg | hotová |
-| 5 flowchart | mermaid-parse + svg | hotová |
-| 6 state diagram | mermaid-parse + svg | hotová |
-| 6 class diagram | mermaid-parse + svg | hotová |
-| 7 ER diagram | mermaid-parse + svg | hotová |
-| ext. gantt | mermaid-parse + svg | hotová |
-| 4 HTTP server | mermaid-server | **nedělané** |
-| 8 PNG via resvg | mermaid-svg | nedělané |
-| 9 themes + config | mermaid-svg | nedělané (jen default theme) |
+| Feature | Status |
+|---|---|
+| sugiyama layout (cycle/layer/order/coord/route) | done |
+| pie · sequence · flowchart · state · class · ER · gantt parsers | done |
+| Matching SVG renderers | done |
+| HTTP server (kroki-style POST /svg) | not started |
+| PNG via resvg | not started |
+| Themes & config | not started (default theme only) |
 
 ## Build & test
 
 ```bash
-cargo build              # workspace build
-cargo test               # všechny crates
-cargo test -p sugiyama   # jen jeden crate
+cargo build              # library + example
+cargo test               # unit + integration + doctest (113 tests total)
+cargo run --example render_user
+cargo package --allow-dirty   # publish dry-run; produces .crate
 ```
 
-Integration testy v `mermaid-svg` zapisují sample SVG do
-`crates/mermaid-svg/target/test-samples/`:
+Integration tests write sample SVGs to `target/test-samples/`:
 - `pie_browsers.svg`, `sequence_api.svg`
 - `flowchart_td.svg`, `flowchart_lr.svg`
-- `state_lifecycle.svg`
-- `class_uml.svg`
-- `er_customer.svg`
-- `gantt_release.svg`
+- `state_lifecycle.svg`, `class_uml.svg`
+- `er_customer.svg`, `gantt_release.svg`
 
-## Známé odchylky od plánu
+## Known deviations from `plan.md`
 
-Vědomá zjednodušení pro v0.1. API se nemění, lze nahradit později:
+Deliberate v0.1 simplifications. API does not change if these are revisited.
 
-1. **sugiyama X-coords**: `coord.rs` používá median-relaxation s hard non-overlap
-   constraints místo plné Brandes-Köpf (1.5 v plánu). Validní layouty, ale ne
-   tak vyrovnané jako 4-pass BK.
-2. **mermaid-parse**: hand-rolled line scannery místo `pest` PEG (2.x v plánu).
-   Mermaid syntax je line-oriented, scanner je kratší a snáz rozšiřitelný.
-   AST je stejný.
-3. **mermaid-svg**: vlastní string SVG builder místo `quick-xml` (3.1 v plánu).
-   Žádný runtime parsing, write-only, escaping je v `svg::escape`.
+1. **sugiyama X-coords**: `coord.rs` uses median-relaxation with hard
+   non-overlap constraints instead of full Brandes-Köpf (1.5 in the plan).
+   Layouts are valid but not as balanced as 4-pass BK.
+2. **mermaid parser**: hand-rolled line scanners instead of `pest` PEG (2.x in
+   the plan). Mermaid syntax is line-oriented, scanner code is shorter and
+   easier to extend. AST is unchanged.
+3. **svg writer**: own string SVG builder instead of `quick-xml` (3.1 in the
+   plan). No runtime parsing, write-only, escaping in `svg::builder::escape`.
 
-## Konvence
+## Conventions
 
-- Žádné komentáře navíc — jen tam kde *proč* není zřejmý z kódu.
-- Žádné `#[allow(dead_code)]` v library kódu (kromě malých `_use_*` placeholderů,
-  které dokumentují, že symbol je veřejný API ale nepoužitý uvnitř).
-- Testy: unit testy v `#[cfg(test)] mod tests` na konci každého souboru,
-  end-to-end testy v `crates/*/tests/integration.rs`.
-- Chyby přes `thiserror`, žádné `String` errory.
-- `NodeId = u32` v sugiyama; vyšší vrstvy si dělají vlastní mapování stringů → u32.
+- No extra comments — only where the *why* is non-obvious from the code.
+- No `#[allow(dead_code)]` in library code.
+- Tests: unit tests in `#[cfg(test)] mod tests` at the end of each file;
+  end-to-end tests in `tests/integration.rs`; private-API sugiyama tests in
+  `src/sugiyama/tests.rs`.
+- Errors via `thiserror`. No stringly-typed errors.
+- `NodeId = u32` in sugiyama; upper layers map their own `String → u32`.
 
-## Pipeline pro flowchart (důležité)
+## Flowchart pipeline (important)
 
-Direction transformace v `mermaid-svg/src/flowchart.rs`: sugiyama umí jen
-top-down, takže pro `LR`/`RL` se **swapují vstupní rozměry** `(w, h) → (h, w)` a
-**výstupní souřadnice** `(sx, sy) → (sy, sx)`. Pro `BT`/`RL` se flippuje osa.
+Direction transform in `src/svg/flowchart.rs`: sugiyama only knows top-down,
+so for `LR`/`RL` we **swap input sizes** `(w, h) → (h, w)` and **output
+coordinates** `(sx, sy) → (sy, sx)`. For `BT`/`RL` we flip the axis.
 
-Edge clipping (`clip_to_node`) má per-shape variantu:
-- rect: výpočet `t = min(hw/|dx|, hh/|dy|)`
-- circle: normalizace na poloměr
+Edge clipping (`clip_to_node`) has per-shape variants:
+- rect: `t = min(hw/|dx|, hh/|dy|)`
+- circle: normalize to radius
 - rhombus: `t = 1 / (|dx|/hw + |dy|/hh)`
-- ostatní tvary fallback na rect
+- other shapes fall back to rect
 
-## Co je třeba pamatovat
+## Things to remember
 
-- Sugiyama waypoints obsahují **endpointy** (center src, center dst). SVG
-  renderer si je sám clipuje na boundary nodu.
-- Flowchart `FlowEdge` má separátní `line` (Solid/Dotted/Thick) a `head`
-  (None/Arrow/Circle/Cross) — kombinace `-->`, `---`, `-.->`, `==>`, `--o`,
-  `--x` plus všechny no-head varianty.
-- `A & B --> C & D` vytvoří 4 hrany (cross product) — multi-source/target.
-- Flowchart `subgraph` se trackuje v `FlowchartDiagram.subgraphs`, vč. nestingu.
-  Renderer kreslí bounding rect kolem skupiny.
-- Sequence parser má **nested items** (`Vec<SequenceItem>`) — bloky `Alt`/`Par`/
-  `Critical` mají větve, `Loop`/`Opt` mají label + items. Renderer kreslí
-  rámečky s tabovým labelem.
-- Sequence `autonumber` přidá pořadové číslo před text každé zprávy.
-- Sequence `activate`/`deactivate` páruje a kreslí activation band na lifeline.
-- State `state X { ... }` se ukládá do `composites`, parallel regions oddělené
-  `--`. Renderer kreslí stroked-dashed rounded outline s labelem.
-- State `note right of X: text` (one-liner) i `note left of X\n...\nend note`
-  (multi-line) jsou v `notes`.
-- Class `namespace X { class A; class B }` se ukládá do `namespaces`, renderer
-  kreslí dashed rect kolem členů.
-- Class `direction` (TD/BT/LR/RL) řídí transpose podobně jako flowchart.
-- ER `EntityAttribute.comment` se naplní z quoted řetězce za atributem
-  (`string name "the customer name"`).
-- Gantt `excludes` (víkendy) a `todayMarker YYYY-MM-DD` jsou v AST; today
-  marker renderer kreslí jako červenou svislou čáru.
+- Sugiyama waypoints include **endpoints** (center of src, center of dst).
+  The SVG renderer clips them to the node boundary itself.
+- Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick) and `head`
+  (None/Arrow/Circle/Cross) — covers `-->`, `---`, `-.->`, `==>`, `--o`,
+  `--x` plus all no-head variants.
+- `A & B --> C & D` produces 4 edges (cross product) — multi-source/target.
+- Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
+  nesting. The renderer draws a dashed bounding rect around the group.
+- Sequence parser has **nested items** (`Vec<SequenceItem>`) — `Alt`/`Par`/
+  `Critical` blocks have branches; `Loop`/`Opt` have label + items. Renderer
+  draws labeled frames with tab labels.
+- Sequence `autonumber` prefixes each message text with a sequence number.
+- Sequence `activate`/`deactivate` is paired and drawn as an activation band
+  on the lifeline.
+- State `state X { ... }` is stored in `composites`; parallel regions are
+  separated by `--`. Renderer draws a dashed rounded outline with a label.
+- State `note right of X: text` (one-liner) and `note left of X\n…\nend note`
+  (multi-line) both land in `notes`.
+- Class `namespace X { class A; class B }` is stored in `namespaces`; the
+  renderer draws a dashed rect around the members.
+- Class `direction` (TD/BT/LR/RL) drives the transpose the same way the
+  flowchart does.
+- ER `EntityAttribute.comment` is populated from a quoted string after the
+  attribute (`string name "the customer name"`).
+- Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
+  the renderer draws the today marker as a vertical red line.
+
+## Known parser limitation still listed
+
+- Asymmetric flowchart shapes `[/text/]` and `[\text\]` are not supported.
+  Tests use the regular `[text]` form.
