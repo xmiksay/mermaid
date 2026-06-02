@@ -2,14 +2,15 @@
 //! layout, then draws shapes, clipped polyline edges, and subgraph frames.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use crate::parse::{
-    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Subgraph,
+    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style,
+    Subgraph,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{escape, fnum, SvgBuilder};
+use super::builder::{curve_basis_path, escape, fnum, SvgBuilder};
+use super::style::{resolve_edge_style, resolve_style, ResolvedStyle};
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -98,7 +99,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     );
 
     // Edges.
-    for fedge in &d.edges {
+    for (ei, fedge) in d.edges.iter().enumerate() {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) else {
             continue;
         };
@@ -109,10 +110,12 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
+        let edge_style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
         draw_edge(
             &mut svg,
             &pts,
             fedge,
+            &edge_style,
             &d.nodes,
             &id_to_u32,
             &node_sizes,
@@ -124,7 +127,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     for (i, node) in d.nodes.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
         let size = node_sizes[i];
-        draw_node(&mut svg, center, size, node, theme);
+        draw_node(&mut svg, center, size, node, &d.class_defs, theme);
     }
 
     svg.finish()
@@ -157,12 +160,12 @@ fn draw_node(
     (cx, cy): (f64, f64),
     (w, h): (f64, f64),
     node: &FlowNode,
+    class_defs: &HashMap<String, Style>,
     theme: &Theme,
 ) {
-    let flow_node_fill = theme.flow_node_fill;
-    let flow_node_stroke = theme.flow_node_stroke;
-    let fill_attr =
-        format!("fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\"");
+    let rs = resolve_style(class_defs, &node.classes, &node.style);
+    let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
+    let fill_attr = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     let off = 12.0; // skew for parallelogram/trapezoid
@@ -333,20 +336,31 @@ fn draw_node(
             svg.path(&d, &fill_attr);
         }
     }
-    draw_label(svg, (cx, cy), &node.text, theme);
+    let fg = rs.label_fill(theme.fg);
+    let font = rs.font_size.as_deref();
+    draw_label(svg, (cx, cy), &node.text, fg, font);
 }
 
-fn draw_label(svg: &mut SvgBuilder, (cx, cy): (f64, f64), text: &str, theme: &Theme) {
-    let fg = theme.fg;
+fn draw_label(
+    svg: &mut SvgBuilder,
+    (cx, cy): (f64, f64),
+    text: &str,
+    fg: &str,
+    font_size: Option<&str>,
+) {
     let lines: Vec<&str> = text.split("\\n").collect();
     let n = lines.len() as f64;
     let line_h = 18.0;
     let y0 = cy - ((n - 1.0) * line_h) / 2.0 + 5.0;
+    let fs = match font_size {
+        Some(s) => format!(" font-size=\"{s}\""),
+        None => String::new(),
+    };
     for (i, line) in lines.iter().enumerate() {
         svg.text(
             cx,
             y0 + i as f64 * line_h,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\"{fs}"),
             line,
         );
     }
@@ -435,16 +449,17 @@ fn draw_subgraphs(
 
 // ---- edge drawing ----------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn draw_edge(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
     edge: &FlowEdge,
+    style_override: &ResolvedStyle,
     nodes: &[FlowNode],
     id_to_u32: &HashMap<String, NodeId>,
     sizes: &[(f64, f64)],
     theme: &Theme,
 ) {
-    let flow_edge_stroke = theme.flow_edge_stroke;
     let n = pts.len();
     let src_idx = id_to_u32[&edge.from] as usize;
     let dst_idx = id_to_u32[&edge.to] as usize;
@@ -459,12 +474,26 @@ fn draw_edge(
     }
     clipped.push(last);
 
-    let d = polyline_path(&clipped);
-    let (style, marker) = edge_style(edge.line, edge.head);
-    let attrs = format!(
-        "fill=\"none\" stroke=\"{flow_edge_stroke}\" {style} {marker}",
-        marker = marker_attr(marker)
-    );
+    let d = curve_basis_path(&clipped);
+
+    // linkStyle overrides layer over the kind-based defaults.
+    let stroke = style_override
+        .stroke
+        .as_deref()
+        .unwrap_or(theme.flow_edge_stroke);
+    let default_w = match edge.line {
+        EdgeLine::Thick => "3",
+        _ => "1.5",
+    };
+    let width = style_override.stroke_width.as_deref().unwrap_or(default_w);
+    let dash = match (&style_override.stroke_dasharray, edge.line) {
+        (Some(da), _) => format!(" stroke-dasharray=\"{da}\""),
+        (None, EdgeLine::Dotted) => " stroke-dasharray=\"2 4\"".to_string(),
+        _ => String::new(),
+    };
+    let marker = marker_attr(edge_marker(edge.head));
+    let attrs =
+        format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{width}\"{dash} {marker}");
     svg.path(&d, &attrs);
 
     if let Some(label) = &edge.label {
@@ -473,23 +502,13 @@ fn draw_edge(
     }
 }
 
-fn edge_style(line: EdgeLine, head: EdgeHead) -> (String, Option<&'static str>) {
-    let stroke_width = match line {
-        EdgeLine::Thick => "3",
-        _ => "1.5",
-    };
-    let dash = match line {
-        EdgeLine::Dotted => " stroke-dasharray=\"2 4\"",
-        _ => "",
-    };
-    let style = format!("stroke-width=\"{stroke_width}\"{dash}");
-    let marker = match head {
+fn edge_marker(head: EdgeHead) -> Option<&'static str> {
+    match head {
         EdgeHead::None => None,
         EdgeHead::Arrow => Some("arrow-filled"),
         EdgeHead::Circle => Some("arrow-circle"),
         EdgeHead::Cross => Some("arrow-cross"),
-    };
-    (style, marker)
+    }
 }
 
 fn marker_attr(m: Option<&str>) -> String {
@@ -497,15 +516,6 @@ fn marker_attr(m: Option<&str>) -> String {
         Some(id) => format!("marker-end=\"url(#{id})\""),
         None => String::new(),
     }
-}
-
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
 }
 
 fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
@@ -720,5 +730,77 @@ mod tests {
     fn empty_flowchart_still_valid_svg() {
         let svg = render(&FlowchartDiagram::default(), &Theme::default());
         assert!(svg.starts_with("<svg"));
+    }
+
+    #[test]
+    fn inline_style_overrides_theme_fill() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nstyle A fill:#f9f\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"#f9f\""));
+    }
+
+    #[test]
+    fn classdef_applied_via_class() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nclassDef foo fill:#0f0\nclass A foo\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"#0f0\""));
+    }
+
+    #[test]
+    fn default_classdef_styles_unclassed_node() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nclassDef default fill:#eee\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"#eee\""));
+    }
+
+    #[test]
+    fn link_style_overrides_edge_stroke() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nlinkStyle 0 stroke:#ff3,stroke-width:4px\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("stroke=\"#ff3\""));
+        assert!(svg.contains("stroke-width=\"4\""));
+    }
+
+    #[test]
+    fn color_prop_sets_label_fill() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA --> B\nstyle A color:#fff\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"#fff\""));
+    }
+
+    /// True if any `<path d="…">` value contains a cubic-bezier `C` command.
+    fn any_bezier_path(svg: &str) -> bool {
+        svg.split("d=\"").skip(1).any(|seg| {
+            let d = &seg[..seg.find('"').unwrap_or(seg.len())];
+            d.contains('C')
+        })
+    }
+
+    #[test]
+    fn curved_edges_use_bezier() {
+        // The skip edge a→d spans multiple layers, so it routes through ≥3
+        // waypoints and emits a cubic-bezier `C` command in its path.
+        let svg = render(
+            &parse_flow("flowchart TD\na --> b --> c --> d\na --> d\n"),
+            &Theme::default(),
+        );
+        assert!(any_bezier_path(&svg));
+    }
+
+    #[test]
+    fn adjacent_layer_edge_stays_straight() {
+        // A single short edge clips to 2 points → straight M..L.., no curve.
+        let svg = render(&parse_flow("flowchart TD\na --> b\n"), &Theme::default());
+        assert!(!any_bezier_path(&svg));
     }
 }

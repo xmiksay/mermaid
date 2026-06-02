@@ -1,5 +1,11 @@
 //! AST types shared by all diagram kinds.
 
+use std::collections::HashMap;
+
+/// CSS-ish `key:value` pairs from a `style`/`classDef`/`linkStyle` directive,
+/// kept in source order. Resolved to SVG attributes at render time.
+pub type Style = Vec<(String, String)>;
+
 #[derive(Debug, Clone)]
 pub enum Diagram {
     Pie(PieDiagram),
@@ -148,6 +154,12 @@ pub struct FlowchartDiagram {
     pub nodes: Vec<FlowNode>,
     pub edges: Vec<FlowEdge>,
     pub subgraphs: Vec<Subgraph>,
+    /// `classDef <name> …` definitions, keyed by class name.
+    pub class_defs: HashMap<String, Style>,
+    /// `linkStyle <idx> …` overrides, keyed by edge definition index.
+    pub edge_styles: HashMap<usize, Style>,
+    /// `linkStyle default …` applied to all edges.
+    pub link_style_default: Style,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -164,6 +176,10 @@ pub struct FlowNode {
     pub id: String,
     pub text: String,
     pub shape: NodeShape,
+    /// Class names applied via `class`/`:::` (resolution order preserved).
+    pub classes: Vec<String>,
+    /// Inline `style <id> …` properties (highest priority).
+    pub style: Style,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +263,8 @@ pub struct StateDiagram {
     pub transitions: Vec<StateTransition>,
     pub composites: Vec<CompositeState>,
     pub notes: Vec<StateNote>,
+    /// `classDef <name> …` definitions, keyed by class name.
+    pub class_defs: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -254,6 +272,10 @@ pub struct State {
     pub id: String,
     pub label: String,
     pub kind: StateKind,
+    /// Class names applied via `class`/`:::`.
+    pub classes: Vec<String>,
+    /// Inline `style <id> …` properties.
+    pub style: Style,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +318,8 @@ pub struct ClassDiagram {
     pub classes: Vec<UmlClass>,
     pub relations: Vec<ClassRelation>,
     pub namespaces: Vec<Namespace>,
+    /// `classDef <name> …` definitions, keyed by class name.
+    pub class_defs: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -303,6 +327,10 @@ pub struct UmlClass {
     pub name: String,
     pub stereotype: Option<String>,
     pub members: Vec<ClassMember>,
+    /// Style class names applied via `cssClass`/`:::`.
+    pub classes: Vec<String>,
+    /// Inline `style <Name> …` properties.
+    pub style: Style,
 }
 
 #[derive(Debug, Clone, PartialEq)]

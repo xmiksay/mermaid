@@ -2,12 +2,11 @@
 //! rows), connected by lines with Crow's Foot cardinality markers on each end.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use crate::parse::{Cardinality, Entity, ErDiagram, ErRelation};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{fnum, SvgBuilder};
+use super::builder::{curve_basis_path, SvgBuilder};
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -218,7 +217,7 @@ fn draw_relation(
     } else {
         format!(" stroke-dasharray=\"{dash}\"")
     };
-    let d = polyline_path(&clipped);
+    let d = curve_basis_path(&clipped);
     svg.path(
         &d,
         &format!("fill=\"none\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"{dash_attr}"),
@@ -355,15 +354,6 @@ fn draw_crowfoot(
     svg.line(ax, ay, tip_x + px * spread, tip_y + py * spread, stroke);
     svg.line(ax, ay, tip_x - px * spread, tip_y - py * spread, stroke);
     let _ = len;
-}
-
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
 }
 
 fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {

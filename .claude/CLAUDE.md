@@ -104,6 +104,17 @@ from one of the built-ins, so adding a field is non-breaking.
   `src/sugiyama/tests.rs`.
 - Errors via `thiserror`. No stringly-typed errors.
 - `NodeId = u32` in sugiyama; upper layers map their own `String → u32`.
+- Keep files small — under 500 LoC. Split a module before it grows past that.
+- DRY and KISS: factor out repetition into shared helpers, and prefer the
+  simplest approach that works over clever or over-general designs.
+- Stay faithful to the original JS-rendered Mermaid output — match its visual
+  layout and styling rather than inventing a new look.
+- When adding new functionality, refresh the relevant docs in the same change:
+  this file (CLAUDE.md), `README.md`, and `Cargo.toml` (description/keywords).
+- Always write tests for new functionality, and make sure the full suite
+  (`cargo test`) passes before committing.
+- Run `cargo fmt` before every commit, and keep `cargo clippy` clean — no
+  warnings (treat them as errors before committing).
 
 ## Flowchart pipeline (important)
 

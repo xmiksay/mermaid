@@ -19,8 +19,9 @@ use std::collections::HashMap;
 
 use super::ast::{
     ClassDiagram, ClassMember, ClassRelation, ClassRelationKind, FlowDirection, MemberKind,
-    Namespace, UmlClass, Visibility,
+    Namespace, Style, UmlClass, Visibility,
 };
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 const RELATIONS: &[(&str, ClassRelationKind)] = &[
@@ -113,6 +114,19 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
             continue;
         }
 
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            handle_class_def(rest, &mut diag);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("style ") {
+            handle_style(rest, &mut diag, &mut by_name);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("cssClass ") {
+            handle_css_class(rest, &mut diag, &mut by_name);
+            continue;
+        }
+
         if let Some(rest) = line.strip_prefix("class ") {
             let added_name = handle_class_decl(rest, &mut diag, &mut by_name, &mut in_block);
             if let Some(ns_name) = namespace_stack.last() {
@@ -139,8 +153,8 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if let Some((tok_pos, tok, kind)) = find_relation(line) {
-            let from = line[..tok_pos].trim().to_string();
-            let after = &line[tok_pos + tok.len()..];
+            let (from, from_class) = extract_inline_class(line[..tok_pos].trim());
+            let (after, to_class) = extract_inline_class(line[tok_pos + tok.len()..].trim());
             let (to_part, label) = match after.split_once(':') {
                 Some((a, b)) => (a.trim().to_string(), Some(b.trim().to_string())),
                 None => (after.trim().to_string(), None),
@@ -149,6 +163,18 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
             let to_clean = to_part.trim().trim_matches('"').to_string();
             get_class(&mut diag, &mut by_name, &from);
             get_class(&mut diag, &mut by_name, &to_clean);
+            if let Some(c) = from_class {
+                let cls = get_class(&mut diag, &mut by_name, &from);
+                if !cls.classes.contains(&c) {
+                    cls.classes.push(c);
+                }
+            }
+            if let Some(c) = to_class {
+                let cls = get_class(&mut diag, &mut by_name, &to_clean);
+                if !cls.classes.contains(&c) {
+                    cls.classes.push(c);
+                }
+            }
             diag.relations.push(ClassRelation {
                 from,
                 to: to_clean,
@@ -190,21 +216,88 @@ fn handle_class_decl(
         Some((a, b)) => (a.trim(), Some(b)),
         None => (rest, None),
     };
+    let (name_part, inline_class) = extract_inline_class(name_part);
     let (name, stereo) = if let Some(i) = name_part.find("<<") {
         let n = name_part[..i].trim();
         let s = name_part[i + 2..].trim_end_matches(">>").trim();
         (n, Some(s.to_string()))
     } else {
-        (name_part, None)
+        (name_part.as_str(), None)
     };
     let cls = get_class(diag, by_name, name);
     if let Some(s) = stereo {
         cls.stereotype = Some(s);
     }
-    if let Some(_remaining_after_brace) = after_brace {
+    if let Some(c) = inline_class {
+        if !cls.classes.contains(&c) {
+            cls.classes.push(c);
+        }
+    }
+    if after_brace.is_some() {
         *in_block = Some(name.to_string());
     }
     name.to_string()
+}
+
+/// `classDef <name>[,<name2>] <props>` — define style classes.
+fn handle_class_def(rest: &str, diag: &mut ClassDiagram) {
+    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let style = parse_style_props(props);
+    for name in names.split(',') {
+        let name = name.trim();
+        if !name.is_empty() {
+            diag.class_defs.insert(name.to_string(), style.clone());
+        }
+    }
+}
+
+/// `style <ClassName> <props>` — inline style on a single class.
+fn handle_style(rest: &str, diag: &mut ClassDiagram, by_name: &mut HashMap<String, usize>) {
+    let Some((name, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let cls = get_class(diag, by_name, name.trim());
+    cls.style = parse_style_props(props);
+}
+
+/// `cssClass "id1,id2" <className>` — apply a style class to classes.
+fn handle_css_class(rest: &str, diag: &mut ClassDiagram, by_name: &mut HashMap<String, usize>) {
+    let Some((quoted, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+        return;
+    };
+    let class_name = class_name.trim();
+    if class_name.is_empty() {
+        return;
+    }
+    for id in quoted.trim().trim_matches('"').split(',') {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let cls = get_class(diag, by_name, id);
+        if !cls.classes.iter().any(|c| c == class_name) {
+            cls.classes.push(class_name.to_string());
+        }
+    }
+}
+
+/// Remove a `:::class` token from `raw`, returning the remaining text and the
+/// class name (first occurrence only).
+fn extract_inline_class(raw: &str) -> (String, Option<String>) {
+    if let Some(p) = raw.find(":::") {
+        let after = &raw[p + 3..];
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == ':')
+            .unwrap_or(after.len());
+        let cls = after[..end].to_string();
+        let cleaned = format!("{}{}", &raw[..p], &after[end..]);
+        let cls = (!cls.is_empty()).then_some(cls);
+        (cleaned.trim().to_string(), cls)
+    } else {
+        (raw.trim().to_string(), None)
+    }
 }
 
 fn take_stereotype(line: &str) -> Option<String> {
@@ -273,6 +366,8 @@ fn get_class<'a>(
             name: name.to_string(),
             stereotype: None,
             members: Vec::new(),
+            classes: Vec::new(),
+            style: Style::new(),
         });
     }
     let i = by_name[name];
@@ -333,5 +428,31 @@ mod tests {
         let s = "classDiagram\nCar --> Engine : has\n";
         let d = parse(s).unwrap();
         assert_eq!(d.relations[0].label.as_deref(), Some("has"));
+    }
+
+    fn class<'a>(d: &'a ClassDiagram, name: &str) -> &'a UmlClass {
+        d.classes.iter().find(|c| c.name == name).unwrap()
+    }
+
+    #[test]
+    fn classdef_style_and_cssclass() {
+        let s = "classDiagram\nAnimal --> Dog\nclassDef foo fill:#0f0\ncssClass \"Animal,Dog\" foo\nstyle Dog stroke:#333\n";
+        let d = parse(s).unwrap();
+        assert!(d.class_defs.contains_key("foo"));
+        assert_eq!(class(&d, "Animal").classes, vec!["foo".to_string()]);
+        assert_eq!(class(&d, "Dog").classes, vec!["foo".to_string()]);
+        assert_eq!(
+            class(&d, "Dog").style,
+            vec![("stroke".to_string(), "#333".to_string())]
+        );
+    }
+
+    #[test]
+    fn inline_class_on_decl_and_relation() {
+        let s = "classDiagram\nclass Animal:::foo\nAnimal --> Dog:::bar : owns\n";
+        let d = parse(s).unwrap();
+        assert_eq!(class(&d, "Animal").classes, vec!["foo".to_string()]);
+        assert_eq!(class(&d, "Dog").classes, vec!["bar".to_string()]);
+        assert_eq!(d.relations[0].label.as_deref(), Some("owns"));
     }
 }

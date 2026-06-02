@@ -16,8 +16,9 @@ use std::collections::HashMap;
 
 use super::ast::{
     CompositeState, FlowDirection, NotePosition, State, StateDiagram, StateKind, StateNote,
-    StateTransition,
+    StateTransition, Style,
 };
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
@@ -133,6 +134,19 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
             continue;
         }
 
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            handle_class_def(rest, &mut diag);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("class ") {
+            handle_class_apply(rest, &mut diag, &mut existing);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("style ") {
+            handle_style(rest, &mut diag, &mut existing);
+            continue;
+        }
+
         if let Some(rest) = line.strip_prefix("state ") {
             parse_state_decl(rest, &mut diag, &mut existing);
             continue;
@@ -214,11 +228,87 @@ fn parse_note_head(head: &str) -> Option<(NotePosition, String)> {
     None
 }
 
+/// `classDef <name>[,<name2>] <props>` — define style classes.
+fn handle_class_def(rest: &str, diag: &mut StateDiagram) {
+    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let style = parse_style_props(props);
+    for name in names.split(',') {
+        let name = name.trim();
+        if !name.is_empty() {
+            diag.class_defs.insert(name.to_string(), style.clone());
+        }
+    }
+}
+
+/// `class <id1>,<id2> <className>` — apply a class to states.
+fn handle_class_apply(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
+    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+        return;
+    };
+    let class_name = class_name.trim();
+    if class_name.is_empty() {
+        return;
+    }
+    for id in ids.split(',') {
+        let id = id.trim();
+        if !id.is_empty() {
+            ensure_state(diag, existing, id, "", StateKind::Normal);
+            apply_state_class(diag, existing, id, class_name);
+        }
+    }
+}
+
+/// `style <id> <props>` — inline style on a single state.
+fn handle_style(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
+    let Some((id, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let id = id.trim();
+    ensure_state(diag, existing, id, "", StateKind::Normal);
+    if let Some(&i) = existing.get(id) {
+        diag.states[i].style = parse_style_props(props);
+    }
+}
+
+/// Remove a `:::class` token from `raw`, returning the remaining text (with the
+/// token excised, so a trailing `: label` survives) and the class name. Only the
+/// first occurrence is handled.
+fn extract_inline_class(raw: &str) -> (String, Option<String>) {
+    if let Some(p) = raw.find(":::") {
+        let after = &raw[p + 3..];
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == ':')
+            .unwrap_or(after.len());
+        let cls = after[..end].to_string();
+        let cleaned = format!("{}{}", &raw[..p], &after[end..]);
+        let cls = (!cls.is_empty()).then_some(cls);
+        (cleaned.trim().to_string(), cls)
+    } else {
+        (raw.trim().to_string(), None)
+    }
+}
+
+fn apply_state_class(
+    diag: &mut StateDiagram,
+    existing: &HashMap<String, usize>,
+    id: &str,
+    class: &str,
+) {
+    if let Some(&i) = existing.get(id) {
+        if !diag.states[i].classes.iter().any(|c| c == class) {
+            diag.states[i].classes.push(class.to_string());
+        }
+    }
+}
+
 fn parse_state_decl(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
-    let rest = rest.trim();
+    // `:::class` binds tighter than a `: label`, so strip it first.
+    let (rest, inline_class) = extract_inline_class(rest.trim());
     let (id_part, label_part) = match rest.split_once(':') {
         Some((a, b)) => (a.trim(), b.trim().to_string()),
-        None => (rest, String::new()),
+        None => (rest.as_str(), String::new()),
     };
     let (id, kind) = if let Some(idx) = id_part.find("<<") {
         let id = id_part[..idx].trim().to_string();
@@ -234,6 +324,9 @@ fn parse_state_decl(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<
         (id_part.to_string(), StateKind::Normal)
     };
     ensure_state(diag, existing, &id, &label_part, kind);
+    if let Some(cls) = inline_class {
+        apply_state_class(diag, existing, &id, &cls);
+    }
 }
 
 fn parse_transition(
@@ -245,14 +338,20 @@ fn parse_transition(
 ) -> Result<(String, String), ParseError> {
     let arrow = "-->";
     let pos = line.find(arrow).unwrap();
-    let from_raw = line[..pos].trim();
-    let after = line[pos + arrow.len()..].trim();
+    let (from_raw, from_class) = extract_inline_class(line[..pos].trim());
+    let (after, to_class) = extract_inline_class(line[pos + arrow.len()..].trim());
     let (to_raw, label) = match after.split_once(':') {
         Some((a, b)) => (a.trim(), Some(b.trim().to_string())),
-        None => (after, None),
+        None => (after.as_str(), None),
     };
-    let from_id = canonicalize(from_raw, true, diag, existing, start_n, end_n);
+    let from_id = canonicalize(&from_raw, true, diag, existing, start_n, end_n);
     let to_id = canonicalize(to_raw, false, diag, existing, start_n, end_n);
+    if let Some(cls) = from_class {
+        apply_state_class(diag, existing, &from_id, &cls);
+    }
+    if let Some(cls) = to_class {
+        apply_state_class(diag, existing, &to_id, &cls);
+    }
     diag.transitions.push(StateTransition {
         from: from_id.clone(),
         to: to_id.clone(),
@@ -277,6 +376,8 @@ fn canonicalize(
                 id: id.clone(),
                 label: String::new(),
                 kind: StateKind::Start,
+                classes: Vec::new(),
+                style: Style::new(),
             });
             id
         } else {
@@ -286,6 +387,8 @@ fn canonicalize(
                 id: id.clone(),
                 label: String::new(),
                 kind: StateKind::End,
+                classes: Vec::new(),
+                style: Style::new(),
             });
             id
         }
@@ -321,6 +424,8 @@ fn ensure_state(
         id: id.to_string(),
         label: final_label,
         kind,
+        classes: Vec::new(),
+        style: Style::new(),
     });
 }
 
@@ -389,5 +494,31 @@ mod tests {
     fn direction_parsed() {
         let d = parse("stateDiagram-v2\ndirection LR\nA --> B\n").unwrap();
         assert_eq!(d.direction, FlowDirection::LeftRight);
+    }
+
+    fn state<'a>(d: &'a StateDiagram, id: &str) -> &'a State {
+        d.states.iter().find(|s| s.id == id).unwrap()
+    }
+
+    #[test]
+    fn classdef_class_and_style() {
+        let d = parse(
+            "stateDiagram-v2\n[*] --> A\nclassDef foo fill:#0f0\nclass A foo\nstyle A stroke:#333\n",
+        )
+        .unwrap();
+        assert!(d.class_defs.contains_key("foo"));
+        assert_eq!(state(&d, "A").classes, vec!["foo".to_string()]);
+        assert_eq!(
+            state(&d, "A").style,
+            vec![("stroke".to_string(), "#333".to_string())]
+        );
+    }
+
+    #[test]
+    fn inline_class_on_transition() {
+        let d = parse("stateDiagram-v2\nA:::foo --> B:::bar : go\n").unwrap();
+        assert_eq!(state(&d, "A").classes, vec!["foo".to_string()]);
+        assert_eq!(state(&d, "B").classes, vec!["bar".to_string()]);
+        assert_eq!(d.transitions[0].label.as_deref(), Some("go"));
     }
 }

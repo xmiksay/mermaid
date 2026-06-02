@@ -2,12 +2,11 @@
 //! relation edges); connectors follow the routed waypoints with rect clipping.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{fnum, SvgBuilder};
+use super::builder::{curve_basis_path, SvgBuilder};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -208,7 +207,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             ""
         };
         svg.path(
-            &polyline_path(&clipped),
+            &curve_basis_path(&clipped),
             &format!(
                 "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#req-arrow)\""
             ),
@@ -279,15 +278,6 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
-}
-
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
 }
 
 fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {

@@ -27,6 +27,7 @@ mod requirement;
 mod sankey;
 mod sequence;
 mod state;
+mod style;
 mod timeline;
 mod treemap;
 mod xychart;

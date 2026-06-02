@@ -2,14 +2,14 @@
 //! start/end/choice/fork/join pseudo-states.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use crate::parse::{
-    FlowDirection, NotePosition, State, StateDiagram, StateKind, StateNote, StateTransition,
+    FlowDirection, NotePosition, State, StateDiagram, StateKind, StateNote, StateTransition, Style,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{fnum, SvgBuilder};
+use super::builder::{curve_basis_path, fnum, SvgBuilder};
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -101,7 +101,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 
     for (i, state) in d.states.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_state(&mut svg, center, sizes[i], state, theme);
+        draw_state(&mut svg, center, sizes[i], state, &d.class_defs, theme);
     }
 
     // Composite outlines: bounding box of all child state positions, drawn
@@ -220,11 +220,11 @@ fn draw_state(
     (cx, cy): (f64, f64),
     (w, h): (f64, f64),
     s: &State,
+    class_defs: &HashMap<String, Style>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_node_fill = theme.flow_node_fill;
-    let flow_node_stroke = theme.flow_node_stroke;
+    let rs = resolve_style(class_defs, &s.classes, &s.style);
+    let fg = rs.label_fill(theme.fg);
     match s.kind {
         StateKind::Start => {
             svg.circle(cx, cy, PSEUDO_R, "fill=\"#333\" stroke=\"none\"");
@@ -251,10 +251,7 @@ fn draw_state(
             );
             svg.path(
                 &d,
-                &format!(
-                    "fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\"",
-                    theme.flow_node_fill, theme.flow_node_stroke
-                ),
+                &rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5"),
             );
         }
         StateKind::Fork | StateKind::Join => {
@@ -267,14 +264,13 @@ fn draw_state(
             );
         }
         StateKind::Normal => {
+            let base = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
             svg.rect(
                 cx - w / 2.0,
                 cy - h / 2.0,
                 w,
                 h,
-                &format!(
-                    "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"10\""
-                ),
+                &format!("{base} rx=\"10\""),
             );
             svg.text(
                 cx,
@@ -312,7 +308,7 @@ fn draw_transition(
     }
     clipped.push(last);
 
-    let d = polyline_path(&clipped);
+    let d = curve_basis_path(&clipped);
     svg.path(
         &d,
         &format!(
@@ -395,15 +391,6 @@ fn clip_rhombus(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f6
     (c.0 + dx * t, c.1 + dy * t)
 }
 
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
-}
-
 fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     if pts.len() < 2 {
         return pts[0];
@@ -469,5 +456,19 @@ mod tests {
         let d = build("stateDiagram-v2\n[*] --> A\nA --> [*]\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("<circle"));
+    }
+
+    #[test]
+    fn style_applies_to_normal_state() {
+        let d = build("stateDiagram-v2\n[*] --> A\nstyle A fill:#abc\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#abc\""));
+    }
+
+    #[test]
+    fn classdef_applies_to_state() {
+        let d = build("stateDiagram-v2\n[*] --> A\nclassDef foo fill:#abc\nclass A foo\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#abc\""));
     }
 }

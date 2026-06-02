@@ -2,14 +2,15 @@
 //! methods), connected by relationship lines whose markers depend on kind.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use crate::parse::{
-    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, UmlClass, Visibility,
+    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, Style, UmlClass,
+    Visibility,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{escape, fnum, SvgBuilder};
+use super::builder::{curve_basis_path, escape, SvgBuilder};
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -102,7 +103,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     // Classes.
     for (i, c) in d.classes.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_class(&mut svg, center, sizes[i], c, theme);
+        draw_class(&mut svg, center, sizes[i], c, &d.class_defs, theme);
     }
 
     // Namespace frames around their member classes.
@@ -206,22 +207,16 @@ fn draw_class(
     (cx, cy): (f64, f64),
     (w, h): (f64, f64),
     c: &UmlClass,
+    class_defs: &HashMap<String, Style>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_node_fill = theme.flow_node_fill;
-    let flow_node_stroke = theme.flow_node_stroke;
+    let rs = resolve_style(class_defs, &c.classes, &c.style);
+    let fg = rs.label_fill(theme.fg);
+    let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
-    svg.rect(
-        x,
-        y,
-        w,
-        h,
-        &format!(
-            "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"2\""
-        ),
-    );
+    let base = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
+    svg.rect(x, y, w, h, &format!("{base} rx=\"2\""));
 
     let mut cursor = y;
     // Header (with optional stereotype line above the name).
@@ -340,7 +335,7 @@ fn draw_relation(
         Some(m) => format!(" marker-start=\"url(#{m})\""),
         None => String::new(),
     };
-    let d = polyline_path(&clipped);
+    let d = curve_basis_path(&clipped);
     svg.path(
         &d,
         &format!(
@@ -381,15 +376,6 @@ fn style_for(k: ClassRelationKind) -> (&'static str, Option<&'static str>, Optio
         Link => ("", None, None),
         LinkDashed => ("4 3", None, None),
     }
-}
-
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
 }
 
 fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
@@ -506,5 +492,21 @@ mod tests {
         let d = build("classDiagram\nCar *-- Wheel\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("cls-diamond-filled"));
+    }
+
+    #[test]
+    fn style_applies_to_class_box() {
+        let d = build("classDiagram\nAnimal --> Dog\nstyle Animal fill:#abc\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#abc\""));
+    }
+
+    #[test]
+    fn cssclass_applies_classdef() {
+        let d = build(
+            "classDiagram\nAnimal --> Dog\nclassDef foo fill:#abc\ncssClass \"Animal\" foo\n",
+        );
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#abc\""));
     }
 }

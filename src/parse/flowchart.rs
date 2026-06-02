@@ -17,8 +17,10 @@
 use std::collections::HashMap;
 
 use super::ast::{
-    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Subgraph,
+    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style,
+    Subgraph,
 };
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
@@ -56,7 +58,23 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             continue;
         }
 
-        if is_unsupported_statement(line) {
+        if let Some(rest) = line.strip_prefix("style ") {
+            handle_style(rest, &mut diag, &mut nodes_by_id);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            handle_class_def(rest, &mut diag);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("class ") {
+            handle_class_apply(rest, &mut diag, &mut nodes_by_id);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("linkStyle ") {
+            handle_link_style(rest, &mut diag);
+            continue;
+        }
+        if line.starts_with("click ") || line.starts_with("direction ") {
             continue;
         }
 
@@ -156,16 +174,99 @@ fn handle_subgraph_open(
     stack.push(new_idx);
 }
 
-fn is_unsupported_statement(line: &str) -> bool {
-    const PFX: &[&str] = &[
-        "style ",
-        "classDef ",
-        "class ",
-        "click ",
-        "linkStyle ",
-        "direction ",
-    ];
-    PFX.iter().any(|k| line.starts_with(k))
+/// `style <id> <props>` — inline style on a single node.
+fn handle_style(rest: &str, diag: &mut FlowchartDiagram, nodes_by_id: &mut HashMap<String, usize>) {
+    let Some((id, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let style = parse_style_props(props);
+    let idx = *nodes_by_id.entry(id.trim().to_string()).or_insert_with(|| {
+        diag.nodes.push(FlowNode {
+            id: id.trim().to_string(),
+            text: id.trim().to_string(),
+            shape: NodeShape::Rect,
+            classes: Vec::new(),
+            style: Style::new(),
+        });
+        diag.nodes.len() - 1
+    });
+    diag.nodes[idx].style = style;
+}
+
+/// `classDef <name>[,<name2>] <props>` — define one or more style classes.
+fn handle_class_def(rest: &str, diag: &mut FlowchartDiagram) {
+    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let style = parse_style_props(props);
+    for name in names.split(',') {
+        let name = name.trim();
+        if !name.is_empty() {
+            diag.class_defs.insert(name.to_string(), style.clone());
+        }
+    }
+}
+
+/// `class <id1>,<id2> <className>` — apply a class to nodes.
+fn handle_class_apply(
+    rest: &str,
+    diag: &mut FlowchartDiagram,
+    nodes_by_id: &mut HashMap<String, usize>,
+) {
+    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+        return;
+    };
+    let class_name = class_name.trim();
+    if class_name.is_empty() {
+        return;
+    }
+    for id in ids.split(',') {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let idx = *nodes_by_id.entry(id.to_string()).or_insert_with(|| {
+            diag.nodes.push(FlowNode {
+                id: id.to_string(),
+                text: id.to_string(),
+                shape: NodeShape::Rect,
+                classes: Vec::new(),
+                style: Style::new(),
+            });
+            diag.nodes.len() - 1
+        });
+        let classes = &mut diag.nodes[idx].classes;
+        if !classes.iter().any(|c| c == class_name) {
+            classes.push(class_name.to_string());
+        }
+    }
+}
+
+/// `linkStyle <default|idx-list> [interpolate <curve>] <props>` — style edges
+/// by their definition index. The optional `interpolate <curve>` clause is
+/// accepted but ignored (curve is fixed to basis).
+fn handle_link_style(rest: &str, diag: &mut FlowchartDiagram) {
+    let Some((selector, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let mut props = props.trim();
+    if let Some(after) = props.strip_prefix("interpolate ") {
+        // Drop `interpolate <curve>`; the remaining (if any) are real props.
+        props = after
+            .trim()
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, p)| p);
+    }
+    let style = parse_style_props(props);
+    if selector == "default" {
+        diag.link_style_default = style;
+        return;
+    }
+    for idx in selector.split(',') {
+        if let Ok(i) = idx.trim().parse::<usize>() {
+            diag.edge_styles.insert(i, style.clone());
+        }
+    }
 }
 
 fn parse_statement(
@@ -281,11 +382,7 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
             (false, "/]") => NodeShape::TrapezoidAlt,
             _ => NodeShape::Rect,
         };
-        return Ok(FlowNode {
-            id,
-            text: unquote(text.trim()),
-            shape,
-        });
+        return Ok(finish_node(id, unquote(text.trim()), shape, sc));
     }
     for (open, close, shape) in SHAPES {
         if sc.try_consume(open) {
@@ -294,18 +391,29 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
                 line: line_no,
             })?;
             let _ = sc.try_consume(close);
-            return Ok(FlowNode {
-                id,
-                text: unquote(text.trim()),
-                shape: *shape,
-            });
+            return Ok(finish_node(id, unquote(text.trim()), *shape, sc));
         }
     }
-    Ok(FlowNode {
-        text: id.clone(),
+    let text = id.clone();
+    Ok(finish_node(id, text, NodeShape::Rect, sc))
+}
+
+/// Build a node, consuming an optional `:::class` shorthand that follows the
+/// id/shape (no whitespace allowed before `:::`, per Mermaid).
+fn finish_node(id: String, text: String, shape: NodeShape, sc: &mut Scanner<'_>) -> FlowNode {
+    let mut classes = Vec::new();
+    if sc.try_consume(":::") {
+        if let Some(name) = sc.read_ident() {
+            classes.push(name);
+        }
+    }
+    FlowNode {
         id,
-        shape: NodeShape::Rect,
-    })
+        text,
+        shape,
+        classes,
+        style: Style::new(),
+    }
 }
 
 fn unquote(s: &str) -> String {
@@ -421,6 +529,12 @@ fn register_node(
         if new_has_explicit {
             existing.text = node.text;
             existing.shape = node.shape;
+        }
+        // Merge any classes from a `:::` shorthand on this re-reference.
+        for c in node.classes {
+            if !existing.classes.contains(&c) {
+                existing.classes.push(c);
+            }
         }
         return false;
     }
@@ -609,11 +723,90 @@ mod tests {
     }
 
     #[test]
-    fn skips_unsupported() {
+    fn skips_click() {
+        let d = parse("flowchart TD\nA-->B\nclick A href \"http://x\"\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+    }
+
+    fn node<'a>(d: &'a FlowchartDiagram, id: &str) -> &'a FlowNode {
+        d.nodes.iter().find(|n| n.id == id).unwrap()
+    }
+
+    #[test]
+    fn style_directive_sets_inline_style() {
+        let d = parse("flowchart TD\nA-->B\nstyle A fill:#f9f,stroke:#333\n").unwrap();
+        assert_eq!(
+            node(&d, "A").style,
+            vec![
+                ("fill".to_string(), "#f9f".to_string()),
+                ("stroke".to_string(), "#333".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn classdef_and_class_apply() {
+        let d = parse("flowchart TD\nA-->B\nclassDef foo fill:#0f0,stroke:#333\nclass A foo\n")
+            .unwrap();
+        assert_eq!(d.class_defs["foo"].len(), 2);
+        assert_eq!(node(&d, "A").classes, vec!["foo".to_string()]);
+    }
+
+    #[test]
+    fn classdef_multiple_names() {
+        let d = parse("flowchart TD\nA-->B\nclassDef a,b fill:#111\n").unwrap();
+        assert!(d.class_defs.contains_key("a"));
+        assert!(d.class_defs.contains_key("b"));
+    }
+
+    #[test]
+    fn classdef_default_present() {
+        let d = parse("flowchart TD\nA-->B\nclassDef default fill:#eee\n").unwrap();
+        assert!(d.class_defs.contains_key("default"));
+    }
+
+    #[test]
+    fn triple_colon_shorthand() {
+        let d = parse("flowchart TD\nA:::foo --> B\n").unwrap();
+        assert_eq!(node(&d, "A").classes, vec!["foo".to_string()]);
+        assert_eq!(d.edges.len(), 1);
+    }
+
+    #[test]
+    fn triple_colon_keeps_shape_and_text() {
+        let d = parse("flowchart TD\nA[hello]:::foo --> B\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.classes, vec!["foo".to_string()]);
+        assert_eq!(a.text, "hello");
+        assert_eq!(a.shape, NodeShape::Rect);
+    }
+
+    #[test]
+    fn link_style_by_index_and_default() {
         let d = parse(
-            "flowchart TD\nA-->B\nstyle A fill:#f9f\nclassDef foo fill:#0f0\nclass A foo\nclick A href \"http://x\"\n",
+            "flowchart TD\nA-->B\nB-->C\nlinkStyle 0 stroke:#ff3,stroke-width:4px\nlinkStyle default stroke:#000\n",
         )
         .unwrap();
-        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edge_styles[&0].len(), 2);
+        assert_eq!(
+            d.link_style_default,
+            vec![("stroke".to_string(), "#000".to_string())]
+        );
+    }
+
+    #[test]
+    fn link_style_multiple_indices() {
+        let d = parse("flowchart TD\nA-->B\nB-->C\nlinkStyle 0,1 stroke:#abc\n").unwrap();
+        assert!(d.edge_styles.contains_key(&0));
+        assert!(d.edge_styles.contains_key(&1));
+    }
+
+    #[test]
+    fn link_style_interpolate_is_ignored() {
+        let d = parse("flowchart TD\nA-->B\nlinkStyle 0 interpolate basis stroke:#abc\n").unwrap();
+        assert_eq!(
+            d.edge_styles[&0],
+            vec![("stroke".to_string(), "#abc".to_string())]
+        );
     }
 }

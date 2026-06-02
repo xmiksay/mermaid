@@ -32,6 +32,7 @@ mod requirement;
 mod sankey;
 mod sequence;
 mod state;
+mod style;
 mod theme;
 mod timeline;
 mod treemap;

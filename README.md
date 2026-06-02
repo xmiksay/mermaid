@@ -61,6 +61,8 @@ let svg = render_with(source, &custom)?;
 
 ## Supported diagrams
 
+23 diagram types are supported:
+
 | Type | Header keyword(s) | Notable features |
 |---|---|---|
 | Pie | `pie` | `showData`, title, entries |
@@ -70,6 +72,22 @@ let svg = render_with(source, &custom)?;
 | Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`) |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
 | Gantt | `gantt` | sections, `excludes` (weekends), `todayMarker` |
+| Journey | `journey` | sections, tasks with scores and actors |
+| Timeline | `timeline` | sections, time periods with multiple events |
+| Sankey | `sankey-beta`, `sankey` | weighted source→target flows |
+| Quadrant | `quadrantChart` | axes, labelled quadrants, plotted points |
+| XY chart | `xychart-beta`, `xychart` | bar and line series, x/y axes |
+| Radar | `radar-beta`, `radar` | multiple axes and curves |
+| Packet | `packet-beta`, `packet` | byte/bit field ranges |
+| Mindmap | `mindmap` | nested nodes, node shapes |
+| Git graph | `gitGraph` | commits, branches, merges, checkouts |
+| Requirement | `requirementDiagram` | requirements, elements, relationships |
+| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems, boundaries, relations |
+| Block | `block-beta`, `block` | grid layout, spanning blocks, edges |
+| Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
+| Kanban | `kanban` | columns and cards |
+| Treemap | `treemap-beta`, `treemap` | nested weighted rectangles |
+| ZenUML | `zenuml` | rendered via the sequence renderer |
 
 ## API
 
