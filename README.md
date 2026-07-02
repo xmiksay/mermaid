@@ -29,11 +29,16 @@ The crate also installs a `mermaid-svg` binary:
 ```bash
 cargo install mermaid-svg
 
-mermaid-svg diagram.mmd diagram.svg              # files
-mermaid-svg < diagram.mmd > diagram.svg          # stdin/stdout
-mermaid-svg --theme dark diagram.mmd > out.svg   # pick a theme
+mermaid-svg diagram.mmd diagram.svg               # files
+mermaid-svg < diagram.mmd > diagram.svg           # stdin/stdout
+mermaid-svg --theme dark diagram.mmd > out.svg    # pick a theme
+mermaid-svg -f 'Inter, sans-serif' diagram.mmd    # override the font family
+mermaid-svg --font-size 16 diagram.mmd            # override the base font size
 echo 'pie\n"A":1\n"B":2' | mermaid-svg
 ```
+
+Options: `-t/--theme <NAME>`, `-f/--font <FAMILY>`, `--font-size <PX>` (backed by
+`Theme::with_font` / `Theme::with_font_size`).
 
 Run `mermaid-svg --help` for the full usage.
 
@@ -54,10 +59,14 @@ Custom themes: construct a [`Theme`] with the colors you want
 let custom = Theme {
     flow_node_fill: "#fffbe6",
     flow_node_stroke: "#caa400",
-    ..Theme::default()
+    ..Theme::default_theme()
 };
 let svg = render_with(source, &custom)?;
 ```
+
+The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
+`Theme::forest()`, and `Theme::neutral()`; `Theme::with_font(family)` and
+`Theme::with_font_size(px)` return a copy with the font overridden.
 
 ## Supported diagrams
 
@@ -106,6 +115,21 @@ These work on every diagram type:
   to plain text.
 
 Note: pie charts drop slices under 1% of the total, matching upstream.
+
+### Styling (flowchart, class, state)
+
+Inline CSS-style overrides are supported and resolved into concrete SVG
+attributes (`fill`, `stroke`, `stroke-width`, `stroke-dasharray`, text `color`,
+`font-size`):
+
+- **`style <id> fill:#f9f,stroke:#333,stroke-width:4px`** — style one node.
+- **`classDef <name> …` + `class <id> <name>`** — define a reusable class and
+  attach it (multiple classes layer in order).
+- **`<id>:::<name>`** — shorthand class attachment inline on a node.
+- **`linkStyle <n> stroke:#f00,…`** — style the n-th edge.
+
+Layering is `default` classDef → each named class in order → the node's inline
+`style` (later layers win per property).
 
 ## API
 
