@@ -384,6 +384,10 @@ pub struct ClassRelation {
     pub to: String,
     pub kind: ClassRelationKind,
     pub label: Option<String>,
+    /// Multiplicity on the `from` end, e.g. `"1"` in `A "1" --> "*" B`.
+    pub from_card: Option<String>,
+    /// Multiplicity on the `to` end, e.g. `"*"` in `A "1" --> "*" B`.
+    pub to_card: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
