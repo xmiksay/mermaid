@@ -203,6 +203,10 @@ pub enum ArrowKind {
     Cross,
     /// `-)` / `--)` open arrow (async)
     Open,
+    /// `<<->>` solid line, filled arrowhead at both ends (bidirectional)
+    BiSolidArrow,
+    /// `<<-->>` dashed line, filled arrowhead at both ends (bidirectional)
+    BiDashedArrow,
 }
 
 // ---- flowchart -------------------------------------------------------------

@@ -5,7 +5,8 @@
 //!   * `title <text>`.
 //!   * `participant <id> [as <alias>]`, `actor <id> [as <alias>]`.
 //!   * Messages: `from <arrow> to : text` with arrows
-//!     `->`, `->>`, `-->`, `-->>`, `-x`, `--x`, `-)`, `--)`.
+//!     `->`, `->>`, `-->`, `-->>`, `-x`, `--x`, `-)`, `--)`, and the
+//!     bidirectional forms `<<->>`, `<<-->>`.
 //!   * `autonumber` (sets a per-diagram flag).
 //!   * `activate <id>` / `deactivate <id>`, plus the `->>+`/`-->>-` arrow
 //!     activation shorthand.
@@ -25,6 +26,8 @@ use super::ast::{
 use super::{strip_comment, ParseError};
 
 const ARROWS: &[(&str, ArrowKind)] = &[
+    ("<<-->>", ArrowKind::BiDashedArrow),
+    ("<<->>", ArrowKind::BiSolidArrow),
     ("-->>", ArrowKind::DashedArrow),
     ("-->", ArrowKind::Dashed),
     ("--x", ArrowKind::Cross),
@@ -691,12 +694,26 @@ mod tests {
             ("A--xB: t", ArrowKind::Cross),
             ("A-)B: t", ArrowKind::Open),
             ("A--)B: t", ArrowKind::Open),
+            ("A<<->>B: t", ArrowKind::BiSolidArrow),
+            ("A<<-->>B: t", ArrowKind::BiDashedArrow),
         ];
         for (msg, expected) in cases {
             let s = format!("sequenceDiagram\n{msg}\n");
             let d = parse(&s).unwrap();
             assert_eq!(first_msg(&d).arrow, expected, "case: {msg}");
         }
+    }
+
+    #[test]
+    fn bidirectional_arrow_no_phantom_participant() {
+        // `Alice<<->>Bob` is one message between two participants, not a
+        // phantom `Alice<<` participant (issue #57).
+        let d = parse("sequenceDiagram\nAlice<<->>Bob: hi\n").unwrap();
+        assert_eq!(d.participants.len(), 2);
+        let m = first_msg(&d);
+        assert_eq!(m.from, "Alice");
+        assert_eq!(m.to, "Bob");
+        assert_eq!(m.arrow, ArrowKind::BiSolidArrow);
     }
 
     #[test]
