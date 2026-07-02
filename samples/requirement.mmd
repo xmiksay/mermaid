@@ -21,3 +21,4 @@ element user_doc {
 test_entity - satisfies -> test_req
 user_doc - traces -> test_req
 test_req - derives -> func_req
+func_req <- contains - test_entity

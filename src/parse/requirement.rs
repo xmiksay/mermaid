@@ -14,15 +14,22 @@
 //!     type: simulation
 //!     docref: doc.md
 //! }
-//! <name> - <kind> -> <name>
+//! <src> - <kind> -> <dst>
+//! <dst> <- <kind> - <src>
+//! direction LR
+//! classDef <name> <props>
+//! class <name> <class>
+//! style <name> <props>
 //! ```
 //!
 //! Kinds: `contains`, `copies`, `derives`, `satisfies`, `verifies`,
-//! `refines`, `traces`.
+//! `refines`, `traces` (matched case-insensitively, like upstream).
 
 use super::ast::{
-    ReqElement, ReqRelation, ReqRelationKind, Requirement, RequirementDiagram, RequirementKind,
+    FlowDirection, ReqElement, ReqRelation, ReqRelationKind, Requirement, RequirementDiagram,
+    RequirementKind,
 };
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
@@ -45,6 +52,28 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
                 });
             }
             header_seen = true;
+            continue;
+        }
+
+        // v11 statements: consume them instead of falling through to the
+        // relation parser (which would hard-error the whole diagram).
+        if let Some(rest) = line.strip_prefix("direction ") {
+            d.direction = parse_direction(rest.trim()).ok_or_else(|| ParseError::Syntax {
+                message: format!("unknown direction: '{}'", rest.trim()),
+                line: line_no,
+            })?;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            handle_class_def(rest, &mut d);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("class ") {
+            handle_class_apply(rest, &mut d);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("style ") {
+            handle_style(rest, &mut d);
             continue;
         }
 
@@ -94,16 +123,73 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
 }
 
 fn parse_req_kind(line: &str) -> Option<RequirementKind> {
-    let token = line.split_whitespace().next()?;
-    Some(match token {
+    // Upstream matches these keywords case-insensitively.
+    let token = line.split_whitespace().next()?.to_ascii_lowercase();
+    Some(match token.as_str() {
         "requirement" => RequirementKind::Requirement,
-        "functionalRequirement" => RequirementKind::Functional,
-        "interfaceRequirement" => RequirementKind::Interface,
-        "performanceRequirement" => RequirementKind::Performance,
-        "physicalRequirement" => RequirementKind::Physical,
-        "designConstraint" => RequirementKind::DesignConstraint,
+        "functionalrequirement" => RequirementKind::Functional,
+        "interfacerequirement" => RequirementKind::Interface,
+        "performancerequirement" => RequirementKind::Performance,
+        "physicalrequirement" => RequirementKind::Physical,
+        "designconstraint" => RequirementKind::DesignConstraint,
         _ => return None,
     })
+}
+
+fn parse_direction(s: &str) -> Option<FlowDirection> {
+    match s {
+        "TD" | "TB" => Some(FlowDirection::TopDown),
+        "BT" => Some(FlowDirection::BottomTop),
+        "LR" => Some(FlowDirection::LeftRight),
+        "RL" => Some(FlowDirection::RightLeft),
+        _ => None,
+    }
+}
+
+/// `classDef <name>[,<name2>] <props>` — define one or more style classes.
+fn handle_class_def(rest: &str, d: &mut RequirementDiagram) {
+    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let style = parse_style_props(props);
+    for name in names.split(',') {
+        let name = name.trim();
+        if !name.is_empty() {
+            d.class_defs.insert(name.to_string(), style.clone());
+        }
+    }
+}
+
+/// `class <id1>,<id2> <className>` — apply a class to requirements/elements.
+fn handle_class_apply(rest: &str, d: &mut RequirementDiagram) {
+    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+        return;
+    };
+    let class_name = class_name.trim();
+    if class_name.is_empty() {
+        return;
+    }
+    for id in ids.split(',') {
+        let id = id.trim();
+        if !id.is_empty() {
+            d.node_classes
+                .entry(id.to_string())
+                .or_default()
+                .push(class_name.to_string());
+        }
+    }
+}
+
+/// `style <id> <props>` — inline style on a single requirement/element.
+fn handle_style(rest: &str, d: &mut RequirementDiagram) {
+    let Some((id, props)) = rest.trim().split_once(char::is_whitespace) else {
+        return;
+    };
+    let id = id.trim();
+    if !id.is_empty() {
+        d.node_styles
+            .insert(id.to_string(), parse_style_props(props));
+    }
 }
 
 fn kind_token_len(line: &str) -> usize {
@@ -175,22 +261,41 @@ fn consume_element_body<'a, I: Iterator<Item = (usize, &'a str)>>(
 }
 
 fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError> {
-    // a - kind -> b
-    let parts: Vec<&str> = line.split("->").collect();
-    if parts.len() != 2 {
-        return Err(ParseError::Syntax {
-            message: format!("expected 'a - kind -> b': '{line}'"),
+    // Two documented forms, `from`→`to` order preserved for both:
+    //   forward: {src} - {kind} -> {dst}
+    //   reverse: {dst} <- {kind} - {src}
+    if let Some((dst, rest)) = line.split_once("<-") {
+        let (kind_str, src) = rest.rsplit_once('-').ok_or_else(|| ParseError::Syntax {
+            message: format!("expected 'b <- kind - a': '{line}'"),
             line: line_no,
+        })?;
+        let kind = parse_relation_kind(kind_str, line_no)?;
+        return Ok(ReqRelation {
+            from: src.trim().to_string(),
+            to: dst.trim().to_string(),
+            kind,
         });
     }
-    let left = parts[0];
-    let to = parts[1].trim().to_string();
+
+    let (left, to) = line.split_once("->").ok_or_else(|| ParseError::Syntax {
+        message: format!("expected 'a - kind -> b': '{line}'"),
+        line: line_no,
+    })?;
     let (from, kind_str) = left.rsplit_once('-').ok_or_else(|| ParseError::Syntax {
         message: format!("expected 'a - kind -> b': '{line}'"),
         line: line_no,
     })?;
     let from = from.trim().trim_end_matches('-').trim().to_string();
-    let kind = match kind_str.trim() {
+    let kind = parse_relation_kind(kind_str, line_no)?;
+    Ok(ReqRelation {
+        from,
+        to: to.trim().to_string(),
+        kind,
+    })
+}
+
+fn parse_relation_kind(kind_str: &str, line_no: usize) -> Result<ReqRelationKind, ParseError> {
+    Ok(match kind_str.trim().to_ascii_lowercase().as_str() {
         "contains" => ReqRelationKind::Contains,
         "copies" => ReqRelationKind::Copies,
         "derives" => ReqRelationKind::Derives,
@@ -204,8 +309,7 @@ fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError>
                 line: line_no,
             })
         }
-    };
-    Ok(ReqRelation { from, to, kind })
+    })
 }
 
 #[cfg(test)]
@@ -222,5 +326,40 @@ mod tests {
         assert_eq!(d.elements.len(), 1);
         assert_eq!(d.relations.len(), 1);
         assert_eq!(d.relations[0].kind, ReqRelationKind::Satisfies);
+    }
+
+    #[test]
+    fn reverse_relation_swaps_endpoints() {
+        // `dst <- kind - src` yields the same edge as `src - kind -> dst`.
+        let src = "requirementDiagram\ntest_entity2 <- copies - test_entity\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.relations.len(), 1);
+        let rel = &d.relations[0];
+        assert_eq!(rel.from, "test_entity");
+        assert_eq!(rel.to, "test_entity2");
+        assert_eq!(rel.kind, ReqRelationKind::Copies);
+    }
+
+    #[test]
+    fn case_insensitive_kinds() {
+        let src =
+            "requirementDiagram\nfunctionalrequirement fr {\n    id: 1\n}\nfr - CONTAINS -> fr\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.requirements[0].kind, RequirementKind::Functional);
+        assert_eq!(d.relations[0].kind, ReqRelationKind::Contains);
+    }
+
+    #[test]
+    fn v11_statements_are_consumed() {
+        let src = "requirementDiagram\ndirection LR\nrequirement r {\n    id: 1\n}\nelement e {\n    type: sim\n}\nclassDef hot fill:#f00,stroke:#900\nclass r hot\nstyle e fill:#0f0\ne - satisfies -> r\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.direction, FlowDirection::LeftRight);
+        assert_eq!(d.class_defs.get("hot").unwrap()[0].0, "fill");
+        assert_eq!(d.node_classes.get("r").unwrap(), &vec!["hot".to_string()]);
+        assert_eq!(
+            d.node_styles.get("e").unwrap()[0],
+            ("fill".into(), "#0f0".into())
+        );
+        assert_eq!(d.relations.len(), 1);
     }
 }

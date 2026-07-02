@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 
+use crate::parse::ast::FlowDirection;
 use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -90,10 +92,16 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         .map(|(i, b)| (b.name.clone(), i as NodeId))
         .collect();
 
+    // For LR/RL the sugiyama layout still runs top-down; we swap node sizes
+    // going in and transpose coordinates coming out (same trick as flowchart).
+    let dir = d.direction;
+    let horizontal = matches!(dir, FlowDirection::LeftRight | FlowDirection::RightLeft);
+
     let mut g = Graph::default();
     for (i, b) in boxes.iter().enumerate() {
         g.nodes.push(i as NodeId);
-        g.node_size.insert(i as NodeId, (b.w, b.h));
+        let size = if horizontal { (b.h, b.w) } else { (b.w, b.h) };
+        g.node_size.insert(i as NodeId, size);
     }
     for rel in &d.relations {
         if let (Some(&u), Some(&v)) = (name_to_id.get(&rel.from), name_to_id.get(&rel.to)) {
@@ -107,13 +115,25 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         ..LayoutConfig::default()
     };
     let layout = layout_with(&g, &cfg).unwrap_or_default();
+    let raw_h = layout.height;
 
     let origin = (PAD, PAD);
+    let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
+        let (tx, ty) = match dir {
+            FlowDirection::TopDown => (sx, sy),
+            FlowDirection::BottomTop => (sx, raw_h - sy),
+            FlowDirection::LeftRight => (sy, sx),
+            FlowDirection::RightLeft => (raw_h - sy, sx),
+        };
+        (origin.0 + tx, origin.1 + ty)
+    };
+
     for (i, b) in boxes.iter_mut().enumerate() {
         let id = i as NodeId;
-        if let Some(&(cx, cy)) = layout.node_pos.get(&id) {
-            b.x = origin.0 + cx - b.w / 2.0;
-            b.y = origin.1 + cy - b.h / 2.0;
+        if let Some(&pos) = layout.node_pos.get(&id) {
+            let (cx, cy) = transform(pos);
+            b.x = cx - b.w / 2.0;
+            b.y = cy - b.h / 2.0;
         } else {
             b.x = origin.0;
             b.y = origin.1;
@@ -139,7 +159,11 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     svg.defs_raw(&format!(
         "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
          markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\">\
-         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{stroke}\"/></marker>"
+         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{stroke}\"/></marker>\
+         <marker id=\"req-contains\" viewBox=\"0 0 20 20\" refX=\"19\" refY=\"10\" \
+         markerWidth=\"18\" markerHeight=\"18\" orient=\"auto-start-reverse\">\
+         <circle cx=\"10\" cy=\"10\" r=\"9\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\"/>\
+         <path d=\"M1,10 L19,10 M10,1 L10,19\" stroke=\"{stroke}\" stroke-width=\"1\"/></marker>"
     ));
 
     let by_name: HashMap<String, (f64, f64, f64, f64)> = boxes
@@ -164,8 +188,8 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
                     .map(|raw| {
                         let mut v: Vec<(f64, f64)> = Vec::with_capacity(raw.len());
                         v.push((acx, acy));
-                        for (px, py) in &raw[1..raw.len().saturating_sub(1)] {
-                            v.push((origin.0 + *px, origin.1 + *py));
+                        for &p in &raw[1..raw.len().saturating_sub(1)] {
+                            v.push(transform(p));
                         }
                         v.push((bcx, bcy));
                         v
@@ -206,10 +230,17 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         } else {
             ""
         };
+        // `contains` uses upstream's crossed-circle containment head; the rest
+        // use a plain arrowhead.
+        let marker = if rel.kind == ReqRelationKind::Contains {
+            "req-contains"
+        } else {
+            "req-arrow"
+        };
         svg.path(
             &curve_basis_path(&clipped),
             &format!(
-                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#req-arrow)\""
+                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
             ),
         );
 
@@ -233,24 +264,29 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         );
     }
 
+    let no_classes: Vec<String> = Vec::new();
+    let no_style = crate::parse::ast::Style::new();
     for b in &boxes {
-        svg.rect(
-            b.x,
-            b.y,
-            b.w,
-            b.h,
-            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-        );
+        let classes = d.node_classes.get(&b.name).unwrap_or(&no_classes);
+        let inline = d.node_styles.get(&b.name).unwrap_or(&no_style);
+        let rs = resolve_style(&d.class_defs, classes, inline);
+        let box_stroke = rs.stroke_or(stroke).to_string();
+        let text_fill = rs.label_fill(fg).to_string();
+        svg.rect(b.x, b.y, b.w, b.h, &rs.shape_attrs(fill, stroke, "1.5"));
         svg.text(
             b.x + b.w / 2.0,
             b.y + 16.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
+            &format!(
+                "text-anchor=\"middle\" fill=\"{text_fill}\" font-size=\"11\" font-style=\"italic\""
+            ),
             &b.title_kind,
         );
         svg.text(
             b.x + b.w / 2.0,
             b.y + 30.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
+            &format!(
+                "text-anchor=\"middle\" fill=\"{text_fill}\" font-size=\"13\" font-weight=\"bold\""
+            ),
             &b.name,
         );
         svg.line(
@@ -258,20 +294,20 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             b.y + BOX_H_HEAD,
             b.x + b.w,
             b.y + BOX_H_HEAD,
-            &format!("stroke=\"{stroke}\" stroke-width=\"1\""),
+            &format!("stroke=\"{box_stroke}\" stroke-width=\"1\""),
         );
         for (i, (k, v)) in b.rows.iter().enumerate() {
             let ry = b.y + BOX_H_HEAD + i as f64 * ROW_H + 14.0;
             svg.text(
                 b.x + 8.0,
                 ry,
-                &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
+                &format!("fill=\"{text_fill}\" font-size=\"11\" font-weight=\"bold\""),
                 k,
             );
             svg.text(
                 b.x + 70.0,
                 ry,
-                &format!("fill=\"{fg}\" font-size=\"11\""),
+                &format!("fill=\"{text_fill}\" font-size=\"11\""),
                 &truncate(v, 22),
             );
         }
@@ -367,11 +403,46 @@ mod tests {
                 to: "req1".into(),
                 kind: ReqRelationKind::Satisfies,
             }],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">req1<"));
         assert!(svg.contains(">e1<"));
         assert!(svg.contains("req-arrow"));
+    }
+
+    #[test]
+    fn contains_uses_containment_marker() {
+        let d = RequirementDiagram {
+            requirements: vec![
+                Requirement {
+                    kind: RequirementKind::Requirement,
+                    name: "a".into(),
+                    id: None,
+                    text: None,
+                    risk: None,
+                    verifymethod: None,
+                },
+                Requirement {
+                    kind: RequirementKind::Requirement,
+                    name: "b".into(),
+                    id: None,
+                    text: None,
+                    risk: None,
+                    verifymethod: None,
+                },
+            ],
+            elements: vec![],
+            relations: vec![ReqRelation {
+                from: "a".into(),
+                to: "b".into(),
+                kind: ReqRelationKind::Contains,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("id=\"req-contains\""));
+        assert!(svg.contains("marker-end=\"url(#req-contains)\""));
     }
 }

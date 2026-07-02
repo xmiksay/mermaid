@@ -397,6 +397,17 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `$c4ShapeInRow`/`$c4BoundaryInRow` override the row-flow wrap counts
   (`flow_layout`'s `shape_in_row`/`boundary_in_row`). `C4Relation.direction`
   (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout.
+- requirementDiagram (`src/parse/requirement.rs`) accepts both relation
+  directions — forward `src - kind -> dst` and reverse `dst <- kind - src`
+  (endpoints swapped so `from`→`to` order, hence layout, is preserved). Kind
+  and requirement keywords are matched case-insensitively. The v11 statements
+  `direction TB/BT/LR/RL`, `classDef`, `class`, and `style` are consumed
+  instead of hard-erroring: `direction` fills `RequirementDiagram.direction`
+  (drives the same size-swap/transpose the flowchart uses), while
+  `classDef`/`class`/`style` fill `class_defs`/`node_classes`/`node_styles`
+  (reusing `parse/style.rs` + `svg/style.rs::resolve_style`). The `contains`
+  relation draws upstream's crossed-circle containment head (`req-contains`
+  marker) instead of the plain arrow.
 - gitGraph header (`src/parse/gitgraph.rs`) tolerates a trailing colon on both
   the keyword and the direction token — `gitGraph:`, `gitGraph TB:`,
   `gitGraph BT:` all parse (the dispatcher in `src/parse/mod.rs` also trims a
