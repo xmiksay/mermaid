@@ -135,6 +135,13 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 - Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick) and `head`
   (None/Arrow/Circle/Cross) — covers `-->`, `---`, `-.->`, `==>`, `--o`,
   `--x` plus all no-head variants.
+- Flowchart edge labels come in two forms: the pipe form `A -->|text| B` and
+  the inline form `A -- text --> B` (also `-. text .->`, `== text ==>`). The
+  inline form is recognized in `parse_arrow` via `read_inline_label`: a
+  two-char opener (`--`/`-.`/`==`) with no head, followed by text and a
+  matching closer, captures the text as the edge label instead of a chain
+  node. A head-less solid/thick closer needs ≥3 connectors so a plain
+  `A -- B -- C` chain is left untouched.
 - `A & B --> C & D` produces 4 edges (cross product) — multi-source/target.
 - Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
   nesting. The renderer draws a dashed bounding rect around the group.
