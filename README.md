@@ -78,7 +78,7 @@ The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
 | Sequence | `sequenceDiagram` | participants/actors, `autonumber [start [step]]`/`off`, `activate`/`deactivate`, nested `alt`/`par`/`critical`/`loop`/`opt`/`break`, `rect <color>` bands, notes |
 | Flowchart | `flowchart`, `graph` | directions TD/BT/LR/RL, all edge styles (`-->`, `---`, `-.->`, `==>`, `--o`, `--x` + no-head variants), invisible links (`~~~`), bidirectional edges (`<-->`, `o--o`, `x--x`), multi-source/target (`A & B --> C & D`), nested `subgraph`, `click` links/callbacks, v11 `A@{ shape: …, label: … }` node syntax, frontmatter `title` |
 | State | `stateDiagram`, `stateDiagram-v2` | composite states with parallel regions (`--`), one-line and multi-line notes |
-| Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`) |
+| Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`), notes, standalone annotations, `Name["label"]`, `click`/`link`/`callback` |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
 | Gantt | `gantt` | sections, task end as duration/end-date/`until <id>`, duration-only tasks, `excludes` (weekends), `todayMarker` |
 | Journey | `journey` | sections, tasks with scores and actors |

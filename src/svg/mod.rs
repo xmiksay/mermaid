@@ -22,6 +22,7 @@ mod er;
 mod flowchart;
 mod gantt;
 mod gitgraph;
+mod interact;
 mod journey;
 mod kanban;
 mod label;

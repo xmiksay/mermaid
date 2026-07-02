@@ -409,17 +409,33 @@ pub struct ClassDiagram {
     pub namespaces: Vec<Namespace>,
     /// `classDef <name> …` definitions, keyed by class name.
     pub class_defs: HashMap<String, Style>,
+    /// `note "…"` (free) and `note for <Class> "…"` (attached) annotations.
+    pub notes: Vec<ClassNote>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UmlClass {
     pub name: String,
+    /// Display label from `class Name["label"]`; falls back to `name`.
+    pub label: Option<String>,
     pub stereotype: Option<String>,
     pub members: Vec<ClassMember>,
     /// Style class names applied via `cssClass`/`:::`.
     pub classes: Vec<String>,
     /// Inline `style <Name> …` properties.
     pub style: Style,
+    /// Interaction bound via `click`/`link`/`callback`, if any. Reuses the
+    /// flowchart [`ClickAction`] model.
+    pub click: Option<ClickAction>,
+}
+
+/// A `note "text"` (free-floating) or `note for <Class> "text"` (attached to a
+/// class) annotation — a yellow sticky box in the rendered diagram.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassNote {
+    /// Class the note is attached to (`note for X …`); `None` is a free note.
+    pub target: Option<String>,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
