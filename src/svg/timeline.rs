@@ -3,7 +3,7 @@
 
 use crate::parse::TimelineDiagram;
 
-use super::builder::{escape, SvgBuilder};
+use super::builder::{SvgBuilder, LABEL_LINE_H};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -14,6 +14,34 @@ const AXIS_Y_OFFSET: f64 = 60.0;
 const EVENT_BOX_H: f64 = 36.0;
 const EVENT_GAP: f64 = 8.0;
 const EVENT_BOX_W: f64 = 120.0;
+/// Approx. chars that fit on one line inside an event box at font-size 12.
+const EVENT_WRAP: usize = 18;
+
+/// Word-wrap an event label to lines of at most `EVENT_WRAP` chars, breaking on
+/// spaces. Upstream wraps long events instead of truncating them. A single word
+/// longer than the budget is kept intact on its own line rather than hard-split.
+fn wrap_event(text: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= EVENT_WRAP {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(word);
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
 
 pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
@@ -31,9 +59,20 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let has_named_section = d.sections.iter().any(|s| s.name.is_some());
     let band_h = if has_named_section { SECTION_BAND } else { 0.0 };
 
+    // Tallest event drives a uniform box height so wrapped events don't overflow.
+    let max_lines = d
+        .sections
+        .iter()
+        .flat_map(|s| s.periods.iter().flat_map(|p| p.events.iter()))
+        .map(|ev| wrap_event(ev).len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let event_box_h = EVENT_BOX_H + (max_lines as f64 - 1.0) * LABEL_LINE_H;
+
     let chart_w = (total_periods.max(1) as f64) * PERIOD_GAP;
     let width = PAD * 2.0 + chart_w;
-    let events_h = max_events as f64 * (EVENT_BOX_H + EVENT_GAP) + EVENT_GAP;
+    let events_h = max_events as f64 * (event_box_h + EVENT_GAP) + EVENT_GAP;
     let height = PAD * 2.0 + title_h + band_h + AXIS_Y_OFFSET + events_h + 30.0;
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
@@ -109,29 +148,20 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
             );
 
             for (ei, ev) in period.events.iter().enumerate() {
-                let ey = axis_y + 36.0 + ei as f64 * (EVENT_BOX_H + EVENT_GAP);
+                let ey = axis_y + 36.0 + ei as f64 * (event_box_h + EVENT_GAP);
                 let ex = cx - EVENT_BOX_W / 2.0;
                 svg.rect(
                     ex,
                     ey,
                     EVENT_BOX_W,
-                    EVENT_BOX_H,
+                    event_box_h,
                     &format!("fill=\"{color}\" fill-opacity=\"0.15\" stroke=\"{color}\" stroke-width=\"1\" rx=\"4\""),
                 );
-                let max_chars = 18;
-                let display: String = if ev.chars().count() > max_chars {
-                    let mut s: String = ev.chars().take(max_chars - 1).collect();
-                    s.push('…');
-                    s
-                } else {
-                    ev.clone()
-                };
-                let _ = escape;
                 svg.text(
                     cx,
-                    ey + EVENT_BOX_H / 2.0 + 4.0,
+                    ey + event_box_h / 2.0 + 4.0,
                     &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-                    &display,
+                    &wrap_event(ev).join("\n"),
                 );
             }
             idx += 1;
@@ -162,5 +192,33 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">2002<"));
         assert!(svg.contains(">LinkedIn<"));
+    }
+
+    #[test]
+    fn long_event_wraps_instead_of_truncating() {
+        let d = TimelineDiagram {
+            title: None,
+            sections: vec![TimelineSection {
+                name: None,
+                periods: vec![TimelinePeriod {
+                    label: "2004".into(),
+                    events: vec!["Decentralized Social Networking".into()],
+                }],
+            }],
+        };
+        let svg = render(&d, &Theme::default());
+        // Wrapped across <tspan>s, no ellipsis truncation.
+        assert!(!svg.contains('…'));
+        assert!(svg.contains("<tspan"));
+        assert!(svg.contains(">Decentralized<"));
+    }
+
+    #[test]
+    fn wrap_event_breaks_on_words() {
+        assert_eq!(wrap_event("Facebook"), vec!["Facebook".to_string()]);
+        assert_eq!(
+            wrap_event("Decentralized Social Networking"),
+            vec!["Decentralized".to_string(), "Social Networking".to_string()]
+        );
     }
 }
