@@ -173,6 +173,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
+- Flowchart `~~~` is the **invisible link** (`EdgeLine::Invisible`): `parse_arrow`
+  accepts `~` as an opener, requires ≥3 tildes, and forbids any head/tail. It is
+  a real edge (so it shapes the sugiyama layout) but `draw_edge` returns early
+  for `Invisible`, drawing nothing. A `~`/`~~` run under 3 is not an edge.
 - Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick), `head`
   (None/Arrow/Circle/Cross), and `tail` (start-side head, same enum) — covers
   `-->`, `---`, `-.->`, `==>`, `--o`, `--x` plus all no-head variants, and the
@@ -206,9 +210,19 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   The renderer wraps hyperlink nodes in `<a href>` and callback nodes in a
   `<g class="clickable" onclick>`; an optional tooltip becomes a `<title>`.
 - Sequence parser has **nested items** (`Vec<SequenceItem>`) — `Alt`/`Par`/
-  `Critical` blocks have branches; `Loop`/`Opt` have label + items. Renderer
-  draws labeled frames with tab labels.
-- Sequence `autonumber` prefixes each message text with a sequence number.
+  `Critical` blocks have branches; `Loop`/`Opt`/`Break` have label + items;
+  `Rect` has a color + items. Renderer draws labeled frames with tab labels
+  (`break` reuses the frame with a `break` title); `rect <color>` draws a
+  colored background band behind its items via a separate `draw_rect_bands`
+  pass (paired `RectOpen`/`RectClose` events, LIFO stack, default fill
+  `rgba(0,0,0,0.05)` when no color given).
+- Sequence `autonumber` is **positional**: it parses to
+  `SequenceItem::AutoNumber(Option<AutoNumberConfig>)` interleaved in `items`.
+  `autonumber [start [step]]` → `Some{start,step}` (defaults 1/1) turns numbering
+  on and resets the counter to `start`; `autonumber off` → `None` turns it off
+  for subsequent messages. The renderer threads a `&mut Numbering { on, step }`
+  plus a counter through `layout_items`, emitting `"{n}. {text}"` for numbered
+  messages. `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
 - Sequence `activate`/`deactivate` is paired and drawn as an activation band
   on the lifeline. `draw_activations` keeps a **stack** of open start-ys per
   participant (`HashMap<String, Vec<f64>>`) so nested/stacked activations (the
