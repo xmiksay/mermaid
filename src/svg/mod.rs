@@ -21,6 +21,7 @@ mod decorate;
 mod er;
 mod flowchart;
 mod gantt;
+mod gantt_date;
 mod gitgraph;
 mod interact;
 mod journey;

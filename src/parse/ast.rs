@@ -577,6 +577,10 @@ pub struct GanttTask {
     pub start: TaskStart,
     pub end: TaskEnd,
     pub status: TaskStatus,
+    /// `crit` tag — draws a red border. Orthogonal to `status`: upstream
+    /// combines it with `done`/`active` (e.g. `done, crit` = done fill + crit
+    /// border) instead of letting the last tag win.
+    pub crit: bool,
     /// `milestone` tag — rendered as a diamond at the start date; the end is
     /// ignored. Orthogonal to `status` (combinable with `done`/`active`/`crit`).
     pub milestone: bool,
@@ -610,7 +614,6 @@ pub enum TaskStatus {
     Normal,
     Active,
     Done,
-    Crit,
 }
 
 // ---- journey ---------------------------------------------------------------
