@@ -4,12 +4,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
-    ClickAction, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram,
-    NodeShape, Style, Subgraph,
+    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style,
+    Subgraph,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{curve_basis_path, escape, fnum, split_label_lines, SvgBuilder};
+use super::builder::{curve_basis_path, fnum, split_label_lines, SvgBuilder};
+use super::interact::{close_click, open_click};
 use super::style::{resolve_edge_style, resolve_style, ResolvedStyle};
 use super::theme::Theme;
 
@@ -475,53 +476,6 @@ fn draw_node(
     draw_label(svg, (cx, cy), &node.text, fg, font);
     if let Some(action) = &node.click {
         close_click(svg, action);
-    }
-}
-
-/// Open the wrapper element for a clickable node: an `<a>` for hyperlinks or a
-/// `<g class="clickable" onclick=…>` for JS callbacks, plus a `<title>` tooltip.
-fn open_click(svg: &mut SvgBuilder, action: &ClickAction) {
-    match action {
-        ClickAction::Href {
-            url,
-            tooltip,
-            target,
-        } => {
-            let target_attr = match target {
-                Some(t) => format!(" target=\"{}\"", escape(t)),
-                None => String::new(),
-            };
-            svg.raw(&format!(
-                "<a href=\"{url}\"{target_attr}>",
-                url = escape(url)
-            ));
-            emit_tooltip(svg, tooltip);
-        }
-        ClickAction::Callback { function, tooltip } => {
-            let call = if function.contains('(') {
-                function.clone()
-            } else {
-                format!("{function}()")
-            };
-            svg.raw(&format!(
-                "<g class=\"clickable\" style=\"cursor:pointer\" onclick=\"{}\">",
-                escape(&call)
-            ));
-            emit_tooltip(svg, tooltip);
-        }
-    }
-}
-
-fn emit_tooltip(svg: &mut SvgBuilder, tooltip: &Option<String>) {
-    if let Some(t) = tooltip {
-        svg.raw(&format!("<title>{}</title>", escape(t)));
-    }
-}
-
-fn close_click(svg: &mut SvgBuilder, action: &ClickAction) {
-    match action {
-        ClickAction::Href { .. } => svg.raw("</a>"),
-        ClickAction::Callback { .. } => svg.raw("</g>"),
     }
 }
 

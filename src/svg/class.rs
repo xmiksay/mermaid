@@ -4,12 +4,13 @@
 use std::collections::HashMap;
 
 use crate::parse::{
-    ClassDiagram, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, Style, UmlClass,
-    Visibility,
+    ClassDiagram, ClassNote, ClassRelation, ClassRelationKind, FlowDirection, MemberKind, Style,
+    UmlClass, Visibility,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{curve_basis_path, escape, SvgBuilder};
+use super::builder::{curve_basis_path, split_label_lines, SvgBuilder};
+use super::interact::{close_click, open_click};
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -69,8 +70,8 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         FlowDirection::LeftRight | FlowDirection::RightLeft => (raw_h, raw_w),
     };
 
-    let width = canvas_w + CANVAS_PAD * 2.0;
-    let height = canvas_h + CANVAS_PAD * 2.0;
+    let mut width = canvas_w + CANVAS_PAD * 2.0;
+    let mut height = canvas_h + CANVAS_PAD * 2.0;
 
     let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
         let (tx, ty) = match dir {
@@ -81,6 +82,28 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         };
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
+
+    // Notes are laid out in a row below the diagram body; grow the canvas to fit.
+    let mut notes: Vec<NoteBox> = Vec::new();
+    if !d.notes.is_empty() {
+        let mut nx = CANVAS_PAD;
+        let ny = height + NOTE_GAP;
+        let mut row_h: f64 = 0.0;
+        for note in &d.notes {
+            let (nw, nh) = note_size(&note.text);
+            notes.push(NoteBox {
+                note,
+                x: nx,
+                y: ny,
+                w: nw,
+                h: nh,
+            });
+            nx += nw + NOTE_GAP;
+            row_h = row_h.max(nh);
+        }
+        width = width.max(nx - NOTE_GAP + CANVAS_PAD);
+        height = ny + row_h + CANVAS_PAD;
+    }
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
@@ -147,11 +170,77 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         );
     }
 
+    // Notes (yellow sticky boxes) with a dashed connector to their target class.
+    for nb in &notes {
+        if let Some(target) = &nb.note.target {
+            if let Some(&u) = id_to_u32.get(target) {
+                let center = transform(layout.node_pos[&u]);
+                let anchor = (nb.x + nb.w / 2.0, nb.y);
+                let end = clip_rect(anchor, center, sizes[u as usize]);
+                svg.line(
+                    anchor.0,
+                    anchor.1,
+                    end.0,
+                    end.1,
+                    &format!("stroke=\"{fg}\" stroke-width=\"1\" stroke-dasharray=\"4 3\""),
+                );
+            }
+        }
+        draw_note(&mut svg, nb, theme);
+    }
+
     svg.finish()
 }
 
+const NOTE_GAP: f64 = 18.0;
+const NOTE_PAD: f64 = 8.0;
+
+struct NoteBox<'a> {
+    note: &'a ClassNote,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+fn note_size(text: &str) -> (f64, f64) {
+    let lines = split_label_lines(text);
+    let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let w = (max_chars as f64 * CHAR_W + NOTE_PAD * 2.0).max(60.0);
+    let h = lines.len().max(1) as f64 * LINE_H + NOTE_PAD * 2.0;
+    (w, h)
+}
+
+fn draw_note(svg: &mut SvgBuilder, nb: &NoteBox, theme: &Theme) {
+    let fg = theme.fg;
+    svg.rect(
+        nb.x,
+        nb.y,
+        nb.w,
+        nb.h,
+        "fill=\"#fff5ad\" stroke=\"#aaaa33\" stroke-width=\"1\" rx=\"2\"",
+    );
+    let lines = split_label_lines(&nb.note.text);
+    let mut y = nb.y + NOTE_PAD + LINE_H - 5.0;
+    for line in lines {
+        svg.text(
+            nb.x + NOTE_PAD,
+            y,
+            &format!("fill=\"{fg}\" font-size=\"13\""),
+            line,
+        );
+        y += LINE_H;
+    }
+}
+
+/// The header text drawn in a class box: the explicit `["label"]` if any, else
+/// the class name with generic `~T~` converted to `<T>`.
+fn class_display(c: &UmlClass) -> String {
+    c.label.clone().unwrap_or_else(|| convert_generics(&c.name))
+}
+
 fn class_size(c: &UmlClass) -> (f64, f64) {
-    let mut max_chars = convert_generics(&c.name).chars().count();
+    let mut max_chars = class_display(c).chars().count();
     if let Some(s) = &c.stereotype {
         max_chars = max_chars.max(s.chars().count() + 4);
     }
@@ -267,6 +356,9 @@ fn draw_class(
     class_defs: &HashMap<String, Style>,
     theme: &Theme,
 ) {
+    if let Some(action) = &c.click {
+        open_click(svg, action);
+    }
     let rs = resolve_style(class_defs, &c.classes, &c.style);
     let fg = rs.label_fill(theme.fg);
     let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
@@ -293,7 +385,7 @@ fn draw_class(
         cx,
         cursor,
         &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
-        &convert_generics(&c.name),
+        &class_display(c),
     );
     cursor += 4.0;
 
@@ -340,6 +432,10 @@ fn draw_class(
             draw_member(svg, x + 8.0, cursor, m, fg);
             cursor += 4.0;
         }
+    }
+
+    if let Some(action) = &c.click {
+        close_click(svg, action);
     }
 }
 
@@ -548,11 +644,6 @@ fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
     svg.defs_raw(&diamond_open);
 }
 
-#[allow(dead_code)]
-fn _use_escape(s: &str) -> String {
-    escape(s)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,6 +751,33 @@ mod tests {
         assert!(!svg.contains('$'));
         assert!(svg.contains("font-style=\"italic\""));
         assert!(svg.contains("text-decoration=\"underline\""));
+    }
+
+    #[test]
+    fn class_label_renders_without_brackets() {
+        let d = build("classDiagram\nclass Animal[\"Animal with a label\"]\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("Animal with a label"));
+        // No brackets and no duplicate bare-name box.
+        assert!(!svg.contains('['));
+        assert!(!svg.contains(']'));
+    }
+
+    #[test]
+    fn note_renders_yellow_box() {
+        let d = build("classDiagram\nclass Duck\nnote for Duck \"can fly\"\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("can fly"));
+        assert!(svg.contains("#fff5ad"));
+        // Dashed connector to the target class.
+        assert!(svg.contains("stroke-dasharray=\"4 3\""));
+    }
+
+    #[test]
+    fn click_wraps_class_in_anchor() {
+        let d = build("classDiagram\nclass Shape\nclick Shape href \"https://example.com\"\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("<a href=\"https://example.com\">"));
     }
 
     #[test]

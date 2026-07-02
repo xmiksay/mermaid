@@ -313,6 +313,18 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   first; a lone unmatched `~` is left alone). The same `member_display` pass
   strips the trailing UML classifier (`*` abstract → `font-style="italic"`,
   `$` static → `text-decoration="underline"`).
+- Class notes/annotations/labels/interactivity (`src/parse/class.rs`):
+  `note "text"` (free) and `note for <Class> "text"` (attached) fill
+  `ClassDiagram.notes` (`ClassNote { target, text }`); the renderer draws them
+  as yellow sticky boxes in a row below the diagram, with a dashed connector to
+  the target class. Standalone annotations parse in **either** order —
+  `<<interface>> Shape` and `Shape <<interface>>` — via
+  `parse_standalone_annotation`. A `class Name["label"]` sets `UmlClass.label`
+  (the display text), keeping `name` clean — no phantom duplicate box.
+  `click`/`link`/`callback` lines bind a `UmlClass.click` (reusing the flowchart
+  `ClickAction`), parsed before the `:`-shorthand split so a URL's `https://`
+  colon can't misroute the line. The shared `open_click`/`close_click` wrappers
+  live in `src/svg/interact.rs` (used by both the flowchart and class renderers).
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`).
 - Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
