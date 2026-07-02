@@ -101,7 +101,9 @@ fn dispatch(input: &str) -> Result<Diagram, ParseError> {
     let head_token = header_line
         .split(|c: char| c.is_whitespace())
         .next()
-        .unwrap_or("");
+        .unwrap_or("")
+        // Upstream's grammar accepts a trailing colon on the header (`gitGraph:`).
+        .trim_end_matches(':');
     match head_token {
         "pie" => pie::parse(input).map(Diagram::Pie),
         "sequenceDiagram" => sequence::parse(input).map(Diagram::Sequence),

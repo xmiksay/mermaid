@@ -33,7 +33,7 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
                     message: "expected 'gitGraph' header".into(),
                     line: line_no,
                 })?;
-            let rest = rest.trim().trim_start_matches(':').trim();
+            let rest = rest.trim().trim_matches(':').trim();
             d.direction = match rest {
                 "" | "LR" => GitDirection::LeftRight,
                 "TB" | "TD" => GitDirection::TopDown,
@@ -50,9 +50,8 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
             let (id, tag, kind) = parse_commit_attrs(rest);
             d.events.push(GitEvent::Commit { id, tag, kind });
         } else if let Some(rest) = line.strip_prefix("branch") {
-            d.events.push(GitEvent::Branch {
-                name: rest.trim().to_string(),
-            });
+            let (name, order) = parse_branch(rest);
+            d.events.push(GitEvent::Branch { name, order });
         } else if let Some(rest) = line.strip_prefix("checkout") {
             d.events.push(GitEvent::Checkout {
                 name: rest.trim().to_string(),
@@ -84,6 +83,26 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
         return Err(ParseError::Empty);
     }
     Ok(d)
+}
+
+/// `branch <name> [order: <n>] [tag: <t>]` — the name is the first token; the
+/// trailing `order:`/`tag:` attributes are consumed so they can't leak into it.
+fn parse_branch(s: &str) -> (String, Option<usize>) {
+    let (name, mut rest) = take_value(s);
+    let mut order = None;
+    while !rest.is_empty() {
+        if let Some(r) = rest.strip_prefix("order:") {
+            let (v, r2) = take_value(r);
+            order = v.parse().ok();
+            rest = r2;
+        } else {
+            match rest.find(char::is_whitespace) {
+                Some(pos) => rest = rest[pos..].trim_start(),
+                None => break,
+            }
+        }
+    }
+    (name, order)
 }
 
 fn parse_commit_attrs(s: &str) -> (Option<String>, Option<String>, CommitKind) {
@@ -149,5 +168,42 @@ mod tests {
             _ => panic!(),
         }
         assert!(matches!(d.events[5], GitEvent::Merge { .. }));
+    }
+
+    #[test]
+    fn direction_with_trailing_colon() {
+        // The documented `gitGraph TB:` / `gitGraph BT:` forms.
+        assert_eq!(
+            parse("gitGraph TB:\ncommit\n").unwrap().direction,
+            GitDirection::TopDown
+        );
+        assert_eq!(
+            parse("gitGraph BT:\ncommit\n").unwrap().direction,
+            GitDirection::BottomTop
+        );
+        // Bare header with a trailing colon still parses as the default LR.
+        assert_eq!(
+            parse("gitGraph:\ncommit\n").unwrap().direction,
+            GitDirection::LeftRight
+        );
+    }
+
+    #[test]
+    fn dispatcher_accepts_trailing_colon_header() {
+        // `gitGraph:` must route to the gitGraph parser, not be rejected.
+        let d = crate::parse::parse("gitGraph:\ncommit\n").unwrap();
+        assert!(matches!(d, crate::parse::Diagram::GitGraph(_)));
+    }
+
+    #[test]
+    fn branch_order_attribute() {
+        let d = parse("gitGraph\nbranch develop order: 3\n").unwrap();
+        match &d.events[0] {
+            GitEvent::Branch { name, order } => {
+                assert_eq!(name, "develop");
+                assert_eq!(*order, Some(3));
+            }
+            _ => panic!("expected branch"),
+        }
     }
 }
