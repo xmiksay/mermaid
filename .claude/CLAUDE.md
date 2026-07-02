@@ -165,6 +165,12 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   stripped. Bare labels with `_`/`*` (e.g. `snake_case`) are left untouched.
 - Pie drops slices `< 1%` of the total (`MIN_SLICE`, matching upstream
   `createPieArcs`); insertion order and per-slice palette color are preserved.
+- Quadrant points carry optional styling on `QuadrantPoint`: a third array
+  value `[x, y, r]` sets `radius`; trailing `radius:`/`color:`/`stroke-color:`/
+  `stroke-width:` attributes and a `:::class` ref (resolved against
+  `QuadrantDiagram::classes`, filled from top-level `classDef <name> …` lines)
+  set the rest. Inline attrs override the array radius and the class default;
+  the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick), `head`
