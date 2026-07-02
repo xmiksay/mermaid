@@ -164,6 +164,16 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `->>+` shorthand) draw one band per level, each offset `level * 3px` to the
   right instead of overwriting. Activations still open at the end of the event
   loop are flushed down to `lifeline_bottom`.
+- Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
+  head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
+  in `src/svg/sequence.rs` branches on `Participant.kind`.
+- Sequence `box <color> <label>` groups participants: `SequenceBox` carries an
+  optional `color` (parsed in `split_box_color` — hex, `rgb()/rgba()`, or a
+  named CSS color; else the whole string is the label) plus the member
+  `participant_ids` (any participant declared while the box frame is open). The
+  renderer (`draw_boxes`) draws a colored background rect spanning the members
+  from above the actor row to below the footer, label centered on top; a
+  missing color renders transparent. Reserves `BOX_LABEL_H` above the actor row.
 - State `state X { ... }` is stored in `composites`; parallel regions are
   separated by `--`. Renderer draws a dashed rounded outline with a label.
 - State `note right of X: text` (one-liner) and `note left of X\n…\nend note`
