@@ -42,6 +42,7 @@ mod treemap;
 mod xychart;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RenderError {
     #[error("parse error: {0}")]
     Parse(#[from] ParseError),

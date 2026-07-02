@@ -39,6 +39,7 @@ pub use ast::*;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
+#[non_exhaustive]
 pub enum ParseError {
     #[error("parse error at line {line}: {message}")]
     Syntax { message: String, line: usize },

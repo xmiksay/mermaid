@@ -1,4 +1,13 @@
 //! AST types shared by all diagram kinds.
+//!
+//! # API stability
+//!
+//! These types are the *output* of [`parse`](crate::parse): downstream code is
+//! expected to read them (field access, pattern matching against the
+//! `#[non_exhaustive]` enums) rather than construct them. Constructing an AST
+//! struct with a literal is **not** part of the stable API — new `pub` fields
+//! may be added in a minor release, which would break a downstream struct
+//! literal but not field access. Build diagrams by parsing Mermaid source.
 
 use std::collections::HashMap;
 
