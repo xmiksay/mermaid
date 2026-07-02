@@ -5,7 +5,8 @@
 //!   * `[*]` start/end pseudo-states (each occurrence gets a unique id).
 //!   * `[H]`/`[H*]` history pseudo-states (shallow/deep, unique id each).
 //!   * Transitions `A --> B[: label]`.
-//!   * `state X` and `state X : description` declarations.
+//!   * `state X`, `state X : description`, and `state "description" as X`
+//!     declarations.
 //!   * Stereotypes via `state X <<choice/fork/join/history>>`.
 //!   * `direction TB|TD|BT|LR|RL`.
 //!   * Composite states `state X { ... }` (potentially nested), with
@@ -311,9 +312,29 @@ fn apply_state_class(
     }
 }
 
+/// Parse the aliasing form `"description" as id`, returning `(id, description)`.
+fn parse_quoted_as(rest: &str) -> Option<(String, String)> {
+    let inner = rest.trim().strip_prefix('"')?;
+    let end = inner.find('"')?;
+    let desc = inner[..end].to_string();
+    let mut after = inner[end + 1..].trim().splitn(2, char::is_whitespace);
+    if after.next() != Some("as") {
+        return None;
+    }
+    let id = after.next()?.trim();
+    (!id.is_empty()).then(|| (id.to_string(), desc))
+}
+
 fn parse_state_decl(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
     // `:::class` binds tighter than a `: label`, so strip it first.
     let (rest, inline_class) = extract_inline_class(rest.trim());
+    if let Some((id, desc)) = parse_quoted_as(&rest) {
+        ensure_state(diag, existing, &id, &desc, StateKind::Normal);
+        if let Some(cls) = inline_class {
+            apply_state_class(diag, existing, &id, &cls);
+        }
+        return;
+    }
     let (id_part, label_part) = match rest.split_once(':') {
         Some((a, b)) => (a.trim(), b.trim().to_string()),
         None => (rest.as_str(), String::new()),
@@ -461,6 +482,18 @@ mod tests {
         let d = parse("stateDiagram-v2\n[*] --> Idle\nIdle --> Run: start\nRun --> [*]\n").unwrap();
         assert_eq!(d.states.len(), 4);
         assert_eq!(d.transitions.len(), 3);
+    }
+
+    #[test]
+    fn quoted_description_alias() {
+        let d =
+            parse("stateDiagram-v2\nstate \"This is a long name\" as s2\n[*] --> s2\ns2 --> [*]\n")
+                .unwrap();
+        // s2 + two `[*]` pseudo-states; no phantom `"…" as s2` box.
+        assert_eq!(d.states.len(), 3);
+        let s2 = d.states.iter().find(|s| s.id == "s2").unwrap();
+        assert_eq!(s2.label, "This is a long name");
+        assert!(!d.states.iter().any(|s| s.id.contains("as s2")));
     }
 
     #[test]

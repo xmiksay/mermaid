@@ -283,6 +283,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   missing color renders transparent. Reserves `BOX_LABEL_H` above the actor row.
 - State `state X { ... }` is stored in `composites`; parallel regions are
   separated by `--`. Renderer draws a dashed rounded outline with a label.
+- State aliasing `state "description" as X` binds `X`'s display label to the
+  quoted text (`parse_quoted_as` in `parse_state_decl`), so the id stays clean
+  and a later transition referencing `X` reuses the same state — no phantom box
+  named literally `"…" as X`.
 - State history pseudo-states parse to `StateKind::History { deep }`:
   `<<history>>` and `[H]` are shallow (`deep: false`), `[H*]` is deep. The
   bracket forms are handled in `canonicalize` like `[*]` (unique `__hist_N`
