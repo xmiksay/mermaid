@@ -6,6 +6,9 @@
 //!     cylinder `[( )]`, circle `(())`, double circle `((()))`, rhombus `{}`,
 //!     hexagon `{{}}`, parallelogram `[/ /]`, parallelogram-alt `[\ \]`,
 //!     trapezoid `[/ \]`, trapezoid-alt `[\ /]`, asymmetric flag `> ]`.
+//!   * Mermaid v11 attribute syntax `id@{ shape: …, label: … }`: named shapes
+//!     map onto the variants above (unknown names fall back to rect);
+//!     `icon`/`img` forms are dropped but any `label` is preserved.
 //!   * Edge tokens combine a line style (`-`, `.`, `=`) and head (`>`, `o`,
 //!     `x`, none): `-->`, `---`, `-.->`, `-.-`, `==>`, `===`, `--o`, `--x`.
 //!   * Edge labels in either the pipe form `A -->|text| B` or the inline form
@@ -377,6 +380,11 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
         line: line_no,
     })?;
 
+    // Mermaid v11 attribute syntax: `id@{ shape: …, label: … }`.
+    if sc.peek_str("@{") {
+        return parse_at_node(id, sc, line_no);
+    }
+
     // The shape table: longer openers first so they win over their prefixes.
     const SHAPES: &[(&str, &str, NodeShape)] = &[
         ("(((", ")))", NodeShape::DoubleCircle),
@@ -428,6 +436,98 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
     }
     let text = id.clone();
     Ok(finish_node(id, text, NodeShape::Rect, sc))
+}
+
+/// Parse the v11 `id@{ key: value, … }` attribute block. `shape` maps a named
+/// shape onto a `NodeShape` (unknown names fall back to `Rect`, matching
+/// upstream); `label`/`title` set the node text. `icon`/`img` forms are out of
+/// scope — dropped, but any `label` is still honored so content is never lost.
+fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, ParseError> {
+    sc.advance(2); // consume `@{`
+    let body = sc.read_until("}").ok_or_else(|| ParseError::Syntax {
+        message: format!("missing closing '}}' for node '{id}'"),
+        line: line_no,
+    })?;
+    sc.try_consume("}");
+
+    let mut text = id.clone();
+    let mut shape = NodeShape::Rect;
+    for (key, value) in split_attrs(&body) {
+        match key.as_str() {
+            "shape" => shape = shape_from_name(&value),
+            "label" | "title" => text = value,
+            _ => {} // icon/img and any other keys are dropped
+        }
+    }
+    Ok(finish_node(id, text, shape, sc))
+}
+
+/// Split an attribute block body into `(key, value)` pairs. Commas separate
+/// pairs and `:` separates a key from its value; both are honored only outside
+/// quotes so a quoted value may embed either character. Values are unquoted.
+fn split_attrs(body: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for part in split_top_commas(body) {
+        if let Some((k, v)) = part.split_once(':') {
+            pairs.push((k.trim().to_string(), unquote(v.trim())));
+        }
+    }
+    pairs
+}
+
+/// Split on commas that sit outside any `"`/`'` quoted run.
+fn split_top_commas(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    for c in s.chars() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+                cur.push(c);
+            }
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                cur.push(c);
+            }
+            None if c == ',' => {
+                if !cur.trim().is_empty() {
+                    parts.push(cur.trim().to_string());
+                }
+                cur.clear();
+            }
+            None => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    parts
+}
+
+/// Map a v11 named shape onto an existing `NodeShape`. Aliases follow upstream
+/// Mermaid; visual-only shapes that lack a variant here (e.g. `notch-rect`,
+/// `bolt`, `hourglass`, `fr-rect`) fall back to `Rect` so their content is
+/// still rendered. Unknown names likewise fall back to `Rect`.
+fn shape_from_name(name: &str) -> NodeShape {
+    match name.trim() {
+        "rounded" => NodeShape::Round,
+        "stadium" | "pill" | "term" | "terminal" => NodeShape::Stadium,
+        "subproc" | "subprocess" | "subroutine" | "framed-rectangle" => NodeShape::Subroutine,
+        "cyl" | "cylinder" | "database" | "db" => NodeShape::Cylinder,
+        "circle" | "circ" => NodeShape::Circle,
+        "dbl-circ" | "double-circle" => NodeShape::DoubleCircle,
+        "diam" | "diamond" | "decision" | "question" => NodeShape::Rhombus,
+        "hex" | "hexagon" | "prepare" => NodeShape::Hexagon,
+        "lean-r" | "lean-right" | "in-out" => NodeShape::Parallelogram,
+        "lean-l" | "lean-left" | "out-in" => NodeShape::ParallelogramAlt,
+        "trap-b" | "trapezoid-bottom" | "trapezoid" | "priority" => NodeShape::Trapezoid,
+        "trap-t" | "trapezoid-top" | "inv-trapezoid" | "manual" => NodeShape::TrapezoidAlt,
+        "odd" => NodeShape::Asymmetric,
+        _ => NodeShape::Rect,
+    }
 }
 
 /// Build a node, consuming an optional `:::class` shorthand that follows the
@@ -912,6 +1012,72 @@ mod tests {
         assert!(shapes.contains(&("G".into(), NodeShape::Subroutine)));
         assert!(shapes.contains(&("H".into(), NodeShape::Cylinder)));
         assert!(shapes.contains(&("I".into(), NodeShape::Stadium)));
+    }
+
+    #[test]
+    fn at_shape_and_label() {
+        let d = parse("flowchart TD\nA@{ shape: rounded, label: \"Hi there\" } --> B\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.shape, NodeShape::Round);
+        assert_eq!(a.text, "Hi there");
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edges[0].to, "B");
+    }
+
+    #[test]
+    fn at_shape_aliases_map_to_variants() {
+        let d = parse(
+            "flowchart TD\n\
+             A@{ shape: diam } --> B@{ shape: cyl }\n\
+             B --> C@{ shape: circle }\n\
+             C --> E@{ shape: hex }\n\
+             E --> F@{ shape: lean-r }\n\
+             F --> G@{ shape: lean-l }\n\
+             G --> H@{ shape: trap-b }\n\
+             H --> I@{ shape: trap-t }\n\
+             I --> J@{ shape: dbl-circ }\n\
+             J --> K@{ shape: stadium }\n\
+             K --> L@{ shape: subproc }\n",
+        )
+        .unwrap();
+        let map: HashMap<_, _> = d.nodes.iter().map(|n| (n.id.clone(), n.shape)).collect();
+        assert_eq!(map["A"], NodeShape::Rhombus);
+        assert_eq!(map["B"], NodeShape::Cylinder);
+        assert_eq!(map["C"], NodeShape::Circle);
+        assert_eq!(map["E"], NodeShape::Hexagon);
+        assert_eq!(map["F"], NodeShape::Parallelogram);
+        assert_eq!(map["G"], NodeShape::ParallelogramAlt);
+        assert_eq!(map["H"], NodeShape::Trapezoid);
+        assert_eq!(map["I"], NodeShape::TrapezoidAlt);
+        assert_eq!(map["J"], NodeShape::DoubleCircle);
+        assert_eq!(map["K"], NodeShape::Stadium);
+        assert_eq!(map["L"], NodeShape::Subroutine);
+    }
+
+    #[test]
+    fn at_unknown_shape_falls_back_to_rect() {
+        // Visual-only shapes without a variant (and any unknown name) fall back
+        // to Rect rather than erroring, and the label is preserved.
+        let d = parse("flowchart TD\nA@{ shape: bolt, label: \"kept\" } --> B\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.shape, NodeShape::Rect);
+        assert_eq!(a.text, "kept");
+    }
+
+    #[test]
+    fn at_icon_form_drops_shape_keeps_label() {
+        let d = parse("flowchart TD\nA@{ icon: \"fa:bell\", label: \"Alarm\" } --> B\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.shape, NodeShape::Rect);
+        assert_eq!(a.text, "Alarm");
+    }
+
+    #[test]
+    fn at_label_only_keeps_default_shape() {
+        let d = parse("flowchart TD\nA@{ label: \"only\" }\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.shape, NodeShape::Rect);
+        assert_eq!(a.text, "only");
     }
 
     #[test]
