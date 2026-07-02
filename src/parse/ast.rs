@@ -25,6 +25,7 @@ pub struct DiagramMeta {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Diagram {
     Pie(PieDiagram),
     Sequence(SequenceDiagram),
@@ -83,12 +84,14 @@ pub struct Participant {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ParticipantKind {
     Participant,
     Actor,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SequenceItem {
     Message(Message),
     Note(SequenceNote),
@@ -137,6 +140,7 @@ pub struct SequenceNote {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NotePosition {
     Over,
     LeftOf,
@@ -152,6 +156,7 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ArrowKind {
     /// `->`  solid line, no arrowhead
     Solid,
@@ -186,6 +191,7 @@ pub struct FlowchartDiagram {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum FlowDirection {
     #[default]
     TopDown,
@@ -210,6 +216,7 @@ pub struct FlowNode {
 /// A `click <id> …` interaction. Either turns the node into a hyperlink or
 /// binds a JavaScript callback fired on click.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ClickAction {
     /// `click A "url" "tooltip"` / `click A href "url" "tooltip" _blank` —
     /// wraps the node in an SVG `<a>` link.
@@ -228,6 +235,7 @@ pub enum ClickAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NodeShape {
     /// `[text]` — rectangle (default)
     Rect,
@@ -272,6 +280,7 @@ pub struct FlowEdge {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EdgeLine {
     /// `-` solid
     Solid,
@@ -282,6 +291,7 @@ pub enum EdgeLine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EdgeHead {
     /// `---` no head
     None,
@@ -327,6 +337,7 @@ pub struct State {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StateKind {
     Normal,
     Start,
@@ -389,6 +400,7 @@ pub struct ClassMember {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Visibility {
     #[default]
     Default,
@@ -399,6 +411,7 @@ pub enum Visibility {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MemberKind {
     Attribute,
     Method,
@@ -417,6 +430,7 @@ pub struct ClassRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ClassRelationKind {
     /// `<|--` inheritance
     Inheritance,
@@ -475,6 +489,7 @@ pub struct ErRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Cardinality {
     /// `||` exactly one
     ExactlyOne,
@@ -514,6 +529,7 @@ pub struct GanttTask {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum TaskStart {
     Date(String),
     AfterId(String),
@@ -521,6 +537,7 @@ pub enum TaskStart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum TaskStatus {
     #[default]
     Normal,
@@ -626,6 +643,7 @@ pub struct XyAxis {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum XyAxisKind {
     /// Categorical labels (e.g. month names).
     Categories(Vec<String>),
@@ -640,6 +658,7 @@ pub struct XySeries {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum XySeriesKind {
     Bar,
     Line,
@@ -700,6 +719,7 @@ pub struct MindmapNode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MindmapShape {
     /// Default — no explicit delimiters.
     Default,
@@ -727,6 +747,7 @@ pub struct GitGraphDiagram {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum GitDirection {
     #[default]
     LeftRight,
@@ -735,6 +756,7 @@ pub enum GitDirection {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum GitEvent {
     Commit {
         id: Option<String>,
@@ -758,6 +780,7 @@ pub enum GitEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum CommitKind {
     #[default]
     Normal,
@@ -785,6 +808,7 @@ pub struct Requirement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum RequirementKind {
     #[default]
     Requirement,
@@ -810,6 +834,7 @@ pub struct ReqRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReqRelationKind {
     Contains,
     Copies,
@@ -878,6 +903,7 @@ pub struct C4LayoutConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum C4Kind {
     Context,
     Container,
@@ -901,6 +927,7 @@ pub struct C4Element {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum C4ElementKind {
     Person,
     System,
@@ -916,6 +943,7 @@ pub enum C4ElementKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum C4BoundaryKind {
     System,
     Container,
@@ -935,6 +963,7 @@ pub struct C4Relation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum C4RelDirection {
     #[default]
     Default,
@@ -953,6 +982,7 @@ pub struct BlockDiagram {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum BlockItem {
     Block(Block),
     Group(BlockGroup),
@@ -970,6 +1000,7 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum BlockShape {
     #[default]
     Rect,
@@ -1042,6 +1073,7 @@ pub struct ArchEdge {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ArchSide {
     Top,
     Bottom,

@@ -111,6 +111,9 @@ from one of the built-ins, so adding a field is non-breaking.
   end-to-end tests in `tests/integration.rs`; private-API sugiyama tests in
   `src/sugiyama/tests.rs`.
 - Errors via `thiserror`. No stringly-typed errors.
+- Every public `ast::*` enum is `#[non_exhaustive]` so adding a diagram kind,
+  shape, or variant stays a minor release. Keep new public AST enums marked
+  the same way; downstream `match`es must carry a `_` arm.
 - `NodeId = u32` in sugiyama; upper layers map their own `String → u32`.
 - Keep files small — under 500 LoC. Split a module before it grows past that.
 - DRY and KISS: factor out repetition into shared helpers, and prefer the
