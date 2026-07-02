@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::parse::{GanttDiagram, TaskStart, TaskStatus};
+use crate::parse::{GanttDiagram, TaskEnd, TaskStart, TaskStatus};
 
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
@@ -246,7 +246,18 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
                 }
                 TaskStart::AfterPrevious => last_end,
             };
-            let dur = task.duration_days.max(0.5);
+            // `until <id>` ends where the named task starts; an end date ends
+            // there directly. Both fall back to a nominal length when the
+            // reference is a forward/unknown ref (matching `after`'s fallback).
+            let dur = match &task.end {
+                TaskEnd::Duration(d) => *d,
+                TaskEnd::Date(s) => ymd_to_day(s).map(|e| e - start).unwrap_or(1.0),
+                TaskEnd::UntilId(id) => id_to_start_end
+                    .get(id)
+                    .map(|(s, _)| *s - start)
+                    .unwrap_or(1.0),
+            }
+            .max(0.5);
             let end = start + dur;
             if let Some(id) = &task.id {
                 id_to_start_end.insert(id.clone(), (start, end));
@@ -358,6 +369,26 @@ mod tests {
         // Diamond is drawn as a <path> with a Z-closed rhombus, no bar <rect>.
         assert!(svg.contains("<path"));
         assert!(svg.contains(">Kickoff<"));
+    }
+
+    #[test]
+    fn end_date_sets_bar_length() {
+        // Two days between 2014-01-06 and 2014-01-08.
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nT : a1, 2014-01-06, 2014-01-08\n");
+        let resolved = resolve_tasks(&d);
+        assert!((resolved[0].duration - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn until_ends_at_referenced_task_start() {
+        // B starts four days before A and runs `until A`, so it ends where A
+        // starts — a 4-day bar.
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nA : a, 2014-01-05, 5d\nB : b, 2014-01-01, until a\n");
+        let resolved = resolve_tasks(&d);
+        assert!((resolved[1].duration - 4.0).abs() < 1e-6);
+        assert!(
+            (resolved[1].start_day + resolved[1].duration - resolved[0].start_day).abs() < 1e-6
+        );
     }
 
     #[test]

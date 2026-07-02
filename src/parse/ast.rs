@@ -554,9 +554,9 @@ pub struct GanttTask {
     pub name: String,
     pub id: Option<String>,
     pub start: TaskStart,
-    pub duration_days: f64,
+    pub end: TaskEnd,
     pub status: TaskStatus,
-    /// `milestone` tag — rendered as a diamond at the start date; duration is
+    /// `milestone` tag — rendered as a diamond at the start date; the end is
     /// ignored. Orthogonal to `status` (combinable with `done`/`active`/`crit`).
     pub milestone: bool,
 }
@@ -567,6 +567,19 @@ pub enum TaskStart {
     Date(String),
     AfterId(String),
     AfterPrevious,
+}
+
+/// How a task's end is expressed: an explicit length, an end date, or an
+/// `until <taskId>` marker that ends the bar where the named task starts.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum TaskEnd {
+    /// Length in days (`Nd`/`Nw`/`Nh`/`Nm`).
+    Duration(f64),
+    /// Explicit end date (string in the diagram's `dateFormat`).
+    Date(String),
+    /// Ends when the named task starts (`until <taskId>`).
+    UntilId(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
