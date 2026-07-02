@@ -169,3 +169,12 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
   `<tspan>`s for multi-line labels, so every renderer honors `<br>` for free;
   flowchart also sizes nodes from the resulting line count / widest line.
+- C4 supports the full `{System,Container,Component} × {Db,Queue} × {_Ext}`
+  element matrix; the `_Ext` variants reuse the same shape with the gray
+  external palette. `UpdateElementStyle` / `UpdateRelStyle` /
+  `UpdateLayoutConfig` are stored on `C4Diagram` (`element_styles`,
+  `rel_styles`, `layout`) and applied at draw time: element `$bgColor`/
+  `$fontColor`/`$borderColor`, rel `$textColor`/`$lineColor`/`$offsetX/Y`.
+  `$c4ShapeInRow`/`$c4BoundaryInRow` override the row-flow wrap counts
+  (`flow_layout`'s `shape_in_row`/`boundary_in_row`). `C4Relation.direction`
+  (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout.
