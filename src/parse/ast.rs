@@ -345,6 +345,10 @@ pub enum StateKind {
     Choice,
     Fork,
     Join,
+    /// History pseudo-state: `[H]`/`<<history>>` (shallow) or `[H*]` (deep).
+    History {
+        deep: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
