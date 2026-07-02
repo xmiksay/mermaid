@@ -18,7 +18,10 @@
 
 use std::collections::HashMap;
 
-use crate::parse::{C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4Kind, C4Relation};
+use crate::parse::{
+    C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4Kind, C4RelStyle,
+    C4Relation,
+};
 
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
@@ -51,7 +54,10 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let origin_x = PAD;
     let origin_y = PAD + title_h;
 
-    let (nodes, _cw, _ch) = flow_layout(&d.elements);
+    // Row-flow knobs are overridable via `UpdateLayoutConfig` (see #14).
+    let shape_in_row = d.layout.shape_in_row.unwrap_or(SHAPE_IN_ROW).max(1);
+    let boundary_in_row = d.layout.boundary_in_row.unwrap_or(BOUNDARY_IN_ROW).max(1);
+    let (nodes, _cw, _ch) = flow_layout(&d.elements, shape_in_row, boundary_in_row);
 
     let mut pos: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     let mut boundaries: Vec<BoundaryBox> = Vec::new();
@@ -111,12 +117,26 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
         draw_boundary_rect(b, &mut svg, theme);
     }
 
+    let elem_styles: HashMap<&str, &C4ElementStyle> = d
+        .element_styles
+        .iter()
+        .map(|s| (s.alias.as_str(), s))
+        .collect();
+    let rel_styles: HashMap<(&str, &str), &C4RelStyle> = d
+        .rel_styles
+        .iter()
+        .map(|s| ((s.from.as_str(), s.to.as_str()), s))
+        .collect();
+
     for (el, x, y, w, h) in &leaves {
-        draw_element(el, *x, *y, *w, *h, &mut svg, theme);
+        let ov = elem_styles.get(el.alias.as_str()).copied();
+        let style = resolve_element_style(el, ov);
+        draw_element(el, &style, *x, *y, *w, *h, &mut svg, theme);
     }
 
     for r in &d.relations {
-        draw_rel(r, &pos, &mut svg, theme);
+        let ov = rel_styles.get(&(r.from.as_str(), r.to.as_str())).copied();
+        draw_rel(r, ov, &pos, &mut svg, theme);
     }
 
     svg.finish()
@@ -148,12 +168,16 @@ struct LayoutNode {
 /// boundaries), then place items left-to-right, wrapping after `SHAPE_IN_ROW`
 /// shapes / `BOUNDARY_IN_ROW` boundaries. Returns the placed nodes plus the
 /// total content size.
-fn flow_layout(items: &[C4Element]) -> (Vec<LayoutNode>, f64, f64) {
+fn flow_layout(
+    items: &[C4Element],
+    shape_in_row: usize,
+    boundary_in_row: usize,
+) -> (Vec<LayoutNode>, f64, f64) {
     let mut nodes: Vec<LayoutNode> = items
         .iter()
         .map(|item| {
             if item.boundary_kind.is_some() {
-                let (mut kids, cw, ch) = flow_layout(&item.members);
+                let (mut kids, cw, ch) = flow_layout(&item.members, shape_in_row, boundary_in_row);
                 let dx = BOUNDARY_PAD;
                 let dy = BOUNDARY_PAD + BOUNDARY_HDR;
                 for k in &mut kids {
@@ -195,9 +219,9 @@ fn flow_layout(items: &[C4Element]) -> (Vec<LayoutNode>, f64, f64) {
     let mut total_w: f64 = 0.0;
     for node in &mut nodes {
         let per_row = if node.is_boundary {
-            BOUNDARY_IN_ROW
+            boundary_in_row
         } else {
-            SHAPE_IN_ROW
+            shape_in_row
         };
         if col >= per_row {
             x = 0.0;
@@ -308,8 +332,40 @@ fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
     );
 }
 
+/// Effective colors for one element after applying any `UpdateElementStyle`
+/// override on top of the built-in palette.
+struct ElementStyle {
+    fill: String,
+    border: String,
+    text: String,
+    muted: String,
+}
+
+fn resolve_element_style(el: &C4Element, ov: Option<&C4ElementStyle>) -> ElementStyle {
+    let (base_fill, base_border) = palette(el.kind, el.external);
+    let fill = ov
+        .and_then(|s| s.bg_color.clone())
+        .unwrap_or_else(|| base_fill.to_string());
+    let border = ov
+        .and_then(|s| s.border_color.clone())
+        .unwrap_or_else(|| base_border.to_string());
+    let font = ov.and_then(|s| s.font_color.clone());
+    let text = font
+        .clone()
+        .unwrap_or_else(|| text_color_for(&fill).to_string());
+    let muted = font.unwrap_or_else(|| mute_text_color_for(&fill).to_string());
+    ElementStyle {
+        fill,
+        border,
+        text,
+        muted,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_element(
     el: &C4Element,
+    style: &ElementStyle,
     x: f64,
     y: f64,
     w: f64,
@@ -319,21 +375,20 @@ fn draw_element(
 ) {
     match el.kind {
         C4ElementKind::SystemDb | C4ElementKind::ContainerDb | C4ElementKind::ComponentDb => {
-            draw_cylinder(el, x, y, w, h, svg);
+            draw_cylinder(el, style, x, y, w, h, svg);
         }
         C4ElementKind::SystemQueue
         | C4ElementKind::ContainerQueue
-        | C4ElementKind::ComponentQueue => draw_queue(el, x, y, w, h, svg),
-        _ => draw_box(el, x, y, w, h, svg),
+        | C4ElementKind::ComponentQueue => draw_queue(el, style, x, y, w, h, svg),
+        _ => draw_box(el, style, x, y, w, h, svg),
     }
     if matches!(el.kind, C4ElementKind::Person) {
-        draw_person_icon(svg, x + w - 28.0, y + 6.0, el);
+        draw_person_icon(svg, x + w - 28.0, y + 6.0, &style.fill);
     }
     let _ = theme;
 }
 
-fn draw_person_icon(svg: &mut SvgBuilder, x: f64, y: f64, el: &C4Element) {
-    let (fill, _) = palette(el.kind, el.external);
+fn draw_person_icon(svg: &mut SvgBuilder, x: f64, y: f64, fill: &str) {
     let stroke = if is_dark_fill(fill) {
         "#FFFFFF"
     } else {
@@ -351,10 +406,19 @@ fn draw_person_icon(svg: &mut SvgBuilder, x: f64, y: f64, el: &C4Element) {
     );
 }
 
-fn draw_box(el: &C4Element, x: f64, y: f64, w: f64, h: f64, svg: &mut SvgBuilder) {
-    let (fill, border) = palette(el.kind, el.external);
-    let text_fill = text_color_for(fill);
-    let muted = mute_text_color_for(fill);
+fn draw_box(
+    el: &C4Element,
+    style: &ElementStyle,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    svg: &mut SvgBuilder,
+) {
+    let fill = &style.fill;
+    let border = &style.border;
+    let text_fill = style.text.as_str();
+    let muted = style.muted.as_str();
     svg.rect(
         x,
         y,
@@ -372,10 +436,19 @@ fn draw_box(el: &C4Element, x: f64, y: f64, w: f64, h: f64, svg: &mut SvgBuilder
     write_label_block(svg, el, x, y, w, h, text_fill, muted);
 }
 
-fn draw_cylinder(el: &C4Element, x: f64, y: f64, w: f64, h: f64, svg: &mut SvgBuilder) {
-    let (fill, border) = palette(el.kind, el.external);
-    let text_fill = text_color_for(fill);
-    let muted = mute_text_color_for(fill);
+fn draw_cylinder(
+    el: &C4Element,
+    style: &ElementStyle,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    svg: &mut SvgBuilder,
+) {
+    let fill = &style.fill;
+    let border = &style.border;
+    let text_fill = style.text.as_str();
+    let muted = style.muted.as_str();
     let rx = w / 2.0;
     let ry = 10.0;
     let top_y = y + ry;
@@ -422,10 +495,19 @@ fn draw_cylinder(el: &C4Element, x: f64, y: f64, w: f64, h: f64, svg: &mut SvgBu
     write_label_block(svg, el, x, y + ry, w, h - 2.0 * ry, text_fill, muted);
 }
 
-fn draw_queue(el: &C4Element, x: f64, y: f64, w: f64, h: f64, svg: &mut SvgBuilder) {
-    let (fill, border) = palette(el.kind, el.external);
-    let text_fill = text_color_for(fill);
-    let muted = mute_text_color_for(fill);
+fn draw_queue(
+    el: &C4Element,
+    style: &ElementStyle,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    svg: &mut SvgBuilder,
+) {
+    let fill = &style.fill;
+    let border = &style.border;
+    let text_fill = style.text.as_str();
+    let muted = style.muted.as_str();
     let rx = h / 2.0;
     let dash = if el.external {
         " stroke-dasharray=\"5 3\""
@@ -573,12 +655,14 @@ fn is_dark_fill(fill: &str) -> bool {
 
 fn draw_rel(
     r: &C4Relation,
+    ov: Option<&C4RelStyle>,
     pos: &HashMap<String, (f64, f64, f64, f64)>,
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg: &str = ov.and_then(|s| s.text_color.as_deref()).unwrap_or(theme.fg);
     let fg_muted = theme.fg_muted;
+    let stroke: &str = ov.and_then(|s| s.line_color.as_deref()).unwrap_or(C4_LINE);
 
     let Some(&(ax, ay, aw, ah)) = pos.get(&r.from) else {
         return;
@@ -605,7 +689,7 @@ fn draw_rel(
     let path = quad_path(&clipped);
     svg.path(
         &path,
-        &format!("fill=\"none\" stroke=\"{C4_LINE}\" stroke-width=\"1\" {markers}"),
+        &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1\" {markers}"),
     );
 
     let label = &r.label;
@@ -613,7 +697,11 @@ fn draw_rel(
     if label.is_empty() && tech.is_none() {
         return;
     }
-    let (mx, my) = polyline_midpoint(&clipped);
+    let (mut mx, mut my) = polyline_midpoint(&clipped);
+    if let Some(s) = ov {
+        mx += s.offset_x.unwrap_or(0.0);
+        my += s.offset_y.unwrap_or(0.0);
+    }
     if let Some(t) = tech {
         svg.text(
             mx,
@@ -803,6 +891,7 @@ mod tests {
             title: Some("Sys".into()),
             elements: vec![person("u", "User")],
             relations: vec![],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -828,6 +917,7 @@ mod tests {
                 vec![person("uportal", "portal")],
             )],
             relations: vec![],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
 
@@ -870,6 +960,7 @@ mod tests {
                 direction: C4RelDirection::Default,
                 bidirectional: false,
             }],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("c4-arrow"));
@@ -891,6 +982,7 @@ mod tests {
                 direction: C4RelDirection::Default,
                 bidirectional: true,
             }],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("marker-start=\"url(#c4-arrow)\""));
@@ -911,6 +1003,7 @@ mod tests {
                 direction: C4RelDirection::Default,
                 bidirectional: false,
             }],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         // The connector path must not be dashed (only the boundary outline is).
@@ -929,6 +1022,7 @@ mod tests {
                 vec![person("a", "A"), person("b", "B")],
             )],
             relations: vec![],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         // Solid border: #444444, width 1, no dasharray on the boundary rect.
@@ -949,6 +1043,7 @@ mod tests {
                 vec![person("a", "A"), person("b", "B")],
             )],
             relations: vec![],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(
@@ -970,6 +1065,7 @@ mod tests {
                 direction: C4RelDirection::Default,
                 bidirectional: false,
             }],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         // Quadratic Bézier, #444444, width 1.
@@ -1016,7 +1112,7 @@ mod tests {
             ),
         ];
 
-        let (nodes, _, _) = flow_layout(&elements);
+        let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW);
         let mut pos = HashMap::new();
         let mut boundaries = Vec::new();
         let mut leaves = Vec::new();
@@ -1043,7 +1139,7 @@ mod tests {
             C4BoundaryKind::Deployment,
             vec![person("x", "X"), person("y", "Y")],
         )];
-        let (nodes, _, _) = flow_layout(&elements);
+        let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW);
         let mut pos = HashMap::new();
         let mut boundaries = Vec::new();
         let mut leaves = Vec::new();
@@ -1060,5 +1156,79 @@ mod tests {
                 "member escapes boundary y"
             );
         }
+    }
+
+    #[test]
+    fn element_style_override_applies_colors() {
+        let d = C4Diagram {
+            kind: C4Kind::Context,
+            title: None,
+            elements: vec![C4Element {
+                kind: C4ElementKind::System,
+                alias: "s".into(),
+                label: "Sys".into(),
+                descr: None,
+                technology: None,
+                external: false,
+                boundary_alias: None,
+                boundary_label: None,
+                boundary_kind: None,
+                members: vec![],
+            }],
+            relations: vec![],
+            element_styles: vec![C4ElementStyle {
+                alias: "s".into(),
+                bg_color: Some("#ABCDEF".into()),
+                font_color: None,
+                border_color: Some("#123456".into()),
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#ABCDEF\""));
+        assert!(svg.contains("stroke=\"#123456\""));
+    }
+
+    #[test]
+    fn rel_style_override_colors_line_and_label() {
+        let d = C4Diagram {
+            kind: C4Kind::Context,
+            title: None,
+            elements: vec![person("a", "A"), person("b", "B")],
+            relations: vec![C4Relation {
+                from: "a".into(),
+                to: "b".into(),
+                label: "uses".into(),
+                technology: None,
+                direction: C4RelDirection::Default,
+                bidirectional: false,
+            }],
+            rel_styles: vec![C4RelStyle {
+                from: "a".into(),
+                to: "b".into(),
+                text_color: Some("#00FF00".into()),
+                line_color: Some("#FF0000".into()),
+                offset_x: None,
+                offset_y: None,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("stroke=\"#FF0000\""));
+        assert!(svg.contains("fill=\"#00FF00\""));
+    }
+
+    #[test]
+    fn layout_config_controls_shapes_per_row() {
+        // With shape_in_row = 1 the two shapes stack vertically; default (4)
+        // would place them on the same row. Verify the override changes layout.
+        let elements = vec![person("a", "A"), person("b", "B")];
+        let (nodes, _, _) = flow_layout(&elements, 1, BOUNDARY_IN_ROW);
+        assert_eq!(nodes.len(), 2);
+        assert!(
+            nodes[1].y > nodes[0].y,
+            "second shape should wrap to the next row"
+        );
+        assert_eq!(nodes[0].x, nodes[1].x, "wrapped shapes share the left edge");
     }
 }

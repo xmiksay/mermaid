@@ -82,7 +82,7 @@ let svg = render_with(source, &custom)?;
 | Mindmap | `mindmap` | nested nodes, node shapes |
 | Git graph | `gitGraph` | commits, branches, merges, checkouts |
 | Requirement | `requirementDiagram` | requirements, elements, relationships |
-| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems, boundaries, relations |
+| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems (`Db`/`Queue`/`_Ext` variants), boundaries, relations, `Update*Style` overrides |
 | Block | `block-beta`, `block` | grid layout, spanning blocks, edges |
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards |

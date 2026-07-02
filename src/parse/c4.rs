@@ -20,7 +20,8 @@
 //! ```
 
 use super::ast::{
-    C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4Kind, C4RelDirection, C4Relation,
+    C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4Kind, C4LayoutConfig,
+    C4RelDirection, C4RelStyle, C4Relation,
 };
 use super::{strip_comment, ParseError};
 
@@ -62,11 +63,8 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
             continue;
         }
 
-        // Styling/layout directives are accepted but not rendered yet.
-        if line.starts_with("UpdateRelStyle")
-            || line.starts_with("UpdateElementStyle")
-            || line.starts_with("UpdateLayoutConfig")
-        {
+        if let Some(dir) = parse_directive(&line) {
+            apply_directive(&mut d, dir);
             continue;
         }
 
@@ -91,6 +89,9 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
             }
             for r in inner.relations {
                 d.relations.push(r);
+            }
+            for dir in inner.directives {
+                apply_directive(&mut d, dir);
             }
             d.elements.push(element);
             let _ = btype;
@@ -178,21 +179,21 @@ fn collect_until_close(lines: &[(usize, String)], i: &mut usize) -> Vec<(usize, 
 struct BoundaryInner {
     elements: Vec<C4Element>,
     relations: Vec<C4Relation>,
+    directives: Vec<C4Directive>,
 }
 
 fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseError> {
     let mut out = BoundaryInner {
         elements: Vec::new(),
         relations: Vec::new(),
+        directives: Vec::new(),
     };
     let mut i = 0;
     while i < body.len() {
         let (line_no, line) = (body[i].0, body[i].1.trim().to_string());
         i += 1;
-        if line.starts_with("UpdateRelStyle")
-            || line.starts_with("UpdateElementStyle")
-            || line.starts_with("UpdateLayoutConfig")
-        {
+        if let Some(dir) = parse_directive(&line) {
+            out.directives.push(dir);
             continue;
         }
         if let Some((kind, alias, label, _, _)) = parse_boundary_open(&line) {
@@ -216,6 +217,7 @@ fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseE
             for r in inner.relations {
                 out.relations.push(r);
             }
+            out.directives.extend(inner.directives);
             out.elements.push(element);
             continue;
         }
@@ -231,6 +233,99 @@ fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseE
     Ok(out)
 }
 
+enum C4Directive {
+    Element(C4ElementStyle),
+    Rel(C4RelStyle),
+    Layout(C4LayoutConfig),
+}
+
+fn apply_directive(d: &mut C4Diagram, dir: C4Directive) {
+    match dir {
+        C4Directive::Element(s) => d.element_styles.push(s),
+        C4Directive::Rel(s) => d.rel_styles.push(s),
+        C4Directive::Layout(c) => {
+            if c.shape_in_row.is_some() {
+                d.layout.shape_in_row = c.shape_in_row;
+            }
+            if c.boundary_in_row.is_some() {
+                d.layout.boundary_in_row = c.boundary_in_row;
+            }
+        }
+    }
+}
+
+fn parse_directive(line: &str) -> Option<C4Directive> {
+    let (token, rest) = match line.find('(') {
+        Some(p) => (&line[..p], &line[p..]),
+        None => return None,
+    };
+    let args_str = rest.trim_start_matches('(').trim_end_matches(')');
+    let args = split_args(args_str);
+    match token {
+        "UpdateElementStyle" => {
+            let mut s = C4ElementStyle {
+                alias: args.first().cloned().unwrap_or_default(),
+                ..Default::default()
+            };
+            for a in args.iter().skip(1) {
+                if let Some((k, v)) = kv(a) {
+                    match k {
+                        "$bgColor" => s.bg_color = Some(v),
+                        "$fontColor" => s.font_color = Some(v),
+                        "$borderColor" => s.border_color = Some(v),
+                        _ => {}
+                    }
+                }
+            }
+            Some(C4Directive::Element(s))
+        }
+        "UpdateRelStyle" => {
+            let mut s = C4RelStyle {
+                from: args.first().cloned().unwrap_or_default(),
+                to: args.get(1).cloned().unwrap_or_default(),
+                ..Default::default()
+            };
+            for a in args.iter().skip(2) {
+                if let Some((k, v)) = kv(a) {
+                    match k {
+                        "$textColor" => s.text_color = Some(v),
+                        "$lineColor" => s.line_color = Some(v),
+                        "$offsetX" => s.offset_x = v.parse().ok(),
+                        "$offsetY" => s.offset_y = v.parse().ok(),
+                        _ => {}
+                    }
+                }
+            }
+            Some(C4Directive::Rel(s))
+        }
+        "UpdateLayoutConfig" => {
+            let mut c = C4LayoutConfig::default();
+            for a in &args {
+                if let Some((k, v)) = kv(a) {
+                    match k {
+                        "$c4ShapeInRow" => c.shape_in_row = v.parse().ok(),
+                        "$c4BoundaryInRow" => c.boundary_in_row = v.parse().ok(),
+                        _ => {}
+                    }
+                }
+            }
+            Some(C4Directive::Layout(c))
+        }
+        _ => None,
+    }
+}
+
+/// Split a `$key="value"` directive argument. Quotes are already removed by
+/// `split_args`, so the value arrives bare.
+fn kv(arg: &str) -> Option<(&str, String)> {
+    let arg = arg.trim();
+    if !arg.starts_with('$') {
+        return None;
+    }
+    let (k, v) = arg.split_once('=')?;
+    Some((k.trim(), v.trim().trim_matches('"').to_string()))
+}
+
 fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Element>, ParseError> {
     let (token, rest) = match line.find('(') {
         Some(p) => (&line[..p], &line[p..]),
@@ -244,13 +339,18 @@ fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Element>, Parse
         "SystemDb" => (false, C4ElementKind::SystemDb),
         "SystemDb_Ext" => (true, C4ElementKind::SystemDb),
         "SystemQueue" => (false, C4ElementKind::SystemQueue),
+        "SystemQueue_Ext" => (true, C4ElementKind::SystemQueue),
         "Container" => (false, C4ElementKind::Container),
         "ContainerDb" => (false, C4ElementKind::ContainerDb),
+        "ContainerDb_Ext" => (true, C4ElementKind::ContainerDb),
         "ContainerQueue" => (false, C4ElementKind::ContainerQueue),
+        "ContainerQueue_Ext" => (true, C4ElementKind::ContainerQueue),
         "Container_Ext" => (true, C4ElementKind::Container),
         "Component" => (false, C4ElementKind::Component),
         "ComponentDb" => (false, C4ElementKind::ComponentDb),
+        "ComponentDb_Ext" => (true, C4ElementKind::ComponentDb),
         "ComponentQueue" => (false, C4ElementKind::ComponentQueue),
+        "ComponentQueue_Ext" => (true, C4ElementKind::ComponentQueue),
         "Component_Ext" => (true, C4ElementKind::Component),
         "Node" => (false, C4ElementKind::Node),
         _ => return Ok(None),
@@ -355,6 +455,70 @@ mod tests {
         assert_eq!(d.relations.len(), 1);
         assert_eq!(d.elements[0].label, "Customer");
         assert_eq!(d.relations[0].label, "Uses");
+    }
+
+    #[test]
+    fn parses_ext_db_and_queue_variants() {
+        let src = "C4Container\n\
+            SystemQueue_Ext(sq, \"Bus\")\n\
+            ContainerDb_Ext(cd, \"DB\", \"Postgres\")\n\
+            ContainerQueue_Ext(cq, \"Q\", \"Kafka\")\n\
+            ComponentDb_Ext(pd, \"Store\", \"Redis\")\n\
+            ComponentQueue_Ext(pq, \"MQ\", \"NATS\")\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.elements.len(), 5);
+        assert!(d.elements.iter().all(|e| e.external));
+        let kinds: Vec<_> = d.elements.iter().map(|e| e.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                C4ElementKind::SystemQueue,
+                C4ElementKind::ContainerDb,
+                C4ElementKind::ContainerQueue,
+                C4ElementKind::ComponentDb,
+                C4ElementKind::ComponentQueue,
+            ]
+        );
+    }
+
+    #[test]
+    fn ext_element_keeps_its_relations() {
+        let src = "C4Context\n\
+            System(s, \"S\")\n\
+            SystemQueue_Ext(q, \"Bus\")\n\
+            Rel(s, q, \"publishes\")\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.elements.len(), 2);
+        assert_eq!(d.relations.len(), 1);
+    }
+
+    #[test]
+    fn parses_update_directives() {
+        let src = "C4Context\n\
+            Person(c, \"Customer\")\n\
+            System(s, \"Banking\")\n\
+            Rel(c, s, \"Uses\")\n\
+            UpdateElementStyle(c, $bgColor=\"red\", $fontColor=\"white\", $borderColor=\"black\")\n\
+            UpdateRelStyle(c, s, $textColor=\"blue\", $lineColor=\"green\", $offsetX=\"10\", $offsetY=\"-5\")\n\
+            UpdateLayoutConfig($c4ShapeInRow=\"3\", $c4BoundaryInRow=\"2\")\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.element_styles.len(), 1);
+        let es = &d.element_styles[0];
+        assert_eq!(es.alias, "c");
+        assert_eq!(es.bg_color.as_deref(), Some("red"));
+        assert_eq!(es.font_color.as_deref(), Some("white"));
+        assert_eq!(es.border_color.as_deref(), Some("black"));
+
+        assert_eq!(d.rel_styles.len(), 1);
+        let rs = &d.rel_styles[0];
+        assert_eq!((rs.from.as_str(), rs.to.as_str()), ("c", "s"));
+        assert_eq!(rs.text_color.as_deref(), Some("blue"));
+        assert_eq!(rs.line_color.as_deref(), Some("green"));
+        assert_eq!(rs.offset_x, Some(10.0));
+        assert_eq!(rs.offset_y, Some(-5.0));
+
+        assert_eq!(d.layout.shape_in_row, Some(3));
+        assert_eq!(d.layout.boundary_in_row, Some(2));
     }
 
     #[test]
