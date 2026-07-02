@@ -1,12 +1,24 @@
 //! block-beta renderer. Grid layout: items flow into cells by column count,
 //! groups draw a labeled box around inner items.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
-use crate::parse::{Block, BlockDiagram, BlockEdge, BlockItem, BlockShape};
+use crate::parse::ast::Style;
+use crate::parse::{Block, BlockArrow, BlockDiagram, BlockEdge, BlockItem, BlockShape};
 
 use super::builder::{fnum, SvgBuilder};
+use super::style::resolve_style;
 use super::theme::Theme;
+
+/// Center + bounding box + shape of a laid-out node, keyed by id for edge
+/// routing. `shape` is `None` for a composite group (clipped as a rectangle).
+struct Geom {
+    cx: f64,
+    cy: f64,
+    w: f64,
+    h: f64,
+    shape: Option<BlockShape>,
+}
 
 const PAD: f64 = 30.0;
 const CELL_W: f64 = 100.0;
@@ -31,28 +43,53 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0))
         .font(theme.font_family, theme.font_size);
 
-    // Resolve block centers (recursively) for edges.
-    let mut centers: BTreeMap<String, (f64, f64)> = BTreeMap::new();
-    fn collect(laid: &[Laid], out: &mut BTreeMap<String, (f64, f64)>) {
+    // Resolve node geometry (recursively) for edges — leaf blocks *and*
+    // composite groups, so an edge can target a `block:ID … end` group.
+    let mut nodes: BTreeMap<String, Geom> = BTreeMap::new();
+    fn collect(laid: &[Laid], out: &mut BTreeMap<String, Geom>) {
         for l in laid {
-            if let BlockItem::Block(b) = &l.item {
-                out.insert(b.id.clone(), (l.x + l.w / 2.0, l.y + l.h / 2.0));
-            }
-            if let BlockItem::Group(_) = &l.item {
-                collect(&l.children, out);
+            match &l.item {
+                BlockItem::Block(b) => {
+                    out.insert(
+                        b.id.clone(),
+                        Geom {
+                            cx: l.x + l.w / 2.0,
+                            cy: l.y + l.h / 2.0,
+                            w: l.w,
+                            h: l.h,
+                            shape: Some(b.shape),
+                        },
+                    );
+                }
+                BlockItem::Group(g) => {
+                    if !g.id.is_empty() {
+                        out.insert(
+                            g.id.clone(),
+                            Geom {
+                                cx: l.x + l.w / 2.0,
+                                cy: l.y + l.h / 2.0,
+                                w: l.w,
+                                h: l.h,
+                                shape: None,
+                            },
+                        );
+                    }
+                    collect(&l.children, out);
+                }
+                _ => {}
             }
         }
     }
-    collect(&laid, &mut centers);
+    collect(&laid, &mut nodes);
 
     // Draw items.
     for l in &laid {
-        draw(l, &mut svg, theme);
+        draw(l, &mut svg, theme, &d.class_defs);
     }
     // Draw edges last so they sit on top.
     for l in &laid {
         if let BlockItem::Edge(e) = &l.item {
-            draw_edge(e, &centers, &mut svg, theme);
+            draw_edge(e, &nodes, &mut svg, theme);
         }
     }
 
@@ -117,7 +154,9 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
                 let inner_y = y0 + row as f64 * (row_h + GAP) + GROUP_PAD + 8.0;
                 let (child_laid, cw, ch) =
                     layout_items(&g.items, g.columns.unwrap_or(cols), inner_x, inner_y);
-                let w = cw + GROUP_PAD * 2.0;
+                // Honor `block:id:span` — the group is at least `span` cells wide.
+                let span_w = g.span.max(1) as f64 * CELL_W + (g.span.max(1) - 1) as f64 * GAP;
+                let w = (cw + GROUP_PAD * 2.0).max(span_w);
                 let h = ch + GROUP_PAD * 2.0 + 18.0;
                 laid.push(Laid {
                     item: item.clone(),
@@ -152,13 +191,11 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
     (laid, max_x, max_y)
 }
 
-fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
+fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme, class_defs: &HashMap<String, Style>) {
     let fg = theme.fg;
-    let fill = theme.flow_node_fill;
-    let stroke = theme.flow_node_stroke;
     let fg_muted = theme.fg_muted;
     match &l.item {
-        BlockItem::Block(b) => draw_block(b, l.x, l.y, l.w, l.h, svg, fg, fill, stroke),
+        BlockItem::Block(b) => draw_block(b, l.x, l.y, l.w, l.h, svg, theme, class_defs),
         BlockItem::Group(g) => {
             svg.rect(l.x, l.y, l.w, l.h,
                 &format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" rx=\"4\""));
@@ -171,7 +208,7 @@ fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
                 );
             }
             for c in &l.children {
-                draw(c, svg, theme);
+                draw(c, svg, theme, class_defs);
             }
         }
         BlockItem::Edge(_) | BlockItem::Space(_) => {}
@@ -186,45 +223,21 @@ fn draw_block(
     w: f64,
     h: f64,
     svg: &mut SvgBuilder,
-    fg: &str,
-    fill: &str,
-    stroke: &str,
+    theme: &Theme,
+    class_defs: &HashMap<String, Style>,
 ) {
+    let rs = resolve_style(class_defs, &b.classes, &b.style);
+    let attrs = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
+    let stroke = rs.stroke_or(theme.flow_node_stroke);
+    let label_fill = rs.label_fill(theme.fg);
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
     match b.shape {
-        BlockShape::Rect => svg.rect(
-            x,
-            y,
-            w,
-            h,
-            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-        ),
-        BlockShape::Round => svg.rect(
-            x,
-            y,
-            w,
-            h,
-            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\" rx=\"8\""),
-        ),
-        BlockShape::Stadium => svg.rect(
-            x,
-            y,
-            w,
-            h,
-            &format!(
-                "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\" rx=\"{}\"",
-                fnum(h / 2.0)
-            ),
-        ),
+        BlockShape::Rect => svg.rect(x, y, w, h, &attrs),
+        BlockShape::Round => svg.rect(x, y, w, h, &format!("{attrs} rx=\"8\"")),
+        BlockShape::Stadium => svg.rect(x, y, w, h, &format!("{attrs} rx=\"{}\"", fnum(h / 2.0))),
         BlockShape::Cylinder => {
-            svg.rect(
-                x,
-                y,
-                w,
-                h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
+            svg.rect(x, y, w, h, &attrs);
             svg.line(
                 x,
                 y + 8.0,
@@ -242,12 +255,7 @@ fn draw_block(
         }
         BlockShape::Circle => {
             let r = w.min(h) / 2.0;
-            svg.circle(
-                cx,
-                cy,
-                r,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
+            svg.circle(cx, cy, r, &attrs);
         }
         BlockShape::Rhombus => {
             let d = format!(
@@ -259,10 +267,7 @@ fn draw_block(
                 l = fnum(x),
                 r = fnum(x + w),
             );
-            svg.path(
-                &d,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
+            svg.path(&d, &attrs);
         }
         BlockShape::Hexagon => {
             let dh = h / 2.0;
@@ -276,30 +281,112 @@ fn draw_block(
                 a = fnum(x + dh),
                 b = fnum(x + w - dh),
             );
-            svg.path(
-                &d,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
+            svg.path(&d, &attrs);
+        }
+        BlockShape::Arrow(arrow) => {
+            svg.path(&arrow_path(arrow, x, y, w, h), &attrs);
         }
     }
     svg.text(
         cx,
         cy + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\""),
+        &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\""),
         &b.label,
     );
 }
 
-fn draw_edge(
-    e: &BlockEdge,
-    centers: &BTreeMap<String, (f64, f64)>,
-    svg: &mut SvgBuilder,
-    theme: &Theme,
-) {
+/// SVG path for a block arrow pointing along the set direction(s). Cardinal
+/// singles get a shafted arrow; `(x)`/`(y)` render a double-headed arrow.
+fn arrow_path(a: BlockArrow, x: f64, y: f64, w: f64, h: f64) -> String {
+    let px = |f: f64| fnum(x + w * f);
+    let py = |f: f64| fnum(y + h * f);
+    let p = |fx: f64, fy: f64| format!("{} {}", px(fx), py(fy));
+    let pts: &[(f64, f64)] = if a.left && a.right {
+        &[
+            (0.0, 0.5),
+            (0.2, 0.0),
+            (0.2, 0.25),
+            (0.8, 0.25),
+            (0.8, 0.0),
+            (1.0, 0.5),
+            (0.8, 1.0),
+            (0.8, 0.75),
+            (0.2, 0.75),
+            (0.2, 1.0),
+        ]
+    } else if a.up && a.down {
+        &[
+            (0.5, 0.0),
+            (1.0, 0.2),
+            (0.75, 0.2),
+            (0.75, 0.8),
+            (1.0, 0.8),
+            (0.5, 1.0),
+            (0.0, 0.8),
+            (0.25, 0.8),
+            (0.25, 0.2),
+            (0.0, 0.2),
+        ]
+    } else if a.left {
+        &[
+            (1.0, 0.25),
+            (0.4, 0.25),
+            (0.4, 0.0),
+            (0.0, 0.5),
+            (0.4, 1.0),
+            (0.4, 0.75),
+            (1.0, 0.75),
+        ]
+    } else if a.up {
+        &[
+            (0.25, 1.0),
+            (0.25, 0.4),
+            (0.0, 0.4),
+            (0.5, 0.0),
+            (1.0, 0.4),
+            (0.75, 0.4),
+            (0.75, 1.0),
+        ]
+    } else if a.down {
+        &[
+            (0.25, 0.0),
+            (0.25, 0.6),
+            (0.0, 0.6),
+            (0.5, 1.0),
+            (1.0, 0.6),
+            (0.75, 0.6),
+            (0.75, 0.0),
+        ]
+    } else {
+        // right (default)
+        &[
+            (0.0, 0.25),
+            (0.6, 0.25),
+            (0.6, 0.0),
+            (1.0, 0.5),
+            (0.6, 1.0),
+            (0.6, 0.75),
+            (0.0, 0.75),
+        ]
+    };
+    let mut d = String::new();
+    for (i, (fx, fy)) in pts.iter().enumerate() {
+        d.push_str(if i == 0 { "M" } else { "L" });
+        d.push_str(&p(*fx, *fy));
+    }
+    d.push('Z');
+    d
+}
+
+fn draw_edge(e: &BlockEdge, nodes: &BTreeMap<String, Geom>, svg: &mut SvgBuilder, theme: &Theme) {
     let stroke = theme.flow_edge_stroke;
-    let (Some(a), Some(b)) = (centers.get(&e.from), centers.get(&e.to)) else {
+    let fg = theme.fg;
+    let (Some(a), Some(b)) = (nodes.get(&e.from), nodes.get(&e.to)) else {
         return;
     };
+    // Clip both ends to the node boundaries so the arrowhead sits on the edge.
+    let (ax, ay) = clip((b.cx, b.cy), a);
+    let (bx, by) = clip((a.cx, a.cy), b);
     let marker = if e.arrow {
         " marker-end=\"url(#blockarrow)\""
     } else {
@@ -311,12 +398,56 @@ fn draw_edge(
         );
     }
     svg.line(
-        a.0,
-        a.1,
-        b.0,
-        b.1,
+        ax,
+        ay,
+        bx,
+        by,
         &format!("stroke=\"{stroke}\" stroke-width=\"1.5\"{marker}"),
     );
+    if let Some(label) = &e.label {
+        let (mx, my) = ((ax + bx) / 2.0, (ay + by) / 2.0);
+        svg.text(
+            mx,
+            my - 4.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+            label,
+        );
+    }
+}
+
+/// Clip the point `from → node.center` to the node's shape boundary.
+fn clip(from: (f64, f64), n: &Geom) -> (f64, f64) {
+    let center = (n.cx, n.cy);
+    let dx = from.0 - center.0;
+    let dy = from.1 - center.1;
+    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
+        return center;
+    }
+    match n.shape {
+        Some(BlockShape::Circle) => {
+            let r = n.w.min(n.h) / 2.0;
+            let d = (dx * dx + dy * dy).sqrt().max(1e-9);
+            (center.0 + dx * r / d, center.1 + dy * r / d)
+        }
+        Some(BlockShape::Rhombus) => {
+            let t = 1.0 / (dx.abs() / (n.w / 2.0) + dy.abs() / (n.h / 2.0)).max(1e-9);
+            (center.0 + dx * t, center.1 + dy * t)
+        }
+        _ => {
+            let tx = if dx.abs() > 1e-9 {
+                (n.w / 2.0) / dx.abs()
+            } else {
+                f64::INFINITY
+            };
+            let ty = if dy.abs() > 1e-9 {
+                (n.h / 2.0) / dy.abs()
+            } else {
+                f64::INFINITY
+            };
+            let t = tx.min(ty);
+            (center.0 + dx * t, center.1 + dy * t)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -333,18 +464,54 @@ mod tests {
                     label: "A".into(),
                     shape: BlockShape::Rect,
                     span: 1,
+                    ..Block::default()
                 }),
                 BlockItem::Block(Block {
                     id: "b".into(),
                     label: "B".into(),
                     shape: BlockShape::Circle,
                     span: 1,
+                    ..Block::default()
                 }),
             ],
+            ..BlockDiagram::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">A<"));
         assert!(svg.contains(">B<"));
+    }
+
+    #[test]
+    fn classdef_style_and_edge_label() {
+        let src = "block-beta\n  columns 2\n  a b\n  classDef hot fill:#f00,stroke:#900\n  class a hot\n  a -- \"link\" --> b\n";
+        let svg = render_from(src);
+        assert!(svg.contains("#f00"));
+        assert!(svg.contains(">link<"));
+        // no ghost blocks for the classDef/class keywords
+        assert!(!svg.contains(">classDef<"));
+        assert!(!svg.contains(">hot<"));
+    }
+
+    #[test]
+    fn block_arrow_renders_path() {
+        let svg = render_from("block-beta\n  a<[\"go\"]>(right)\n");
+        assert!(svg.contains("<path"));
+        assert!(svg.contains(">go<"));
+    }
+
+    #[test]
+    fn edge_to_composite_group() {
+        let src = "block-beta\n  block:G\n    x\n  end\n  y\n  G --> y\n";
+        let svg = render_from(src);
+        // one edge line drawn (marker present) — group id resolves as a node
+        assert!(svg.contains("marker-end=\"url(#blockarrow)\""));
+    }
+
+    fn render_from(src: &str) -> String {
+        match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Block(d) => render(&d, &Theme::default()),
+            _ => panic!("expected block"),
+        }
     }
 }
