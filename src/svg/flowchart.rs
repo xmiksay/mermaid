@@ -544,7 +544,7 @@ fn draw_edge(
         (None, EdgeLine::Dotted) => " stroke-dasharray=\"2 4\"".to_string(),
         _ => String::new(),
     };
-    let marker = marker_attr(edge_marker(edge.head));
+    let marker = marker_attr(edge_marker(edge.tail), edge_marker(edge.head));
     let attrs =
         format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{width}\"{dash} {marker}");
     svg.path(&d, &attrs);
@@ -564,11 +564,17 @@ fn edge_marker(head: EdgeHead) -> Option<&'static str> {
     }
 }
 
-fn marker_attr(m: Option<&str>) -> String {
-    match m {
-        Some(id) => format!("marker-end=\"url(#{id})\""),
-        None => String::new(),
+fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
+    // The markers use `orient="auto-start-reverse"`, so the same id flips to
+    // point outward when referenced as `marker-start` (the cross is symmetric).
+    let mut attrs = Vec::new();
+    if let Some(id) = start {
+        attrs.push(format!("marker-start=\"url(#{id})\""));
     }
+    if let Some(id) = end {
+        attrs.push(format!("marker-end=\"url(#{id})\""));
+    }
+    attrs.join(" ")
 }
 
 fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
@@ -753,6 +759,13 @@ mod tests {
     fn solid_no_arrow_omits_marker() {
         let svg = render(&parse_flow("flowchart TD\nA --- B\n"), &Theme::default());
         assert_eq!(svg.matches("marker-end=").count(), 0);
+    }
+
+    #[test]
+    fn bidirectional_edge_emits_start_and_end_markers() {
+        let svg = render(&parse_flow("flowchart LR\nA <--> B\n"), &Theme::default());
+        assert!(svg.contains("marker-start=\"url(#arrow-filled)\""));
+        assert!(svg.contains("marker-end=\"url(#arrow-filled)\""));
     }
 
     #[test]

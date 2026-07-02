@@ -242,6 +242,9 @@ pub struct FlowEdge {
     pub to: String,
     pub label: Option<String>,
     pub line: EdgeLine,
+    /// Start-side head for bidirectional edges (`<-->`, `o--o`, `x--x`);
+    /// `EdgeHead::None` for the common one-directional edge.
+    pub tail: EdgeHead,
     pub head: EdgeHead,
 }
 

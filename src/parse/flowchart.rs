@@ -304,7 +304,7 @@ fn parse_statement(
         if sc.eof() {
             break;
         }
-        let Some((line_style, head, label)) = parse_arrow(&mut sc, line_no)? else {
+        let Some((line_style, tail, head, label)) = parse_arrow(&mut sc, line_no)? else {
             return Err(ParseError::Syntax {
                 message: format!("unexpected text: '{}'", sc.remaining()),
                 line: line_no,
@@ -325,6 +325,7 @@ fn parse_statement(
                     to: dst.id.clone(),
                     label: label.clone(),
                     line: line_style,
+                    tail,
                     head,
                 });
             }
@@ -572,15 +573,38 @@ fn read_until_either<'a>(
     Some((text, tok))
 }
 
-fn parse_arrow(
-    sc: &mut Scanner<'_>,
-    line_no: usize,
-) -> Result<Option<(EdgeLine, EdgeHead, Option<String>)>, ParseError> {
+/// The shape of an edge connector: `(line, tail head, arrow head, label)`.
+type ArrowSpec = (EdgeLine, EdgeHead, EdgeHead, Option<String>);
+
+fn parse_arrow(sc: &mut Scanner<'_>, line_no: usize) -> Result<Option<ArrowSpec>, ParseError> {
     sc.skip_ws();
+    let tail_start = sc.i;
+    // Optional start-side head for bidirectional edges: `<-->`, `o--o`, `x--x`.
+    // `<` is unambiguous; `o`/`x` are only a tail marker when a line char
+    // (`-`, `=`, `.`) immediately follows, so a node id like `o` stays a node.
+    let mut chars = sc.remaining().chars();
+    let tail = match chars.next() {
+        Some('<') => {
+            sc.advance(1);
+            EdgeHead::Arrow
+        }
+        Some('o') if matches!(chars.next(), Some('-') | Some('=') | Some('.')) => {
+            sc.advance(1);
+            EdgeHead::Circle
+        }
+        Some('x') if matches!(chars.next(), Some('-') | Some('=') | Some('.')) => {
+            sc.advance(1);
+            EdgeHead::Cross
+        }
+        _ => EdgeHead::None,
+    };
     // Edge tokens always start with one of `-`, `.`, `=`. Reject anything else.
     let first = match sc.remaining().chars().next() {
         Some(c) if c == '-' || c == '=' || c == '.' => c,
-        _ => return Ok(None),
+        _ => {
+            sc.i = tail_start;
+            return Ok(None);
+        }
     };
 
     // Distinguish thick (`=`) vs solid (`-`) vs dotted (`-.` / `.`).
@@ -622,7 +646,7 @@ fn parse_arrow(
     // Reject lone `-` or `=` that wasn't a real arrow (e.g., inside an id).
     let opener_len = sc.i - start;
     if opener_len < 2 {
-        sc.i = start;
+        sc.i = tail_start;
         return Ok(None);
     }
 
@@ -649,7 +673,7 @@ fn parse_arrow(
     } else {
         None
     };
-    Ok(Some((line_style, head, label)))
+    Ok(Some((line_style, tail, head, label)))
 }
 
 /// Try to read the inline edge-label form. The scanner is positioned at the
@@ -900,6 +924,49 @@ mod tests {
         assert!(kinds.contains(&(EdgeLine::Solid, EdgeHead::Cross)));
         assert!(kinds.contains(&(EdgeLine::Dotted, EdgeHead::None)));
         assert!(kinds.contains(&(EdgeLine::Thick, EdgeHead::None)));
+    }
+
+    #[test]
+    fn bidirectional_edges() {
+        let d = parse("flowchart LR\nA <--> B\nC o--o D\nE x--x F\n").unwrap();
+        assert_eq!(d.edges.len(), 3);
+        assert_eq!(
+            (d.edges[0].tail, d.edges[0].head, d.edges[0].line),
+            (EdgeHead::Arrow, EdgeHead::Arrow, EdgeLine::Solid)
+        );
+        assert_eq!(
+            (d.edges[1].tail, d.edges[1].head),
+            (EdgeHead::Circle, EdgeHead::Circle)
+        );
+        assert_eq!(
+            (d.edges[2].tail, d.edges[2].head),
+            (EdgeHead::Cross, EdgeHead::Cross)
+        );
+        // A leading `o`/`x` node is not swallowed as a tail marker.
+        assert!(d.nodes.iter().any(|n| n.id == "C"));
+        assert!(d.nodes.iter().any(|n| n.id == "E"));
+    }
+
+    #[test]
+    fn bidirectional_edges_thick_and_dotted() {
+        let d = parse("flowchart LR\nA <==> B\nC <-.-> D\n").unwrap();
+        assert_eq!(d.edges.len(), 2);
+        assert_eq!(
+            (d.edges[0].tail, d.edges[0].head, d.edges[0].line),
+            (EdgeHead::Arrow, EdgeHead::Arrow, EdgeLine::Thick)
+        );
+        assert_eq!(
+            (d.edges[1].tail, d.edges[1].head, d.edges[1].line),
+            (EdgeHead::Arrow, EdgeHead::Arrow, EdgeLine::Dotted)
+        );
+    }
+
+    #[test]
+    fn leading_o_node_is_not_a_tail_marker() {
+        // `o` and `x` as bare node ids in the chain position must stay nodes.
+        let d = parse("flowchart LR\nA --- o\no --> B\n").unwrap();
+        assert!(d.nodes.iter().any(|n| n.id == "o"));
+        assert!(d.edges.iter().all(|e| e.tail == EdgeHead::None));
     }
 
     #[test]

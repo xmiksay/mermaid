@@ -132,9 +132,14 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
-- Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick) and `head`
-  (None/Arrow/Circle/Cross) — covers `-->`, `---`, `-.->`, `==>`, `--o`,
-  `--x` plus all no-head variants.
+- Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick), `head`
+  (None/Arrow/Circle/Cross), and `tail` (start-side head, same enum) — covers
+  `-->`, `---`, `-.->`, `==>`, `--o`, `--x` plus all no-head variants, and the
+  bidirectional forms `<-->`, `o--o`, `x--x` (`tail` set). `parse_arrow` reads
+  an optional leading `<`/`o`/`x` before the line dashes; `o`/`x` count as a
+  tail marker only when a line char (`-`/`=`/`.`) immediately follows, so a
+  bare node id like `o` stays a node. The renderer emits `marker-start` (the
+  markers' `orient="auto-start-reverse"` flips them to point outward).
 - Flowchart edge labels come in two forms: the pipe form `A -->|text| B` and
   the inline form `A -- text --> B` (also `-. text .->`, `== text ==>`). The
   inline form is recognized in `parse_arrow` via `read_inline_label`: a
