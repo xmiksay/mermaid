@@ -530,6 +530,9 @@ pub struct GanttTask {
     pub start: TaskStart,
     pub duration_days: f64,
     pub status: TaskStatus,
+    /// `milestone` tag — rendered as a diamond at the start date; duration is
+    /// ignored. Orthogonal to `status` (combinable with `done`/`active`/`crit`).
+    pub milestone: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -4,9 +4,10 @@
 //!   * Header: `gantt`.
 //!   * `title <text>`, `dateFormat <fmt>`, `axisFormat <fmt>`.
 //!   * `section <name>` blocks.
-//!   * Tasks: `<name> : [status,] [id,] <start>, <duration>`
-//!     where status ∈ {active, done, crit}, start is a date or `after <id>`,
-//!     and duration is `Nd` / `Nw` / `Nh` / a bare date.
+//!   * Tasks: `<name> : [tags,] [id,] <start>, <duration>`
+//!     where tags ⊆ {active, done, crit, milestone} (any combination), start
+//!     is a date or `after <id>`, and duration is `Nd` / `Nw` / `Nh` / a bare
+//!     date. `milestone` renders a diamond at the start date (duration ignored).
 
 use super::ast::{GanttDiagram, GanttSection, GanttTask, TaskStart, TaskStatus};
 use super::{strip_comment, ParseError};
@@ -126,12 +127,20 @@ fn parse_task(
     }
 
     let mut status = TaskStatus::Normal;
+    let mut milestone = false;
     let mut id: Option<String> = None;
     let mut consumed = 0;
 
-    // Status (optional, must be the first token if present).
-    if let Some(s) = parse_status(parts[0]) {
-        status = s;
+    // Leading tags (optional, any combination): `active`/`done`/`crit` set the
+    // status, `milestone` is orthogonal. Upstream allows e.g. `crit, milestone`.
+    while consumed < parts.len() {
+        match parts[consumed] {
+            "milestone" => milestone = true,
+            "active" => status = TaskStatus::Active,
+            "done" => status = TaskStatus::Done,
+            "crit" => status = TaskStatus::Crit,
+            _ => break,
+        }
         consumed += 1;
     }
     // ID (optional). Heuristic: if the next token isn't a date/after/duration, treat as id.
@@ -177,16 +186,8 @@ fn parse_task(
         start,
         duration_days,
         status,
+        milestone,
     })
-}
-
-fn parse_status(s: &str) -> Option<TaskStatus> {
-    match s {
-        "active" => Some(TaskStatus::Active),
-        "done" => Some(TaskStatus::Done),
-        "crit" => Some(TaskStatus::Crit),
-        _ => None,
-    }
 }
 
 fn looks_like_start(s: &str) -> bool {
@@ -243,6 +244,21 @@ mod tests {
         let build = &d.sections[1].tasks[0];
         assert_eq!(build.status, TaskStatus::Crit);
         assert_eq!(build.duration_days, 7.0);
+    }
+
+    #[test]
+    fn milestone_tag_parsed_and_combinable() {
+        let s = "gantt\nsection S\n\
+                 M1 : milestone, 2026-01-06, 0d\n\
+                 M2 : crit, milestone, m2, 2026-01-08, 0d\n";
+        let d = parse(s).unwrap();
+        let m1 = &d.sections[0].tasks[0];
+        assert!(m1.milestone);
+        assert_eq!(m1.status, TaskStatus::Normal);
+        let m2 = &d.sections[0].tasks[1];
+        assert!(m2.milestone);
+        assert_eq!(m2.status, TaskStatus::Crit);
+        assert_eq!(m2.id.as_deref(), Some("m2"));
     }
 
     #[test]
