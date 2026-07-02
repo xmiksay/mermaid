@@ -5,6 +5,8 @@
 
 use std::fmt::Write as _;
 
+use super::label::decode_label;
+
 /// Baseline-to-baseline spacing used when a label is split across lines.
 pub const LABEL_LINE_H: f64 = 18.0;
 
@@ -39,10 +41,13 @@ impl SvgBuilder {
 
     pub fn finish(self) -> String {
         let mut out = String::with_capacity(self.body.len() + self.defs.len() + 256);
+        // Responsive envelope, matching upstream Mermaid: a fluid `width="100%"`
+        // capped by `max-width`, with the intrinsic size carried by `viewBox`
+        // (no fixed `height`, so the aspect ratio is preserved when scaled).
         let _ = write!(
             out,
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
-             width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\" \
+             width=\"100%\" viewBox=\"0 0 {w} {h}\" style=\"max-width: {w}px;\" \
              font-family=\"{ff}\" font-size=\"{fs}\">",
             w = fnum(self.width),
             h = fnum(self.height),
@@ -105,7 +110,7 @@ impl SvgBuilder {
                 fnum(x),
                 fnum(y),
                 attrs,
-                escape(content)
+                escape(&decode_label(content))
             );
             return;
         }
@@ -121,7 +126,7 @@ impl SvgBuilder {
                 "<tspan x=\"{}\" dy=\"{}\">{}</tspan>",
                 fnum(x),
                 fnum(dy),
-                escape(line)
+                escape(&decode_label(line))
             );
         }
         let _ = write!(
@@ -335,6 +340,26 @@ mod tests {
         assert!(svg.contains("fill=\"red\""));
         assert!(svg.contains("font-family=\"sans-serif\""));
         assert!(svg.contains("font-size=\"14\""));
+    }
+
+    #[test]
+    fn envelope_is_responsive() {
+        let svg = SvgBuilder::new(120.0, 80.0).finish();
+        assert!(svg.contains("width=\"100%\""));
+        assert!(svg.contains("style=\"max-width: 120px;\""));
+        assert!(svg.contains("viewBox=\"0 0 120 80\""));
+        // No fixed pixel height on the root element.
+        assert!(!svg.contains("height=\""));
+    }
+
+    #[test]
+    fn text_decodes_entities_into_content() {
+        let mut b = SvgBuilder::new(50.0, 20.0);
+        b.text(10.0, 10.0, "", "x #gt; y");
+        let svg = b.finish();
+        // `#gt;` → `>` → XML-escaped back to `&gt;` (never leaks the raw `#gt;`).
+        assert!(svg.contains("x &gt; y"));
+        assert!(!svg.contains("#gt;"));
     }
 
     #[test]

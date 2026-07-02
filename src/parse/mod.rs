@@ -21,6 +21,7 @@ mod kanban;
 mod mindmap;
 mod packet;
 mod pie;
+mod preamble;
 mod quadrant;
 mod radar;
 mod requirement;
@@ -48,6 +49,48 @@ pub enum ParseError {
 }
 
 pub fn parse(input: &str) -> Result<Diagram, ParseError> {
+    parse_with_meta(input).map(|(d, _)| d)
+}
+
+/// Parse `input`, also returning the cross-cutting [`DiagramMeta`] (title,
+/// `accTitle`/`accDescr`, theme) extracted from the source preamble. The
+/// diagram body is parsed from the source with the preamble removed.
+pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError> {
+    let (meta, cleaned) = preamble::strip(input);
+    let mut diagram = dispatch(&cleaned)?;
+    if let Some(title) = &meta.title {
+        apply_title(&mut diagram, title);
+    }
+    Ok((diagram, meta))
+}
+
+/// Copy a frontmatter `title` onto the concrete diagram, but only for diagram
+/// kinds that carry a title and only when the body did not set one itself.
+fn apply_title(diagram: &mut Diagram, title: &str) {
+    let slot: Option<&mut Option<String>> = match diagram {
+        Diagram::Pie(d) => Some(&mut d.title),
+        Diagram::Sequence(d) => Some(&mut d.title),
+        Diagram::Flowchart(d) => Some(&mut d.title),
+        Diagram::Gantt(d) => Some(&mut d.title),
+        Diagram::Journey(d) => Some(&mut d.title),
+        Diagram::Timeline(d) => Some(&mut d.title),
+        Diagram::Quadrant(d) => Some(&mut d.title),
+        Diagram::XyChart(d) => Some(&mut d.title),
+        Diagram::Radar(d) => Some(&mut d.title),
+        Diagram::Packet(d) => Some(&mut d.title),
+        Diagram::GitGraph(d) => Some(&mut d.title),
+        Diagram::C4(d) => Some(&mut d.title),
+        Diagram::Treemap(d) => Some(&mut d.title),
+        _ => None,
+    };
+    if let Some(slot) = slot {
+        if slot.is_none() {
+            *slot = Some(title.to_string());
+        }
+    }
+}
+
+fn dispatch(input: &str) -> Result<Diagram, ParseError> {
     let header_line = input
         .lines()
         .map(strip_comment)

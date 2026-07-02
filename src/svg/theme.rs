@@ -104,7 +104,7 @@ impl Theme {
 
     pub fn by_name(name: &str) -> Option<Self> {
         match name {
-            "default" => Some(Self::default_theme()),
+            "default" | "base" => Some(Self::default_theme()),
             "dark" => Some(Self::dark()),
             "forest" => Some(Self::forest()),
             "neutral" => Some(Self::neutral()),

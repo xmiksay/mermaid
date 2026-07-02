@@ -13,6 +13,9 @@ const TITLE_GAP: f64 = 30.0;
 const LEGEND_ROW: f64 = 22.0;
 const SWATCH: f64 = 14.0;
 const LEGEND_LABEL_MAX: usize = 24;
+/// Slices below this fraction of the total are dropped, matching upstream
+/// `createPieArcs`.
+const MIN_SLICE: f64 = 0.01;
 
 pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
@@ -21,13 +24,22 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
 
     let total: f64 = p.entries.iter().map(|e| e.value.max(0.0)).sum();
 
-    let legend_w = if p.entries.is_empty() {
+    // Upstream `createPieArcs` drops slices under 1% of the total (percentages
+    // stay relative to the full total). Insertion order is preserved — d3 uses
+    // `.sort(null)` — and the original index keeps each slice's palette color.
+    let shown: Vec<(usize, &crate::parse::PieEntry)> = p
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| total <= 0.0 || e.value.max(0.0) / total >= MIN_SLICE)
+        .collect();
+
+    let legend_w = if shown.is_empty() {
         0.0
     } else {
-        let longest = p
-            .entries
+        let longest = shown
             .iter()
-            .map(|e| label_len(&legend_text(e, total, p.show_data)))
+            .map(|(_, e)| label_len(&legend_text(e, total, p.show_data)))
             .max()
             .unwrap_or(0);
         // ~7 px per char for sans-serif 14px at the legend size, + swatch + padding
@@ -51,7 +63,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
         );
     }
 
-    if total <= 0.0 || p.entries.is_empty() {
+    if total <= 0.0 || shown.is_empty() {
         // Empty pie: just draw the outline so the diagram is identifiable.
         svg.circle(
             cx,
@@ -64,7 +76,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
 
     // Sweep segments starting at angle = -π/2 (top, like most pie charts).
     let mut angle = -std::f64::consts::FRAC_PI_2;
-    for (i, e) in p.entries.iter().enumerate() {
+    for &(i, e) in &shown {
         let frac = e.value.max(0.0) / total;
         if frac <= 0.0 {
             continue;
@@ -112,9 +124,9 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
 
     // Legend
     let legend_x = PAD + RADIUS * 2.0 + 8.0;
-    let legend_top = PAD + title_h + RADIUS - (p.entries.len() as f64 * LEGEND_ROW) / 2.0;
-    for (i, e) in p.entries.iter().enumerate() {
-        let y = legend_top + i as f64 * LEGEND_ROW;
+    let legend_top = PAD + title_h + RADIUS - (shown.len() as f64 * LEGEND_ROW) / 2.0;
+    for (row, &(i, e)) in shown.iter().enumerate() {
+        let y = legend_top + row as f64 * LEGEND_ROW;
         svg.rect(
             legend_x,
             y,
@@ -232,6 +244,20 @@ mod tests {
         let svg = render(&pie(vec![("All", 1.0)]), &Theme::default());
         // Two path segments for full circle.
         assert_eq!(svg.matches("<path").count(), 2);
+    }
+
+    #[test]
+    fn drops_slices_below_one_percent() {
+        // C is 0.5% of the total (< 1%) → filtered from arcs and legend, like
+        // upstream `createPieArcs`.
+        let svg = render(
+            &pie(vec![("A", 100.0), ("B", 99.5), ("C", 1.0)]),
+            &Theme::default(),
+        );
+        assert_eq!(svg.matches("<path").count(), 2, "tiny slice dropped");
+        assert!(svg.contains("A ("));
+        assert!(svg.contains("B ("));
+        assert!(!svg.contains("C ("), "tiny slice absent from legend");
     }
 
     #[test]

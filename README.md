@@ -65,9 +65,9 @@ let svg = render_with(source, &custom)?;
 
 | Type | Header keyword(s) | Notable features |
 |---|---|---|
-| Pie | `pie` | `showData`, title, entries |
+| Pie | `pie` | `showData`, title, entries (slices under 1% dropped) |
 | Sequence | `sequenceDiagram` | participants/actors, `autonumber`, `activate`/`deactivate`, nested `alt`/`par`/`critical`/`loop`/`opt`, notes |
-| Flowchart | `flowchart`, `graph` | directions TD/BT/LR/RL, all edge styles (`-->`, `---`, `-.->`, `==>`, `--o`, `--x` + no-head variants), bidirectional edges (`<-->`, `o--o`, `x--x`), multi-source/target (`A & B --> C & D`), nested `subgraph`, `click` links/callbacks |
+| Flowchart | `flowchart`, `graph` | directions TD/BT/LR/RL, all edge styles (`-->`, `---`, `-.->`, `==>`, `--o`, `--x` + no-head variants), bidirectional edges (`<-->`, `o--o`, `x--x`), multi-source/target (`A & B --> C & D`), nested `subgraph`, `click` links/callbacks, frontmatter `title` |
 | State | `stateDiagram`, `stateDiagram-v2` | composite states with parallel regions (`--`), one-line and multi-line notes |
 | Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`) |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
@@ -89,6 +89,24 @@ let svg = render_with(source, &custom)?;
 | Treemap | `treemap-beta`, `treemap` | nested weighted rectangles |
 | ZenUML | `zenuml` | rendered via the sequence renderer |
 
+### Cross-cutting features
+
+These work on every diagram type:
+
+- **YAML frontmatter** — a leading `--- … ---` block sets the diagram `title:`
+  and, via `config: { theme: … }`, the render theme.
+- **`%%{init: {"theme": …}}%%` directives** — select a built-in theme inline.
+- **`accTitle:` / `accDescr:`** (and the `accDescr { … }` block form) — emitted
+  as `<title>`/`<desc>` and linked with `aria-labelledby`/`aria-describedby`;
+  the root `<svg>` always carries `role` + `aria-roledescription`.
+- **Responsive output** — `width="100%"` + `style="max-width: Npx;"` + `viewBox`
+  (no fixed height), so diagrams scale to their container.
+- **Entity codes & markdown strings in labels** — `#quot;`, `#35;`, `#x2665;`
+  etc. are decoded; backtick-fenced markdown emphasis (`**bold**`) is stripped
+  to plain text.
+
+Note: pie charts drop slices under 1% of the total, matching upstream.
+
 ## API
 
 ```rust
@@ -97,8 +115,9 @@ pub fn render_with(input: &str, theme: &Theme) -> Result<String, RenderError>;
 pub fn render_diagram(d: &Diagram) -> Result<String, RenderError>;
 pub fn render_diagram_with(d: &Diagram, theme: &Theme) -> Result<String, RenderError>;
 pub fn parse(input: &str) -> Result<Diagram, ParseError>;
+pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError>;
 
-pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, ...
+pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, DiagramMeta, ...
 ```
 
 ## Implementation notes

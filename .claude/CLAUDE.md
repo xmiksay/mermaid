@@ -12,14 +12,17 @@ src/
 ├── bin/
 │   └── mermaid-svg.rs   CLI (stdin/file → stdout/file, --theme flag)
 ├── parse/           Mermaid source → Diagram AST (line-oriented scanners)
-│   ├── mod.rs       parse() dispatcher, ParseError, ast re-export
-│   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`)
+│   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError, ast re-export
+│   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta
+│   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
 │   └── {pie,sequence,flowchart,state,class,er,gantt,
 │        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
 │        gitgraph,requirement,c4,block,architecture,kanban,treemap,zenuml}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
+│   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
+│   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
 │   ├── theme.rs     Theme struct + default/dark/forest/neutral
 │   └── {pie,sequence,flowchart,state,class,er,gantt,
 │        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
@@ -46,6 +49,9 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 | Matching SVG renderers (zenuml reuses sequence renderer) | done |
 | Themes (default, dark, forest, neutral + user-defined) | done |
 | CLI binary (`mermaid-svg`) | done |
+| Cross-cutting preamble (frontmatter title/theme, `%%{init}%%`, accTitle/accDescr) | done |
+| Responsive SVG output + `role`/`aria`/`<title>`/`<desc>` accessibility | done |
+| `#…;` entity codes + markdown-string emphasis in labels | done |
 
 ## Build & test
 
@@ -130,6 +136,30 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 
 ## Things to remember
 
+- **Source preamble** (`src/parse/preamble.rs`) is stripped by
+  `parse_with_meta` *before* per-diagram dispatch, yielding a `DiagramMeta`
+  (title, `acc_title`, `acc_descr`, `theme`): YAML frontmatter (`--- title: …
+  / config: { theme: … } ---`), `%%{init: {theme: …}}%%` directives, and
+  `accTitle:`/`accDescr:` (line + `accDescr { … }` block). `parse()` still
+  returns just the `Diagram`; a frontmatter `title` is copied onto the
+  diagram's own `title` field when it has one (flowchart gained a `title`).
+- **Rendering is `parse_with_meta` → `render_body` (per-diagram match) →
+  `decorate::apply`.** A preamble `theme` overrides the caller's theme.
+  `decorate` (string surgery on the finished doc) always adds
+  `role="graphics-document document"` + `aria-roledescription="<kind>"`, and
+  when meta carries accTitle/accDescr injects `<title>`/`<desc>` + the matching
+  `aria-labelledby`/`aria-describedby`. `render_diagram_with` (no meta) still
+  gets role/aria but no title/desc.
+- **Output is responsive**: `SvgBuilder::finish()` emits `width="100%"` +
+  `style="max-width: {w}px;"` + `viewBox` and **no fixed height** (upstream
+  shape). Tests must not assert a root `height="…"`.
+- **Label text is decoded** in `SvgBuilder::text()` via `decode_label`
+  (`src/svg/label.rs`):
+  `#…;` entity codes (`#quot;`→`"`, `#35;`→`#`, `#9829;`/`#x2665;`→`♥`, named
+  set) and backtick-fenced markdown *strings* have their `**`/`*`/`_` emphasis
+  stripped. Bare labels with `_`/`*` (e.g. `snake_case`) are left untouched.
+- Pie drops slices `< 1%` of the total (`MIN_SLICE`, matching upstream
+  `createPieArcs`); insertion order and per-slice palette color are preserved.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `FlowEdge` has separate `line` (Solid/Dotted/Thick), `head`

@@ -21,6 +21,8 @@ const MIN_W: f64 = 60.0;
 const MIN_H: f64 = 40.0;
 const CANVAS_PAD: f64 = 24.0;
 const SUBGRAPH_PAD: f64 = 16.0;
+/// Vertical space reserved above the graph for a frontmatter title.
+const TITLE_BAND: f64 = 34.0;
 
 pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     if d.nodes.is_empty() {
@@ -30,6 +32,8 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     }
 
     let dir = d.direction;
+    // Reserve a band at the top for a frontmatter title, if present.
+    let title_h = if d.title.is_some() { TITLE_BAND } else { 0.0 };
     let node_sizes: Vec<(f64, f64)> = d.nodes.iter().map(node_size).collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .nodes
@@ -73,7 +77,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             FlowDirection::LeftRight => (sy, sx),
             FlowDirection::RightLeft => (raw_h - sy, sx),
         };
-        (tx + CANVAS_PAD, ty + CANVAS_PAD)
+        (tx + CANVAS_PAD, ty + CANVAS_PAD + title_h)
     };
 
     // Screen-space node positions and edge polylines. Working in screen space
@@ -105,11 +109,27 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         max_x = max_x.max(bx1 + SUBGRAPH_PAD);
         max_y = max_y.max(by1 + SUBGRAPH_PAD);
     }
-    let width = max_x + CANVAS_PAD;
+    let mut width = max_x + CANVAS_PAD;
     let height = max_y + CANVAS_PAD;
+
+    // A long title can be wider than the graph itself; grow the canvas to fit.
+    if let Some(t) = &d.title {
+        let title_w = t.chars().count() as f64 * (CHAR_W + 2.0) + CANVAS_PAD * 2.0;
+        width = width.max(title_w);
+    }
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
+
+    if let Some(t) = &d.title {
+        let fg = theme.fg;
+        svg.text(
+            width / 2.0,
+            CANVAS_PAD + 6.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            t,
+        );
+    }
 
     // Subgraph frames (drawn first so they sit under nodes/edges).
     draw_subgraphs(&mut svg, d, &boxes, theme);
@@ -856,6 +876,15 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains("A"));
         assert!(svg.contains("C"));
+    }
+
+    #[test]
+    fn frontmatter_title_is_drawn() {
+        let d = parse_flow("---\ntitle: My Flow\n---\nflowchart TD\nA --> B\n");
+        assert_eq!(d.title.as_deref(), Some("My Flow"));
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">My Flow</text>"));
+        assert!(svg.contains("font-weight=\"bold\""));
     }
 
     #[test]
