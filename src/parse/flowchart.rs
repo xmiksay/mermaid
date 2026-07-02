@@ -12,13 +12,14 @@
 //!     four edges.
 //!   * `subgraph <id> [label]` ... `end` blocks tracked in `subgraphs`,
 //!     including nesting.
-//!   * Skipped quietly: `style`, `classDef`, `class`, `click`, `linkStyle`.
+//!   * `click <id> …` binds a hyperlink or JS callback to a node.
+//!   * Skipped quietly: `style`, `classDef`, `class`, `linkStyle`.
 
 use std::collections::HashMap;
 
 use super::ast::{
-    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style,
-    Subgraph,
+    ClickAction, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram,
+    NodeShape, Style, Subgraph,
 };
 use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
@@ -74,7 +75,14 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             handle_link_style(rest, &mut diag);
             continue;
         }
-        if line.starts_with("click ") || line.starts_with("direction ") {
+        if let Some(rest) = line.strip_prefix("click ") {
+            if let Some((id, action)) = parse_click(rest) {
+                let idx = node_index(&mut diag, &mut nodes_by_id, &id);
+                diag.nodes[idx].click = Some(action);
+            }
+            continue;
+        }
+        if line.starts_with("direction ") {
             continue;
         }
 
@@ -174,22 +182,33 @@ fn handle_subgraph_open(
     stack.push(new_idx);
 }
 
+/// Index of the node with `id`, creating a bare rectangle placeholder if a
+/// directive references it before it is declared.
+fn node_index(
+    diag: &mut FlowchartDiagram,
+    nodes_by_id: &mut HashMap<String, usize>,
+    id: &str,
+) -> usize {
+    *nodes_by_id.entry(id.to_string()).or_insert_with(|| {
+        diag.nodes.push(FlowNode {
+            id: id.to_string(),
+            text: id.to_string(),
+            shape: NodeShape::Rect,
+            classes: Vec::new(),
+            style: Style::new(),
+            click: None,
+        });
+        diag.nodes.len() - 1
+    })
+}
+
 /// `style <id> <props>` — inline style on a single node.
 fn handle_style(rest: &str, diag: &mut FlowchartDiagram, nodes_by_id: &mut HashMap<String, usize>) {
     let Some((id, props)) = rest.trim().split_once(char::is_whitespace) else {
         return;
     };
     let style = parse_style_props(props);
-    let idx = *nodes_by_id.entry(id.trim().to_string()).or_insert_with(|| {
-        diag.nodes.push(FlowNode {
-            id: id.trim().to_string(),
-            text: id.trim().to_string(),
-            shape: NodeShape::Rect,
-            classes: Vec::new(),
-            style: Style::new(),
-        });
-        diag.nodes.len() - 1
-    });
+    let idx = node_index(diag, nodes_by_id, id.trim());
     diag.nodes[idx].style = style;
 }
 
@@ -225,16 +244,7 @@ fn handle_class_apply(
         if id.is_empty() {
             continue;
         }
-        let idx = *nodes_by_id.entry(id.to_string()).or_insert_with(|| {
-            diag.nodes.push(FlowNode {
-                id: id.to_string(),
-                text: id.to_string(),
-                shape: NodeShape::Rect,
-                classes: Vec::new(),
-                style: Style::new(),
-            });
-            diag.nodes.len() - 1
-        });
+        let idx = node_index(diag, nodes_by_id, id);
         let classes = &mut diag.nodes[idx].classes;
         if !classes.iter().any(|c| c == class_name) {
             classes.push(class_name.to_string());
@@ -413,7 +423,118 @@ fn finish_node(id: String, text: String, shape: NodeShape, sc: &mut Scanner<'_>)
         shape,
         classes,
         style: Style::new(),
+        click: None,
     }
+}
+
+/// Parse a `click <id> …` directive body (text after `click `) into the node
+/// id and its bound action. Returns `None` if the line is malformed.
+///
+/// Recognized forms (tooltips and `_target` are optional throughout):
+///   `click A "url" "tooltip" _blank`   → hyperlink
+///   `click A href "url" "tooltip"`      → hyperlink
+///   `click A callback "tooltip"`        → JS callback
+///   `click A call callback() "tooltip"` → JS callback
+fn parse_click(rest: &str) -> Option<(String, ClickAction)> {
+    let toks = click_tokens(rest);
+    let (id_tok, args) = toks.split_first()?;
+    let id = id_tok.value.clone();
+    let head = args.first()?;
+
+    if !head.quoted && head.value == "href" {
+        let url = args.get(1)?.value.clone();
+        let (tooltip, target) = tooltip_and_target(&args[2..]);
+        return Some((
+            id,
+            ClickAction::Href {
+                url,
+                tooltip,
+                target,
+            },
+        ));
+    }
+    if !head.quoted && head.value == "call" {
+        let function = args.get(1)?.value.clone();
+        let tooltip = args.get(2).map(|t| t.value.clone());
+        return Some((id, ClickAction::Callback { function, tooltip }));
+    }
+    if head.quoted {
+        let url = head.value.clone();
+        let (tooltip, target) = tooltip_and_target(&args[1..]);
+        return Some((
+            id,
+            ClickAction::Href {
+                url,
+                tooltip,
+                target,
+            },
+        ));
+    }
+    // Bare token → callback function name.
+    let function = head.value.clone();
+    let tooltip = args.get(1).map(|t| t.value.clone());
+    Some((id, ClickAction::Callback { function, tooltip }))
+}
+
+struct ClickToken {
+    quoted: bool,
+    value: String,
+}
+
+/// Split a click-directive body into whitespace-delimited tokens, treating a
+/// `"…"` run as a single (quoted) token so URLs and tooltips keep their spaces.
+fn click_tokens(s: &str) -> Vec<ClickToken> {
+    let bytes = s.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        if bytes[i] == b'"' {
+            i += 1;
+            let start = i;
+            while i < bytes.len() && bytes[i] != b'"' {
+                i += 1;
+            }
+            tokens.push(ClickToken {
+                quoted: true,
+                value: s[start..i].to_string(),
+            });
+            if i < bytes.len() {
+                i += 1; // closing quote
+            }
+        } else {
+            let start = i;
+            while i < bytes.len() && bytes[i] != b' ' && bytes[i] != b'\t' {
+                i += 1;
+            }
+            tokens.push(ClickToken {
+                quoted: false,
+                value: s[start..i].to_string(),
+            });
+        }
+    }
+    tokens
+}
+
+/// From the trailing tokens of a hyperlink `click`, pick the first quoted token
+/// as the tooltip and the first `_`-prefixed bare token (e.g. `_blank`) as the
+/// link target.
+fn tooltip_and_target(rest: &[ClickToken]) -> (Option<String>, Option<String>) {
+    let mut tooltip = None;
+    let mut target = None;
+    for tok in rest {
+        if tok.quoted {
+            tooltip.get_or_insert_with(|| tok.value.clone());
+        } else if tok.value.starts_with('_') {
+            target.get_or_insert_with(|| tok.value.clone());
+        }
+    }
+    (tooltip, target)
 }
 
 fn unquote(s: &str) -> String {
@@ -723,8 +844,61 @@ mod tests {
     }
 
     #[test]
-    fn skips_click() {
-        let d = parse("flowchart TD\nA-->B\nclick A href \"http://x\"\n").unwrap();
+    fn click_href_with_tooltip() {
+        let d =
+            parse("flowchart TD\nA-->B\nclick A \"https://example.com\" \"tooltip\"\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Href {
+                url: "https://example.com".into(),
+                tooltip: Some("tooltip".into()),
+                target: None,
+            })
+        );
+    }
+
+    #[test]
+    fn click_href_keyword_and_target() {
+        let d = parse("flowchart TD\nA-->B\nclick A href \"http://x\" \"tip\" _blank\n").unwrap();
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Href {
+                url: "http://x".into(),
+                tooltip: Some("tip".into()),
+                target: Some("_blank".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn click_callback_bare() {
+        let d = parse("flowchart TD\nA-->B\nclick A callback \"a tip\"\n").unwrap();
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Callback {
+                function: "callback".into(),
+                tooltip: Some("a tip".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn click_callback_call_keyword() {
+        let d = parse("flowchart TD\nA-->B\nclick A call handler()\n").unwrap();
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Callback {
+                function: "handler()".into(),
+                tooltip: None,
+            })
+        );
+    }
+
+    #[test]
+    fn click_before_node_declared_creates_it() {
+        let d = parse("flowchart TD\nclick Z \"http://z\"\nZ-->B\n").unwrap();
+        assert!(node(&d, "Z").click.is_some());
         assert_eq!(d.edges.len(), 1);
     }
 

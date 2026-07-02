@@ -138,6 +138,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 - `A & B --> C & D` produces 4 edges (cross product) — multi-source/target.
 - Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
   nesting. The renderer draws a dashed bounding rect around the group.
+- Flowchart `click <id>` sets `FlowNode.click` (`ClickAction::Href` for
+  `"url"`/`href` forms, `ClickAction::Callback` for a bare name/`call fn()`).
+  The renderer wraps hyperlink nodes in `<a href>` and callback nodes in a
+  `<g class="clickable" onclick>`; an optional tooltip becomes a `<title>`.
 - Sequence parser has **nested items** (`Vec<SequenceItem>`) — `Alt`/`Par`/
   `Critical` blocks have branches; `Loop`/`Opt` have label + items. Renderer
   draws labeled frames with tab labels.

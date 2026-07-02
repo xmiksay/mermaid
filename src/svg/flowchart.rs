@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use crate::parse::{
-    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style,
-    Subgraph,
+    ClickAction, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram,
+    NodeShape, Style, Subgraph,
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
@@ -163,6 +163,9 @@ fn draw_node(
     class_defs: &HashMap<String, Style>,
     theme: &Theme,
 ) {
+    if let Some(action) = &node.click {
+        open_click(svg, action);
+    }
     let rs = resolve_style(class_defs, &node.classes, &node.style);
     let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
     let fill_attr = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
@@ -339,6 +342,56 @@ fn draw_node(
     let fg = rs.label_fill(theme.fg);
     let font = rs.font_size.as_deref();
     draw_label(svg, (cx, cy), &node.text, fg, font);
+    if let Some(action) = &node.click {
+        close_click(svg, action);
+    }
+}
+
+/// Open the wrapper element for a clickable node: an `<a>` for hyperlinks or a
+/// `<g class="clickable" onclick=…>` for JS callbacks, plus a `<title>` tooltip.
+fn open_click(svg: &mut SvgBuilder, action: &ClickAction) {
+    match action {
+        ClickAction::Href {
+            url,
+            tooltip,
+            target,
+        } => {
+            let target_attr = match target {
+                Some(t) => format!(" target=\"{}\"", escape(t)),
+                None => String::new(),
+            };
+            svg.raw(&format!(
+                "<a href=\"{url}\"{target_attr}>",
+                url = escape(url)
+            ));
+            emit_tooltip(svg, tooltip);
+        }
+        ClickAction::Callback { function, tooltip } => {
+            let call = if function.contains('(') {
+                function.clone()
+            } else {
+                format!("{function}()")
+            };
+            svg.raw(&format!(
+                "<g class=\"clickable\" style=\"cursor:pointer\" onclick=\"{}\">",
+                escape(&call)
+            ));
+            emit_tooltip(svg, tooltip);
+        }
+    }
+}
+
+fn emit_tooltip(svg: &mut SvgBuilder, tooltip: &Option<String>) {
+    if let Some(t) = tooltip {
+        svg.raw(&format!("<title>{}</title>", escape(t)));
+    }
+}
+
+fn close_click(svg: &mut SvgBuilder, action: &ClickAction) {
+    match action {
+        ClickAction::Href { .. } => svg.raw("</a>"),
+        ClickAction::Callback { .. } => svg.raw("</g>"),
+    }
 }
 
 fn draw_label(
@@ -646,11 +699,6 @@ fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
     ));
 }
 
-#[allow(dead_code)]
-fn _use_escape(s: &str) -> String {
-    escape(s)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -795,6 +843,44 @@ mod tests {
             &Theme::default(),
         );
         assert!(any_bezier_path(&svg));
+    }
+
+    #[test]
+    fn click_href_wraps_node_in_anchor() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA-->B\nclick A \"https://example.com\" \"go\"\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("<a href=\"https://example.com\">"));
+        assert!(svg.contains("<title>go</title>"));
+        assert!(svg.contains("</a>"));
+    }
+
+    #[test]
+    fn click_href_target_renders_attribute() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA-->B\nclick A href \"http://x\" \"t\" _blank\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("target=\"_blank\""));
+    }
+
+    #[test]
+    fn click_callback_emits_onclick() {
+        let svg = render(
+            &parse_flow("flowchart TD\nA-->B\nclick A doThing \"hint\"\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("onclick=\"doThing()\""));
+        assert!(svg.contains("class=\"clickable\""));
+        assert!(svg.contains("<title>hint</title>"));
+    }
+
+    #[test]
+    fn non_clickable_node_has_no_anchor() {
+        let svg = render(&parse_flow("flowchart TD\nA-->B\n"), &Theme::default());
+        assert!(!svg.contains("<a "));
+        assert!(!svg.contains("onclick"));
     }
 
     #[test]

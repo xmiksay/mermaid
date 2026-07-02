@@ -180,6 +180,28 @@ pub struct FlowNode {
     pub classes: Vec<String>,
     /// Inline `style <id> …` properties (highest priority).
     pub style: Style,
+    /// Interaction bound via a `click` directive, if any.
+    pub click: Option<ClickAction>,
+}
+
+/// A `click <id> …` interaction. Either turns the node into a hyperlink or
+/// binds a JavaScript callback fired on click.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClickAction {
+    /// `click A "url" "tooltip"` / `click A href "url" "tooltip" _blank` —
+    /// wraps the node in an SVG `<a>` link.
+    Href {
+        url: String,
+        tooltip: Option<String>,
+        /// Link target such as `_blank`; `None` renders no `target` attribute.
+        target: Option<String>,
+    },
+    /// `click A callback "tooltip"` / `click A call callback() "tooltip"` —
+    /// binds an `onclick` handler invoking the named function.
+    Callback {
+        function: String,
+        tooltip: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
