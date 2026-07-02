@@ -19,8 +19,8 @@
 //!   * `box label` ... `end` — collects participants declared inside.
 
 use super::ast::{
-    AltBranch, ArrowKind, Message, NotePosition, Participant, ParticipantKind, SequenceBlock,
-    SequenceBox, SequenceDiagram, SequenceItem, SequenceNote,
+    AltBranch, ArrowKind, AutoNumberConfig, Message, NotePosition, Participant, ParticipantKind,
+    SequenceBlock, SequenceBox, SequenceDiagram, SequenceItem, SequenceNote, SequenceRect,
 };
 use super::{strip_comment, ParseError};
 
@@ -114,6 +114,14 @@ enum BlockFrame {
     },
     Opt {
         label: String,
+        items: Vec<SequenceItem>,
+    },
+    Break {
+        label: String,
+        items: Vec<SequenceItem>,
+    },
+    Rect {
+        color: Option<String>,
         items: Vec<SequenceItem>,
     },
     Box {
@@ -244,6 +252,40 @@ fn handle_block_keyword(
         return Ok(true);
     }
 
+    if let Some(rest) = line.strip_prefix("break ") {
+        stack.push(BlockFrame::Break {
+            label: rest.trim().to_string(),
+            items: Vec::new(),
+        });
+        return Ok(true);
+    }
+    if line == "break" {
+        stack.push(BlockFrame::Break {
+            label: String::new(),
+            items: Vec::new(),
+        });
+        return Ok(true);
+    }
+
+    if let Some(rest) = line.strip_prefix("rect ") {
+        // `rect <color>` — the whole argument is the fill (a bare label with no
+        // color makes no sense for a background band).
+        let arg = rest.trim();
+        let color = (!arg.is_empty()).then(|| arg.to_string());
+        stack.push(BlockFrame::Rect {
+            color,
+            items: Vec::new(),
+        });
+        return Ok(true);
+    }
+    if line == "rect" {
+        stack.push(BlockFrame::Rect {
+            color: None,
+            items: Vec::new(),
+        });
+        return Ok(true);
+    }
+
     if let Some(rest) = line.strip_prefix("box ") {
         let (color, label) = split_box_color(rest.trim());
         stack.push(BlockFrame::Box {
@@ -302,6 +344,8 @@ fn close_frame(frame: BlockFrame) -> SequenceItem {
         }
         BlockFrame::Loop { label, items } => SequenceItem::Loop(SequenceBlock { label, items }),
         BlockFrame::Opt { label, items } => SequenceItem::Opt(SequenceBlock { label, items }),
+        BlockFrame::Break { label, items } => SequenceItem::Break(SequenceBlock { label, items }),
+        BlockFrame::Rect { color, items } => SequenceItem::Rect(SequenceRect { color, items }),
         BlockFrame::Box {
             color,
             label,
@@ -325,7 +369,10 @@ fn push_item(diag: &mut SequenceDiagram, stack: &mut [BlockFrame], item: Sequenc
             BlockFrame::Alt { current_items, .. }
             | BlockFrame::Par { current_items, .. }
             | BlockFrame::Critical { current_items, .. } => current_items.push(item),
-            BlockFrame::Loop { items, .. } | BlockFrame::Opt { items, .. } => items.push(item),
+            BlockFrame::Loop { items, .. }
+            | BlockFrame::Opt { items, .. }
+            | BlockFrame::Break { items, .. }
+            | BlockFrame::Rect { items, .. } => items.push(item),
             // A box only groups participants; any messages/notes inside it are
             // ordinary events that belong at the diagram level.
             BlockFrame::Box { .. } => diag.items.push(item),
@@ -345,8 +392,11 @@ fn parse_line_to_items(
         return Ok(Vec::new());
     }
     if line == "autonumber" || line.starts_with("autonumber ") {
-        diag.autonumber = true;
-        return Ok(Vec::new());
+        let cfg = parse_autonumber(line);
+        if cfg.is_some() {
+            diag.autonumber = true;
+        }
+        return Ok(vec![SequenceItem::AutoNumber(cfg)]);
     }
 
     if let Some(rest) = line.strip_prefix("participant ") {
@@ -390,6 +440,21 @@ fn parse_line_to_items(
         Activation::None => items.push(SequenceItem::Message(msg)),
     }
     Ok(items)
+}
+
+/// `autonumber` / `autonumber <start>` / `autonumber <start> <step>` /
+/// `autonumber off`. Bare `autonumber` starts at 1 with step 1; `off` returns
+/// `None`. Non-numeric params fall back to the defaults.
+fn parse_autonumber(line: &str) -> Option<AutoNumberConfig> {
+    let rest = line["autonumber".len()..].trim();
+    if rest.eq_ignore_ascii_case("off") {
+        return None;
+    }
+    let mut nums = rest.split_whitespace();
+    Some(AutoNumberConfig {
+        start: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1),
+        step: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1),
+    })
 }
 
 fn parse_note(line: &str) -> Option<SequenceNote> {
@@ -765,6 +830,49 @@ mod tests {
     fn autonumber_sets_flag() {
         let d = parse("sequenceDiagram\nautonumber\nA->>B: x\n").unwrap();
         assert!(d.autonumber);
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 1 && c.step == 1
+        ));
+    }
+
+    #[test]
+    fn autonumber_start_and_step() {
+        let d = parse("sequenceDiagram\nautonumber 10 5\nA->>B: x\n").unwrap();
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 10 && c.step == 5
+        ));
+    }
+
+    #[test]
+    fn autonumber_off_emits_none() {
+        let d = parse("sequenceDiagram\nautonumber\nA->>B: x\nautonumber off\n").unwrap();
+        // The trailing `off` is a positional None marker; it doesn't clear the
+        // "was ever on" flag.
+        assert!(d.autonumber);
+        assert!(matches!(
+            d.items.last(),
+            Some(SequenceItem::AutoNumber(None))
+        ));
+    }
+
+    #[test]
+    fn break_block_parses() {
+        let d = parse("sequenceDiagram\nbreak boom\nA->>B: x\nend\n").unwrap();
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Break(b)) if b.label == "boom" && b.items.len() == 1
+        ));
+    }
+
+    #[test]
+    fn rect_block_captures_color_and_items() {
+        let d = parse("sequenceDiagram\nrect rgb(0,255,0)\nA->>B: x\nend\n").unwrap();
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Rect(r)) if r.color.as_deref() == Some("rgb(0,255,0)") && r.items.len() == 1
+        ));
     }
 
     #[test]

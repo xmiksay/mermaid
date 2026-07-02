@@ -659,6 +659,10 @@ fn draw_edge(
     end: &EndClip,
     theme: &Theme,
 ) {
+    // Invisible links (`~~~`) only shape the layout; they draw nothing.
+    if edge.line == EdgeLine::Invisible {
+        return;
+    }
     let n = pts.len();
     let first = clip_end(pts[1], start);
     let last = clip_end(pts[n - 2], end);
@@ -900,6 +904,25 @@ mod tests {
     fn dotted_edge_uses_dasharray() {
         let svg = render(&parse_flow("flowchart TD\nA -.-> B\n"), &Theme::default());
         assert!(svg.contains("stroke-dasharray=\"2 4\""));
+    }
+
+    #[test]
+    fn invisible_link_draws_no_edge_path() {
+        // The invisible edge must add no drawn path: the SVG for `A ~~~ B` plus
+        // one visible edge has the same edge-path count as the visible edge
+        // alone.
+        let with_inv = render(
+            &parse_flow("flowchart TD\nA --> B\nA ~~~ C\nC --> B\n"),
+            &Theme::default(),
+        );
+        let without_inv = render(
+            &parse_flow("flowchart TD\nA --> B\nC --> B\n"),
+            &Theme::default(),
+        );
+        assert_eq!(
+            with_inv.matches("<path").count(),
+            without_inv.matches("<path").count(),
+        );
     }
 
     #[test]

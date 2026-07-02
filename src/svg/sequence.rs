@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::parse::{
     AltBranch, ArrowKind, Message, NotePosition, ParticipantKind, SequenceBlock, SequenceDiagram,
-    SequenceItem, SequenceNote,
+    SequenceItem, SequenceNote, SequenceRect,
 };
 
 use super::builder::SvgBuilder;
@@ -85,13 +85,14 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     // First pass: precompute events with y positions.
     let mut events: Vec<Event> = Vec::new();
     let mut cursor = body_top;
-    let mut step_counter: u32 = 0;
+    let mut step_counter: u32 = 1;
+    let mut num = Numbering { on: false, step: 1 };
     layout_items(
         &d.items,
         &mut events,
         &mut cursor,
         &mut step_counter,
-        d.autonumber,
+        &mut num,
         &x_of,
     );
     let lifeline_bottom = cursor + MSG_BOTTOM_GAP;
@@ -115,6 +116,9 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     if has_boxes {
         draw_boxes(&mut svg, d, &x_of, &w_of, box_top, footer_bottom, theme);
     }
+
+    // `rect <color>` colored bands (behind lifelines and messages).
+    draw_rect_bands(&mut svg, &events, &x_of);
 
     // Lifelines
     for p in &d.participants {
@@ -195,6 +199,11 @@ enum EventKind {
         label: String,
     },
     BlockClose,
+    /// `rect <color>` band open/close markers, paired in `draw_rect_bands`.
+    RectOpen {
+        color: Option<String>,
+    },
+    RectClose,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -204,6 +213,15 @@ enum BlockKind {
     Critical,
     Loop,
     Opt,
+    Break,
+}
+
+/// Auto-numbering state threaded through the layout pass. The counter holds the
+/// *next* number to emit; `step` is the increment (`autonumber <start> <step>`).
+#[derive(Debug, Clone, Copy)]
+struct Numbering {
+    on: bool,
+    step: u32,
 }
 
 fn layout_items(
@@ -211,16 +229,25 @@ fn layout_items(
     out: &mut Vec<Event>,
     cursor: &mut f64,
     counter: &mut u32,
-    autonumber: bool,
+    num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
     for item in items {
         match item {
+            SequenceItem::AutoNumber(cfg) => match cfg {
+                Some(c) => {
+                    num.on = true;
+                    num.step = c.step.max(1);
+                    *counter = c.start;
+                }
+                None => num.on = false,
+            },
             SequenceItem::Message(m) => {
                 *cursor += MSG_STEP;
-                let number = if autonumber {
-                    *counter += 1;
-                    Some(*counter)
+                let number = if num.on {
+                    let n = *counter;
+                    *counter += num.step;
+                    Some(n)
                 } else {
                     None
                 };
@@ -252,26 +279,10 @@ fn layout_items(
                 });
             }
             SequenceItem::Alt(branches) => {
-                emit_branched_block(
-                    BlockKind::Alt,
-                    branches,
-                    out,
-                    cursor,
-                    counter,
-                    autonumber,
-                    x_of,
-                );
+                emit_branched_block(BlockKind::Alt, branches, out, cursor, counter, num, x_of);
             }
             SequenceItem::Par(branches) => {
-                emit_branched_block(
-                    BlockKind::Par,
-                    branches,
-                    out,
-                    cursor,
-                    counter,
-                    autonumber,
-                    x_of,
-                );
+                emit_branched_block(BlockKind::Par, branches, out, cursor, counter, num, x_of);
             }
             SequenceItem::Critical(branches) => {
                 emit_branched_block(
@@ -280,15 +291,21 @@ fn layout_items(
                     out,
                     cursor,
                     counter,
-                    autonumber,
+                    num,
                     x_of,
                 );
             }
             SequenceItem::Loop(b) => {
-                emit_simple_block(BlockKind::Loop, b, out, cursor, counter, autonumber, x_of);
+                emit_simple_block(BlockKind::Loop, b, out, cursor, counter, num, x_of);
             }
             SequenceItem::Opt(b) => {
-                emit_simple_block(BlockKind::Opt, b, out, cursor, counter, autonumber, x_of);
+                emit_simple_block(BlockKind::Opt, b, out, cursor, counter, num, x_of);
+            }
+            SequenceItem::Break(b) => {
+                emit_simple_block(BlockKind::Break, b, out, cursor, counter, num, x_of);
+            }
+            SequenceItem::Rect(r) => {
+                emit_rect_block(r, out, cursor, counter, num, x_of);
             }
             SequenceItem::Box(_) => {
                 // boxes group participants horizontally — v0.1 just ignores
@@ -304,7 +321,7 @@ fn emit_simple_block(
     out: &mut Vec<Event>,
     cursor: &mut f64,
     counter: &mut u32,
-    autonumber: bool,
+    num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
     *cursor += BLOCK_TOP_GAP;
@@ -316,11 +333,36 @@ fn emit_simple_block(
         },
     });
     *cursor += BLOCK_TAB_H;
-    layout_items(&block.items, out, cursor, counter, autonumber, x_of);
+    layout_items(&block.items, out, cursor, counter, num, x_of);
     *cursor += BLOCK_BOTTOM_GAP;
     out.push(Event {
         y: *cursor,
         kind: EventKind::BlockClose,
+    });
+}
+
+/// `rect <color>` — a colored background band with no label tab or border. The
+/// band is drawn behind everything in a separate pass (`draw_rect_bands`).
+fn emit_rect_block(
+    rect: &SequenceRect,
+    out: &mut Vec<Event>,
+    cursor: &mut f64,
+    counter: &mut u32,
+    num: &mut Numbering,
+    x_of: &HashMap<String, f64>,
+) {
+    *cursor += BLOCK_BOTTOM_GAP;
+    out.push(Event {
+        y: *cursor,
+        kind: EventKind::RectOpen {
+            color: rect.color.clone(),
+        },
+    });
+    layout_items(&rect.items, out, cursor, counter, num, x_of);
+    *cursor += BLOCK_BOTTOM_GAP;
+    out.push(Event {
+        y: *cursor,
+        kind: EventKind::RectClose,
     });
 }
 
@@ -330,7 +372,7 @@ fn emit_branched_block(
     out: &mut Vec<Event>,
     cursor: &mut f64,
     counter: &mut u32,
-    autonumber: bool,
+    num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
     *cursor += BLOCK_TOP_GAP;
@@ -356,7 +398,7 @@ fn emit_branched_block(
             });
             *cursor += BLOCK_TAB_H / 2.0;
         }
-        layout_items(&branch.items, out, cursor, counter, autonumber, x_of);
+        layout_items(&branch.items, out, cursor, counter, num, x_of);
     }
     *cursor += BLOCK_BOTTOM_GAP;
     out.push(Event {
@@ -643,6 +685,36 @@ fn draw_note(
     );
 }
 
+/// Draw `rect <color>` background bands. Bands nest strictly (LIFO), so a plain
+/// stack of open `(y_top, color)` pairs matches each close to its open.
+fn draw_rect_bands(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>) {
+    if x_of.is_empty() {
+        return;
+    }
+    let min_x = x_of.values().copied().fold(f64::INFINITY, f64::min);
+    let max_x = x_of.values().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut stack: Vec<(f64, Option<String>)> = Vec::new();
+    for ev in events {
+        match &ev.kind {
+            EventKind::RectOpen { color } => stack.push((ev.y, color.clone())),
+            EventKind::RectClose => {
+                if let Some((y_top, color)) = stack.pop() {
+                    let fill = color.as_deref().unwrap_or("rgba(0,0,0,0.05)");
+                    let x = min_x - 20.0;
+                    svg.rect(
+                        x,
+                        y_top,
+                        (max_x + 20.0) - x,
+                        ev.y - y_top,
+                        &format!("fill=\"{fill}\" stroke=\"none\""),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn draw_block_frames(
     svg: &mut SvgBuilder,
     events: &[Event],
@@ -715,6 +787,7 @@ fn draw_block_frame(
         BlockKind::Critical => "critical",
         BlockKind::Loop => "loop",
         BlockKind::Opt => "opt",
+        BlockKind::Break => "break",
     };
     // Label tab in upper-left
     svg.rect(
@@ -898,6 +971,40 @@ mod tests {
         );
         assert!(svg.contains(">1. x<"));
         assert!(svg.contains(">2. y<"));
+    }
+
+    #[test]
+    fn autonumber_honors_start_step_and_off() {
+        let svg = render(
+            &build(
+                "sequenceDiagram\nautonumber 10 5\nA->>B: a\nA->>B: b\nautonumber off\nA->>B: c\n",
+            ),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">10. a<"));
+        assert!(svg.contains(">15. b<"));
+        // After `autonumber off`, subsequent messages carry no prefix.
+        assert!(svg.contains(">c<"));
+        assert!(!svg.contains(">20. c<"));
+    }
+
+    #[test]
+    fn break_block_renders_frame() {
+        let svg = render(
+            &build("sequenceDiagram\nbreak connection lost\nA->>B: bye\nend\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">break<"));
+        assert!(svg.contains("[connection lost]"));
+    }
+
+    #[test]
+    fn rect_block_draws_colored_band() {
+        let svg = render(
+            &build("sequenceDiagram\nrect rgb(200,220,255)\nA->>B: x\nend\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"rgb(200,220,255)\""));
     }
 
     #[test]

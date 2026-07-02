@@ -717,14 +717,34 @@ fn parse_arrow(sc: &mut Scanner<'_>, line_no: usize) -> Result<Option<ArrowSpec>
         }
         _ => EdgeHead::None,
     };
-    // Edge tokens always start with one of `-`, `.`, `=`. Reject anything else.
+    // Edge tokens always start with one of `-`, `.`, `=`, `~`. Reject anything
+    // else. `~~~` is the invisible link: it lays out like an edge but is not
+    // drawn, and never carries a head or a tail marker.
     let first = match sc.remaining().chars().next() {
-        Some(c) if c == '-' || c == '=' || c == '.' => c,
+        Some(c) if c == '-' || c == '=' || c == '.' || c == '~' => c,
         _ => {
             sc.i = tail_start;
             return Ok(None);
         }
     };
+    if first == '~' {
+        if tail != EdgeHead::None {
+            sc.i = tail_start;
+            return Ok(None);
+        }
+        let start = sc.i;
+        while sc.try_consume("~") {}
+        if sc.i - start < 3 {
+            sc.i = tail_start;
+            return Ok(None);
+        }
+        return Ok(Some((
+            EdgeLine::Invisible,
+            EdgeHead::None,
+            EdgeHead::None,
+            None,
+        )));
+    }
 
     // Distinguish thick (`=`) vs solid (`-`) vs dotted (`-.` / `.`).
     // Patterns to recognize (all may have optional head suffix):
@@ -850,6 +870,8 @@ fn match_closer(bytes: &[u8], p: usize, style: EdgeLine) -> Option<(usize, EdgeH
             }
             j - p
         }
+        // Invisible links (`~~~`) never carry an inline label.
+        EdgeLine::Invisible => return None,
     };
     let solid_or_thick = matches!(style, EdgeLine::Solid | EdgeLine::Thick);
     if solid_or_thick && run < 2 {
@@ -1251,6 +1273,26 @@ mod tests {
         assert_eq!(d.edges.len(), 1);
         assert_eq!(d.edges[0].label.as_deref(), Some("two words"));
         assert_eq!(d.edges[0].head, EdgeHead::None);
+    }
+
+    #[test]
+    fn invisible_link_parses_as_edge() {
+        // `~~~` is an invisible link: a real edge (shapes layout) with no head
+        // and no tail. It must not error nor leave `~~~ B` as stray text.
+        let d = parse("flowchart TD\nA ~~~ B\nA --> C\n").unwrap();
+        assert_eq!(d.edges.len(), 2);
+        let inv = &d.edges[0];
+        assert_eq!(inv.from, "A");
+        assert_eq!(inv.to, "B");
+        assert_eq!(inv.line, EdgeLine::Invisible);
+        assert_eq!(inv.head, EdgeHead::None);
+        assert_eq!(inv.tail, EdgeHead::None);
+    }
+
+    #[test]
+    fn lone_tilde_is_not_an_edge() {
+        // A single/double `~` is not a valid invisible link, so `~` stays text.
+        assert!(parse("flowchart TD\nA ~~ B\n").is_err());
     }
 
     #[test]

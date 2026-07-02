@@ -73,6 +73,8 @@ pub struct SequenceDiagram {
     pub title: Option<String>,
     pub participants: Vec<Participant>,
     pub items: Vec<SequenceItem>,
+    /// True if any `autonumber` on-directive was seen. Message numbering itself
+    /// is positional — see [`SequenceItem::AutoNumber`].
     pub autonumber: bool,
 }
 
@@ -107,8 +109,30 @@ pub enum SequenceItem {
     Opt(SequenceBlock),
     /// `critical label / option label / end`
     Critical(Vec<AltBranch>),
+    /// `break label ... end` — draws a labeled frame breaking out of a loop
+    Break(SequenceBlock),
+    /// `rect <color> ... end` — colored background band behind the items
+    Rect(SequenceRect),
     /// `box label ... end` — wraps participants
     Box(SequenceBox),
+    /// `autonumber [start [step]]` / `autonumber off` — toggles message
+    /// numbering positionally. `Some` turns it on (resetting the counter to
+    /// `start`), `None` turns it off for subsequent messages.
+    AutoNumber(Option<AutoNumberConfig>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoNumberConfig {
+    pub start: u32,
+    pub step: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SequenceRect {
+    /// Background fill from `rect <color>` (hex, `rgb()/rgba()`, or a named
+    /// CSS color). `None` renders a light default band.
+    pub color: Option<String>,
+    pub items: Vec<SequenceItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -288,6 +312,8 @@ pub enum EdgeLine {
     Dotted,
     /// `=` thick
     Thick,
+    /// `~~~` invisible — participates in layout but is not drawn
+    Invisible,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
