@@ -7,7 +7,8 @@
 //!   * Messages: `from <arrow> to : text` with arrows
 //!     `->`, `->>`, `-->`, `-->>`, `-x`, `--x`, `-)`, `--)`.
 //!   * `autonumber` (sets a per-diagram flag).
-//!   * `activate <id>` / `deactivate <id>`.
+//!   * `activate <id>` / `deactivate <id>`, plus the `->>+`/`-->>-` arrow
+//!     activation shorthand.
 //!   * Notes: `Note over A[,B]: text`, `Note right of A: text`, `Note left of A: text`.
 //!   * Blocks (each followed by item lines, terminated by `end`):
 //!     `alt label` ... `else label` ... `end`,
@@ -62,7 +63,7 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
         }
 
         let before = diag.participants.len();
-        let item = parse_line_to_item(line, &mut diag, line_no)?;
+        let items = parse_line_to_items(line, &mut diag, line_no)?;
         // Participants (explicit or implied by a message) declared while a box
         // frame is open belong to that box.
         if diag.participants.len() > before {
@@ -75,7 +76,7 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
                 }
             }
         }
-        if let Some(item) = item {
+        for item in items {
             push_item(&mut diag, &mut block_stack, item);
         }
     }
@@ -334,46 +335,61 @@ fn push_item(diag: &mut SequenceDiagram, stack: &mut [BlockFrame], item: Sequenc
     }
 }
 
-fn parse_line_to_item(
+fn parse_line_to_items(
     line: &str,
     diag: &mut SequenceDiagram,
     line_no: usize,
-) -> Result<Option<SequenceItem>, ParseError> {
+) -> Result<Vec<SequenceItem>, ParseError> {
     if let Some(rest) = line.strip_prefix("title ") {
         diag.title = Some(rest.trim().to_string());
-        return Ok(None);
+        return Ok(Vec::new());
     }
     if line == "autonumber" || line.starts_with("autonumber ") {
         diag.autonumber = true;
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     if let Some(rest) = line.strip_prefix("participant ") {
         let p = parse_participant(rest, ParticipantKind::Participant, line_no)?;
         diag.participants.push(p);
-        return Ok(None);
+        return Ok(Vec::new());
     }
     if let Some(rest) = line.strip_prefix("actor ") {
         let p = parse_participant(rest, ParticipantKind::Actor, line_no)?;
         diag.participants.push(p);
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     if let Some(rest) = line.strip_prefix("activate ") {
-        return Ok(Some(SequenceItem::Activate(rest.trim().to_string())));
+        return Ok(vec![SequenceItem::Activate(rest.trim().to_string())]);
     }
     if let Some(rest) = line.strip_prefix("deactivate ") {
-        return Ok(Some(SequenceItem::Deactivate(rest.trim().to_string())));
+        return Ok(vec![SequenceItem::Deactivate(rest.trim().to_string())]);
     }
 
     if let Some(note) = parse_note(line) {
-        return Ok(Some(SequenceItem::Note(note)));
+        return Ok(vec![SequenceItem::Note(note)]);
     }
 
-    let msg = parse_message(line, line_no)?;
+    let (msg, activation) = parse_message(line, line_no)?;
     register_implicit_participant(diag, &msg.from);
     register_implicit_participant(diag, &msg.to);
-    Ok(Some(SequenceItem::Message(msg)))
+    // Activation shorthand: `->>+B` activates the target *after* the message,
+    // `-->>-A` deactivates it *before* the message — matching upstream ordering.
+    let target = msg.to.clone();
+    let mut items = Vec::new();
+    match activation {
+        Activation::Activate => {
+            items.push(SequenceItem::Message(msg));
+            items.push(SequenceItem::Activate(target));
+        }
+        Activation::Deactivate => {
+            items.push(SequenceItem::Deactivate(target));
+            items.push(SequenceItem::Message(msg));
+        }
+        Activation::None => items.push(SequenceItem::Message(msg)),
+    }
+    Ok(items)
 }
 
 fn parse_note(line: &str) -> Option<SequenceNote> {
@@ -495,7 +511,14 @@ fn parse_participant(
     }
 }
 
-fn parse_message(line: &str, line_no: usize) -> Result<Message, ParseError> {
+/// Activation shorthand attached to a message arrow (`->>+` / `-->>-`).
+enum Activation {
+    None,
+    Activate,
+    Deactivate,
+}
+
+fn parse_message(line: &str, line_no: usize) -> Result<(Message, Activation), ParseError> {
     let (arrow_pos, token, kind) = find_arrow(line).ok_or_else(|| ParseError::Syntax {
         message: format!("not a recognized statement: '{line}'"),
         line: line_no,
@@ -508,25 +531,35 @@ fn parse_message(line: &str, line_no: usize) -> Result<Message, ParseError> {
         });
     }
     let after = &line[arrow_pos + token.len()..];
-    let (to, text) = match after.find(':') {
-        Some(c) => (
-            after[..c].trim().to_string(),
-            after[c + 1..].trim().to_string(),
-        ),
-        None => (after.trim().to_string(), String::new()),
+    let (target_part, text) = match after.find(':') {
+        Some(c) => (after[..c].trim(), after[c + 1..].trim().to_string()),
+        None => (after.trim(), String::new()),
     };
+    // A leading `+`/`-` on the target is the activation shorthand, not part of
+    // the participant id.
+    let (activation, target_part) = match target_part.strip_prefix('+') {
+        Some(rest) => (Activation::Activate, rest.trim_start()),
+        None => match target_part.strip_prefix('-') {
+            Some(rest) => (Activation::Deactivate, rest.trim_start()),
+            None => (Activation::None, target_part),
+        },
+    };
+    let to = target_part.to_string();
     if to.is_empty() {
         return Err(ParseError::Syntax {
             message: "empty receiver".into(),
             line: line_no,
         });
     }
-    Ok(Message {
-        from,
-        to,
-        text,
-        arrow: kind,
-    })
+    Ok((
+        Message {
+            from,
+            to,
+            text,
+            arrow: kind,
+        },
+        activation,
+    ))
 }
 
 fn find_arrow(line: &str) -> Option<(usize, &'static str, ArrowKind)> {
@@ -702,6 +735,30 @@ mod tests {
         let d = parse("sequenceDiagram\nactivate A\nA->>B: x\ndeactivate A\n").unwrap();
         assert!(matches!(d.items.first(), Some(SequenceItem::Activate(s)) if s == "A"));
         assert!(matches!(d.items.last(), Some(SequenceItem::Deactivate(s)) if s == "A"));
+    }
+
+    #[test]
+    fn activation_shorthand_targets_and_events() {
+        let d = parse("sequenceDiagram\nA->>+B: outer\nB-->>-A: r1\n").unwrap();
+        // Only A and B — no bogus `+B` / `-A` participants.
+        assert_eq!(d.participants.len(), 2);
+        assert!(d.participants.iter().all(|p| p.id == "A" || p.id == "B"));
+
+        // Sequence: Message(A->B), Activate(B), Deactivate(A), Message(B->A).
+        assert!(matches!(&d.items[0], SequenceItem::Message(m) if m.to == "B"));
+        assert!(matches!(&d.items[1], SequenceItem::Activate(s) if s == "B"));
+        assert!(matches!(&d.items[2], SequenceItem::Deactivate(s) if s == "A"));
+        assert!(matches!(&d.items[3], SequenceItem::Message(m) if m.to == "A"));
+        assert_eq!(d.items.len(), 4);
+    }
+
+    #[test]
+    fn activation_shorthand_preserves_text_and_arrow() {
+        let d = parse("sequenceDiagram\nA->>+B: hello\n").unwrap();
+        let m = first_msg(&d);
+        assert_eq!(m.to, "B");
+        assert_eq!(m.text, "hello");
+        assert_eq!(m.arrow, ArrowKind::SolidArrow);
     }
 
     #[test]

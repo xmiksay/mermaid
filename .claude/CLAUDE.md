@@ -204,6 +204,12 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `->>+` shorthand) draw one band per level, each offset `level * 3px` to the
   right instead of overwriting. Activations still open at the end of the event
   loop are flushed down to `lifeline_bottom`.
+  - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
+    (`parse_message` in `src/parse/sequence.rs`): a leading `+`/`-` on the
+    target id is stripped (not part of the participant name) and
+    `parse_line_to_items` synthesizes the paired event — `+` appends
+    `Activate(target)` *after* the message, `-` prepends `Deactivate(target)`
+    *before* it, matching upstream ordering.
 - Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
   head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
   in `src/svg/sequence.rs` branches on `Participant.kind`.
