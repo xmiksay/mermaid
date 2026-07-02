@@ -68,18 +68,20 @@ type lives in `benches/samples/`. Two groups: `parse/<kind>` (parse only)
 and `render/<kind>` (parse + render to SVG). Sized inputs use realistic
 non-trivial examples (typically 10-30 lines).
 
-Integration tests write sample SVGs to `target/test-samples/`:
-- `pie_browsers.svg`, `sequence_api.svg`
-- `flowchart_td.svg`, `flowchart_lr.svg`
-- `state_lifecycle.svg`, `class_uml.svg`
-- `er_customer.svg`, `gantt_release.svg`
-- `journey_day.svg`, `timeline_history.svg`
-- `sankey_energy.svg`, `quadrant_campaigns.svg`
-- `xychart_sales.svg`, `radar_skills.svg`, `packet_tcp.svg`
-- `mindmap_tree.svg`, `gitgraph_branches.svg`
-- `requirement_test.svg`, `c4_context.svg`
-- `block_grid.svg`, `architecture_api.svg`
-- `kanban_board.svg`, `treemap_drinks.svg`, `zenuml_auth.svg`
+Integration tests write one sample SVG per diagram kind to
+`target/test-samples/<stem>.svg`, one stem per `SAMPLES` entry in
+`gallery_build.rs`:
+- `pie.svg`, `sequence.svg`
+- `flowchart.svg`, `state.svg`
+- `class.svg`, `er.svg`
+- `gantt.svg`, `journey.svg`
+- `timeline.svg`, `sankey.svg`
+- `quadrant.svg`, `xychart.svg`
+- `radar.svg`, `packet.svg`
+- `mindmap.svg`, `gitgraph.svg`
+- `requirement.svg`, `c4.svg`
+- `block.svg`, `architecture.svg`
+- `kanban.svg`, `treemap.svg`, `zenuml.svg`
 
 ## Themes — internal contract
 
