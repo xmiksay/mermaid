@@ -160,8 +160,7 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   attribute (`string name "the customer name"`).
 - Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
   the renderer draws the today marker as a vertical red line.
-
-## Known parser limitation still listed
-
-- Asymmetric flowchart shapes `[/text/]` and `[\text\]` are not supported.
-  Tests use the regular `[text]` form.
+- Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
+  parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
+  `[\text/]`, and the asymmetric flag `>text]` — parsed in
+  `src/parse/flowchart.rs` and rendered in `src/svg/flowchart.rs`.

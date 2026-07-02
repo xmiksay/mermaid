@@ -101,11 +101,6 @@ pub fn parse(input: &str) -> Result<Diagram, ParseError>;
 pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, ...
 ```
 
-## Known gaps
-
-- Asymmetric flowchart shapes `[/text/]` and `[\text\]` are not parsed; use
-  the standard `[text]` form.
-
 ## Implementation notes
 
 - Layered diagrams (flowchart, state, class, ER) go through a built-in
