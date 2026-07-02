@@ -1,7 +1,7 @@
 //! Flowchart renderer: maps the AST to a `crate::sugiyama::Graph`, runs layered
 //! layout, then draws shapes, clipped polyline edges, and subgraph frames.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
     ClickAction, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram,
@@ -65,15 +65,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     };
     let layout = layout_with(&g, &LayoutConfig::default()).unwrap_or_default();
 
-    let (raw_w, raw_h) = (layout.width, layout.height);
-    let (canvas_w, canvas_h) = match dir {
-        FlowDirection::TopDown | FlowDirection::BottomTop => (raw_w, raw_h),
-        FlowDirection::LeftRight | FlowDirection::RightLeft => (raw_h, raw_w),
-    };
-
-    let width = canvas_w + CANVAS_PAD * 2.0;
-    let height = canvas_h + CANVAS_PAD * 2.0;
-
+    let raw_h = layout.height;
     let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
         let (tx, ty) = match dir {
             FlowDirection::TopDown => (sx, sy),
@@ -84,53 +76,172 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
 
+    // Screen-space node positions and edge polylines. Working in screen space
+    // (rather than transforming lazily at draw time) lets a subgraph with a
+    // local `direction` transpose just its own members in place.
+    let mut pos: HashMap<NodeId, (f64, f64)> = (0..d.nodes.len() as NodeId)
+        .map(|u| (u, transform(layout.node_pos[&u])))
+        .collect();
+    let mut edge_pts: HashMap<(NodeId, NodeId), Vec<(f64, f64)>> = layout
+        .edge_points
+        .iter()
+        .map(|(k, v)| (*k, v.iter().map(|&p| transform(p)).collect()))
+        .collect();
+
+    apply_local_directions(d, dir, &id_to_u32, &mut pos, &mut edge_pts);
+
+    let boxes = compute_subgraph_boxes(d, &id_to_u32, &pos, &node_sizes);
+
+    // Canvas: expand the global extent to include any locally moved nodes and
+    // subgraph frames so nothing is clipped by the viewport.
+    let mut max_x = 0.0_f64;
+    let mut max_y = 0.0_f64;
+    for (u, &(x, y)) in &pos {
+        let (w, h) = node_sizes[*u as usize];
+        max_x = max_x.max(x + w / 2.0);
+        max_y = max_y.max(y + h / 2.0);
+    }
+    for &(_, _, bx1, by1) in boxes.values() {
+        max_x = max_x.max(bx1 + SUBGRAPH_PAD);
+        max_y = max_y.max(by1 + SUBGRAPH_PAD);
+    }
+    let width = max_x + CANVAS_PAD;
+    let height = max_y + CANVAS_PAD;
+
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
     define_markers(&mut svg, theme);
 
     // Subgraph frames (drawn first so they sit under nodes/edges).
-    draw_subgraphs(
-        &mut svg,
-        d,
-        &id_to_u32,
-        &node_sizes,
-        &layout,
-        &transform,
-        theme,
-    );
+    draw_subgraphs(&mut svg, d, &boxes, theme);
 
     // Edges.
     for (ei, fedge) in d.edges.iter().enumerate() {
-        let (Some(&u), Some(&v)) = (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) else {
-            continue;
-        };
-        let Some(raw_pts) = layout.edge_points.get(&(u, v)) else {
-            continue;
-        };
-        if raw_pts.len() < 2 {
-            continue;
-        }
-        let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
         let edge_style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
-        draw_edge(
-            &mut svg,
-            &pts,
-            fedge,
-            &edge_style,
-            &d.nodes,
-            &id_to_u32,
-            &node_sizes,
-            theme,
-        );
+        let (Some(start), Some(end)) = (
+            endpoint_clip(&fedge.from, &id_to_u32, &d.nodes, &node_sizes, &pos, &boxes),
+            endpoint_clip(&fedge.to, &id_to_u32, &d.nodes, &node_sizes, &pos, &boxes),
+        ) else {
+            continue;
+        };
+        // Real node→node edges keep their routed polyline; an endpoint that is
+        // a subgraph cluster has no layout route, so draw a straight connector
+        // clipped to the cluster box.
+        let pts: Vec<(f64, f64)> = match (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) {
+            (Some(&u), Some(&v)) => match edge_pts.get(&(u, v)) {
+                Some(p) if p.len() >= 2 => p.clone(),
+                _ => vec![start.center, end.center],
+            },
+            _ => vec![start.center, end.center],
+        };
+        draw_edge(&mut svg, &pts, fedge, &edge_style, &start, &end, theme);
     }
 
     // Nodes.
     for (i, node) in d.nodes.iter().enumerate() {
-        let center = transform(layout.node_pos[&(i as NodeId)]);
+        let center = pos[&(i as NodeId)];
         let size = node_sizes[i];
         draw_node(&mut svg, center, size, node, &d.class_defs, theme);
     }
 
     svg.finish()
+}
+
+/// Clip target for one end of an edge: the shape boundary a connector stops at.
+struct EndClip {
+    center: (f64, f64),
+    size: (f64, f64),
+    /// `None` marks a subgraph cluster box (clipped as a rectangle).
+    shape: Option<NodeShape>,
+}
+
+/// Resolve an edge endpoint id to its clip target — a node boundary if it names
+/// a node, otherwise the bounding box of the subgraph it names.
+fn endpoint_clip(
+    id: &str,
+    id_to_u32: &HashMap<String, NodeId>,
+    nodes: &[FlowNode],
+    node_sizes: &[(f64, f64)],
+    pos: &HashMap<NodeId, (f64, f64)>,
+    boxes: &HashMap<String, (f64, f64, f64, f64)>,
+) -> Option<EndClip> {
+    if let Some(&u) = id_to_u32.get(id) {
+        return Some(EndClip {
+            center: pos[&u],
+            size: node_sizes[u as usize],
+            shape: Some(nodes[u as usize].shape),
+        });
+    }
+    let &(x0, y0, x1, y1) = boxes.get(id)?;
+    Some(EndClip {
+        center: ((x0 + x1) / 2.0, (y0 + y1) / 2.0),
+        size: (x1 - x0, y1 - y0),
+        shape: None,
+    })
+}
+
+fn is_horizontal(d: FlowDirection) -> bool {
+    matches!(d, FlowDirection::LeftRight | FlowDirection::RightLeft)
+}
+
+/// Apply each subgraph's local `direction` by transposing its members (and
+/// their internal edges) in place about the cluster centre. Only clusters whose
+/// flow axis differs from the diagram's are affected — a TD chain inside a
+/// `direction LR` subgraph becomes a horizontal row, matching upstream.
+fn apply_local_directions(
+    d: &FlowchartDiagram,
+    global_dir: FlowDirection,
+    id_to_u32: &HashMap<String, NodeId>,
+    pos: &mut HashMap<NodeId, (f64, f64)>,
+    edge_pts: &mut HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
+) {
+    let mut moved: HashSet<NodeId> = HashSet::new();
+    for sub in &d.subgraphs {
+        let Some(local) = sub.direction else { continue };
+        if is_horizontal(local) == is_horizontal(global_dir) {
+            continue;
+        }
+        let members: Vec<NodeId> = sub
+            .node_ids
+            .iter()
+            .filter_map(|id| id_to_u32.get(id).copied())
+            .filter(|u| !moved.contains(u))
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for &u in &members {
+            let (x, y) = pos[&u];
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        let (cx, cy) = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+        let transpose = |(x, y): (f64, f64)| (cx + (y - cy), cy + (x - cx));
+
+        let member_set: HashSet<NodeId> = members.iter().copied().collect();
+        for &u in &members {
+            let p = transpose(pos[&u]);
+            pos.insert(u, p);
+            moved.insert(u);
+        }
+        for (&(a, b), pts) in edge_pts.iter_mut() {
+            let (a_in, b_in) = (member_set.contains(&a), member_set.contains(&b));
+            if a_in && b_in {
+                for p in pts.iter_mut() {
+                    *p = transpose(*p);
+                }
+            } else if a_in || b_in {
+                *pts = vec![pos[&a], pos[&b]];
+            }
+        }
+    }
 }
 
 // ---- node sizing & drawing -------------------------------------------------
@@ -421,38 +532,36 @@ fn draw_label(
 
 // ---- subgraph frames -------------------------------------------------------
 
-fn draw_subgraphs(
-    svg: &mut SvgBuilder,
+fn collect_node_ids<'a>(
+    sub: &'a Subgraph,
+    all: &'a [Subgraph],
+    idx_by_id: &HashMap<&str, usize>,
+    out: &mut Vec<&'a str>,
+) {
+    for n in &sub.node_ids {
+        out.push(n.as_str());
+    }
+    for child_id in &sub.child_subgraph_ids {
+        if let Some(&i) = idx_by_id.get(child_id.as_str()) {
+            collect_node_ids(&all[i], all, idx_by_id, out);
+        }
+    }
+}
+
+/// Screen-space bounding box `(x0, y0, x1, y1)` of every subgraph, including the
+/// space for its title, keyed by subgraph id. A box spans all member nodes
+/// gathered recursively through nested children.
+fn compute_subgraph_boxes(
     d: &FlowchartDiagram,
     id_to_u32: &HashMap<String, NodeId>,
+    pos: &HashMap<NodeId, (f64, f64)>,
     node_sizes: &[(f64, f64)],
-    layout: &crate::sugiyama::Layout,
-    transform: &impl Fn((f64, f64)) -> (f64, f64),
-    theme: &Theme,
-) {
-    let fg = theme.fg;
-    // We compute the bounding box of each subgraph by collecting transformed
-    // coordinates of all nodes that belong to it (recursively).
+) -> HashMap<String, (f64, f64, f64, f64)> {
     let mut sub_idx_by_id: HashMap<&str, usize> = HashMap::new();
     for (i, s) in d.subgraphs.iter().enumerate() {
         sub_idx_by_id.insert(s.id.as_str(), i);
     }
-    fn collect_node_ids<'a>(
-        sub: &'a Subgraph,
-        all: &'a [Subgraph],
-        idx_by_id: &HashMap<&str, usize>,
-        out: &mut Vec<&'a str>,
-    ) {
-        for n in &sub.node_ids {
-            out.push(n.as_str());
-        }
-        for child_id in &sub.child_subgraph_ids {
-            if let Some(&i) = idx_by_id.get(child_id.as_str()) {
-                collect_node_ids(&all[i], all, idx_by_id, out);
-            }
-        }
-    }
-
+    let mut boxes = HashMap::new();
     for sub in &d.subgraphs {
         let mut ids: Vec<&str> = Vec::new();
         collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
@@ -464,8 +573,7 @@ fn draw_subgraphs(
             let Some(&u) = id_to_u32.get(*id) else {
                 continue;
             };
-            let (sx, sy) = layout.node_pos[&u];
-            let (cx, cy) = transform((sx, sy));
+            let (cx, cy) = pos[&u];
             let (w, h) = node_sizes[u as usize];
             min_x = min_x.min(cx - w / 2.0);
             max_x = max_x.max(cx + w / 2.0);
@@ -475,15 +583,35 @@ fn draw_subgraphs(
         if !min_x.is_finite() {
             continue;
         }
-        let x = min_x - SUBGRAPH_PAD;
-        let y = min_y - SUBGRAPH_PAD - 14.0;
-        let w = (max_x - min_x) + SUBGRAPH_PAD * 2.0;
-        let h = (max_y - min_y) + SUBGRAPH_PAD * 2.0 + 14.0;
+        boxes.insert(
+            sub.id.clone(),
+            (
+                min_x - SUBGRAPH_PAD,
+                min_y - SUBGRAPH_PAD - 14.0,
+                max_x + SUBGRAPH_PAD,
+                max_y + SUBGRAPH_PAD,
+            ),
+        );
+    }
+    boxes
+}
+
+fn draw_subgraphs(
+    svg: &mut SvgBuilder,
+    d: &FlowchartDiagram,
+    boxes: &HashMap<String, (f64, f64, f64, f64)>,
+    theme: &Theme,
+) {
+    let fg = theme.fg;
+    for sub in &d.subgraphs {
+        let Some(&(x0, y0, x1, y1)) = boxes.get(&sub.id) else {
+            continue;
+        };
         svg.rect(
-            x,
-            y,
-            w,
-            h,
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
             "fill=\"#F8F8FF\" stroke=\"#666\" stroke-width=\"1\" stroke-dasharray=\"6 4\" rx=\"4\"",
         );
         let label = if sub.label.is_empty() {
@@ -492,8 +620,8 @@ fn draw_subgraphs(
             sub.label.as_str()
         };
         svg.text(
-            x + 10.0,
-            y + 12.0,
+            x0 + 10.0,
+            y0 + 12.0,
             &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
             label,
         );
@@ -502,23 +630,18 @@ fn draw_subgraphs(
 
 // ---- edge drawing ----------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn draw_edge(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
     edge: &FlowEdge,
     style_override: &ResolvedStyle,
-    nodes: &[FlowNode],
-    id_to_u32: &HashMap<String, NodeId>,
-    sizes: &[(f64, f64)],
+    start: &EndClip,
+    end: &EndClip,
     theme: &Theme,
 ) {
     let n = pts.len();
-    let src_idx = id_to_u32[&edge.from] as usize;
-    let dst_idx = id_to_u32[&edge.to] as usize;
-
-    let first = clip_to_node(pts[1], pts[0], sizes[src_idx], nodes[src_idx].shape);
-    let last = clip_to_node(pts[n - 2], pts[n - 1], sizes[dst_idx], nodes[dst_idx].shape);
+    let first = clip_end(pts[1], start);
+    let last = clip_end(pts[n - 2], end);
 
     let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(n);
     clipped.push(first);
@@ -627,6 +750,13 @@ fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme
 }
 
 // ---- shape clipping --------------------------------------------------------
+
+fn clip_end(from: (f64, f64), clip: &EndClip) -> (f64, f64) {
+    match clip.shape {
+        Some(shape) => clip_to_node(from, clip.center, clip.size, shape),
+        None => clip_rect(from, clip.center, clip.size),
+    }
+}
 
 fn clip_to_node(
     from: (f64, f64),
@@ -777,6 +907,58 @@ mod tests {
         // Dashed rect for subgraph + italic label
         assert!(svg.contains("stroke-dasharray=\"6 4\""));
         assert!(svg.contains(">Group<"));
+    }
+
+    /// Centre `(x, y)` of the single-line node label `id` (`text-anchor
+    /// middle` places the `<text>` x at the node's centre).
+    fn label_center(svg: &str, id: &str) -> (f64, f64) {
+        let needle = format!(">{id}</text>");
+        let end = svg.find(&needle).unwrap_or_else(|| panic!("no label {id}"));
+        let open = svg[..end].rfind("<text ").unwrap();
+        let tag = &svg[open..end];
+        let grab = |attr: &str| {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse::<f64>().unwrap()
+        };
+        (grab("x=\""), grab("y=\""))
+    }
+
+    #[test]
+    fn subgraph_local_direction_transposes_members() {
+        // Under TD the chain A→B stacks vertically (same x, B below A).
+        let td = render(
+            &parse_flow("flowchart TD\nsubgraph S\nA --> B\nend\n"),
+            &Theme::default(),
+        );
+        let (ax, ay) = label_center(&td, "A");
+        let (bx, by) = label_center(&td, "B");
+        assert!((ax - bx).abs() < 1.0, "TD members should share a column");
+        assert!(by > ay, "TD flows top-to-bottom");
+
+        // `direction LR` inside the subgraph lays the same members side by side.
+        let lr = render(
+            &parse_flow("flowchart TD\nsubgraph S\ndirection LR\nA --> B\nend\n"),
+            &Theme::default(),
+        );
+        let (ax, ay) = label_center(&lr, "A");
+        let (bx, by) = label_center(&lr, "B");
+        assert!((ay - by).abs() < 1.0, "LR members should share a row");
+        assert!(bx > ax, "LR flows left-to-right");
+    }
+
+    #[test]
+    fn edge_to_subgraph_id_routes_to_box() {
+        let svg = render(
+            &parse_flow("flowchart TD\nsubgraph SG [Group]\nA --> B\nend\nC --> SG\n"),
+            &Theme::default(),
+        );
+        // Cluster frame titled by its label, no phantom `SG` node, and the C→SG
+        // edge is drawn (an arrow-headed path) rather than silently dropped.
+        assert!(svg.contains("stroke-dasharray=\"6 4\""));
+        assert!(svg.contains(">Group</text>"));
+        assert!(!svg.contains(">SG</text>"));
+        assert!(svg.contains("marker-end=\"url(#arrow-filled)\""));
     }
 
     #[test]
