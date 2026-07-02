@@ -104,6 +104,9 @@ pub struct SequenceBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SequenceBox {
+    /// Background fill from the `box <color> <label>` syntax; `None` renders
+    /// transparent (upstream default).
+    pub color: Option<String>,
     pub label: String,
     pub participant_ids: Vec<String>,
 }

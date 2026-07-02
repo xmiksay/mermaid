@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use crate::parse::{
-    AltBranch, ArrowKind, Message, NotePosition, SequenceBlock, SequenceDiagram, SequenceItem,
-    SequenceNote,
+    AltBranch, ArrowKind, Message, NotePosition, ParticipantKind, SequenceBlock, SequenceDiagram,
+    SequenceItem, SequenceNote,
 };
 
 use super::builder::SvgBuilder;
@@ -33,6 +33,8 @@ const BLOCK_BOTTOM_GAP: f64 = 12.0;
 const BLOCK_LABEL_W: f64 = 60.0;
 const BLOCK_TAB_H: f64 = 18.0; // reserved Y-space below the alt/loop tab so first message text doesn't overlap
 const ACTIVATION_W: f64 = 10.0;
+const BOX_LABEL_H: f64 = 22.0; // reserved Y-space above the actor row for `box` labels
+const BOX_PAD: f64 = 12.0;
 
 pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
@@ -73,7 +75,10 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     }
     let width = x - PARTICIPANT_GAP + PAD;
 
-    let top_y = PAD + title_h;
+    let has_boxes = d.items.iter().any(|i| matches!(i, SequenceItem::Box(_)));
+    let box_label_h = if has_boxes { BOX_LABEL_H } else { 0.0 };
+    let box_top = PAD + title_h;
+    let top_y = box_top + box_label_h;
     let header_bottom = top_y + actor_h;
     let body_top = header_bottom + MSG_TOP_GAP;
 
@@ -106,6 +111,11 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         );
     }
 
+    // Box backgrounds (behind lifelines and actors).
+    if has_boxes {
+        draw_boxes(&mut svg, d, &x_of, &w_of, box_top, footer_bottom, theme);
+    }
+
     // Lifelines
     for p in &d.participants {
         let x = x_of[&p.id];
@@ -128,8 +138,10 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     for p in &d.participants {
         let x = x_of[&p.id];
         let w = w_of[&p.id];
-        draw_actor(&mut svg, x, top_y, w, actor_h, &p.display, theme);
-        draw_actor(&mut svg, x, footer_top, w, actor_h, &p.display, theme);
+        draw_actor(&mut svg, x, top_y, w, actor_h, &p.display, p.kind, theme);
+        draw_actor(
+            &mut svg, x, footer_top, w, actor_h, &p.display, p.kind, theme,
+        );
     }
 
     // Events
@@ -353,7 +365,32 @@ fn emit_branched_block(
     });
 }
 
-fn draw_actor(svg: &mut SvgBuilder, cx: f64, top: f64, w: f64, h: f64, label: &str, theme: &Theme) {
+#[allow(clippy::too_many_arguments)]
+fn draw_actor(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    top: f64,
+    w: f64,
+    h: f64,
+    label: &str,
+    kind: ParticipantKind,
+    theme: &Theme,
+) {
+    match kind {
+        ParticipantKind::Actor => draw_actor_figure(svg, cx, top, h, label, theme),
+        ParticipantKind::Participant => draw_actor_box(svg, cx, top, w, h, label, theme),
+    }
+}
+
+fn draw_actor_box(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    top: f64,
+    w: f64,
+    h: f64,
+    label: &str,
+    theme: &Theme,
+) {
     let fg = theme.fg;
     let actor_fill = theme.actor_fill;
     let actor_stroke = theme.actor_stroke;
@@ -375,6 +412,95 @@ fn draw_actor(svg: &mut SvgBuilder, cx: f64, top: f64, w: f64, h: f64, label: &s
             &format!("text-anchor=\"middle\" fill=\"{fg}\""),
             line,
         );
+    }
+}
+
+/// Draw an `actor` as a stick figure (head + body + arms + legs) with the name
+/// underneath — mirrors upstream `drawActorTypeActor`.
+fn draw_actor_figure(svg: &mut SvgBuilder, cx: f64, top: f64, h: f64, label: &str, theme: &Theme) {
+    let fg = theme.fg;
+    let stroke = theme.actor_stroke;
+    let fill = theme.actor_fill;
+    let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
+    let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
+
+    let head_r = 7.0;
+    let head_cy = top + head_r + 1.0;
+    let body_top = head_cy + head_r;
+    let body_bot = body_top + 13.0;
+    let arm_y = body_top + 5.0;
+    let arm_half = 10.0;
+    let leg_dx = 8.0;
+    let leg_dy = 10.0;
+
+    svg.circle(cx, head_cy, head_r, &attrs);
+    svg.line(cx, body_top, cx, body_bot, &line_attrs);
+    svg.line(cx - arm_half, arm_y, cx + arm_half, arm_y, &line_attrs);
+    svg.line(cx, body_bot, cx - leg_dx, body_bot + leg_dy, &line_attrs);
+    svg.line(cx, body_bot, cx + leg_dx, body_bot + leg_dy, &line_attrs);
+
+    // Name sits below the figure, within the actor's allotted height.
+    let lines = label_lines(label);
+    let mut y = (body_bot + leg_dy + 14.0).min(top + h - 2.0);
+    for line in &lines {
+        svg.text(
+            cx,
+            y,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\""),
+            line,
+        );
+        y += ACTOR_LINE_H;
+    }
+}
+
+/// Draw the `box` grouping backgrounds: a filled rect spanning member
+/// participants from above the actor row down past the footer, label centered
+/// at the top.
+fn draw_boxes(
+    svg: &mut SvgBuilder,
+    d: &SequenceDiagram,
+    x_of: &HashMap<String, f64>,
+    w_of: &HashMap<String, f64>,
+    top: f64,
+    bottom: f64,
+    theme: &Theme,
+) {
+    let fg = theme.fg;
+    for item in &d.items {
+        let SequenceItem::Box(b) = item else { continue };
+        let mut min_l = f64::INFINITY;
+        let mut max_r = f64::NEG_INFINITY;
+        for id in &b.participant_ids {
+            if let (Some(&cx), Some(&w)) = (x_of.get(id), w_of.get(id)) {
+                min_l = min_l.min(cx - w / 2.0);
+                max_r = max_r.max(cx + w / 2.0);
+            }
+        }
+        if !min_l.is_finite() {
+            continue;
+        }
+        let x = min_l - BOX_PAD;
+        let w = (max_r - min_l) + BOX_PAD * 2.0;
+        let y = top;
+        let h = (bottom + BOX_PAD) - y;
+        let fill = b.color.as_deref().unwrap_or("none");
+        svg.rect(
+            x,
+            y,
+            w,
+            h,
+            &format!("fill=\"{fill}\" stroke=\"#999\" stroke-width=\"1\""),
+        );
+        if !b.label.is_empty() {
+            svg.text(
+                x + w / 2.0,
+                y + 15.0,
+                &format!(
+                    "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""
+                ),
+                &b.label,
+            );
+        }
     }
 }
 
@@ -808,6 +934,49 @@ mod tests {
         let (w, h) = actor_size("one<br/>two<br/>three");
         assert!(h > ACTOR_H, "multi-line label should be taller");
         assert_eq!(w, ACTOR_MIN_W, "short lines keep the minimum width");
+    }
+
+    #[test]
+    fn actor_renders_as_stick_figure() {
+        let svg = render(
+            &build("sequenceDiagram\nactor A\nparticipant B\nA->>B: hi\n"),
+            &Theme::default(),
+        );
+        // Stick figure emits a <circle> head; a plain participant box does not.
+        assert!(svg.contains("<circle"), "actor should draw a circle head");
+        assert!(svg.contains(">A</text>"), "actor name below figure");
+    }
+
+    #[test]
+    fn participant_stays_a_box() {
+        let svg = render(
+            &build("sequenceDiagram\nparticipant A\nA->>B: hi\n"),
+            &Theme::default(),
+        );
+        assert!(!svg.contains("<circle"), "participant is a rounded rect");
+    }
+
+    #[test]
+    fn box_renders_background_and_label() {
+        let svg = render(
+            &build(
+                "sequenceDiagram\nbox Aqua Team\nparticipant A\nparticipant B\nend\nA->>B: hi\n",
+            ),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"Aqua\""), "box uses its declared color");
+        assert!(svg.contains(">Team<"), "box label is drawn");
+    }
+
+    #[test]
+    fn box_without_color_is_transparent() {
+        let svg = render(
+            &build("sequenceDiagram\nbox Team\nparticipant A\nparticipant B\nend\nA->>B: hi\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">Team<"));
+        // A transparent box has no colored fill of its own.
+        assert!(!svg.contains("fill=\"Aqua\""));
     }
 
     #[test]

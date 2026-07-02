@@ -61,7 +61,20 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
             continue;
         }
 
+        let before = diag.participants.len();
         let item = parse_line_to_item(line, &mut diag, line_no)?;
+        // Participants (explicit or implied by a message) declared while a box
+        // frame is open belong to that box.
+        if diag.participants.len() > before {
+            if let Some(BlockFrame::Box {
+                participant_ids, ..
+            }) = block_stack.last_mut()
+            {
+                for p in &diag.participants[before..] {
+                    participant_ids.push(p.id.clone());
+                }
+            }
+        }
         if let Some(item) = item {
             push_item(&mut diag, &mut block_stack, item);
         }
@@ -103,6 +116,7 @@ enum BlockFrame {
         items: Vec<SequenceItem>,
     },
     Box {
+        color: Option<String>,
         label: String,
         participant_ids: Vec<String>,
     },
@@ -230,8 +244,18 @@ fn handle_block_keyword(
     }
 
     if let Some(rest) = line.strip_prefix("box ") {
+        let (color, label) = split_box_color(rest.trim());
         stack.push(BlockFrame::Box {
-            label: rest.trim().to_string(),
+            color,
+            label,
+            participant_ids: Vec::new(),
+        });
+        return Ok(true);
+    }
+    if line == "box" {
+        stack.push(BlockFrame::Box {
+            color: None,
+            label: String::new(),
             participant_ids: Vec::new(),
         });
         return Ok(true);
@@ -278,9 +302,11 @@ fn close_frame(frame: BlockFrame) -> SequenceItem {
         BlockFrame::Loop { label, items } => SequenceItem::Loop(SequenceBlock { label, items }),
         BlockFrame::Opt { label, items } => SequenceItem::Opt(SequenceBlock { label, items }),
         BlockFrame::Box {
+            color,
             label,
             participant_ids,
         } => SequenceItem::Box(SequenceBox {
+            color,
             label,
             participant_ids,
         }),
@@ -299,17 +325,9 @@ fn push_item(diag: &mut SequenceDiagram, stack: &mut [BlockFrame], item: Sequenc
             | BlockFrame::Par { current_items, .. }
             | BlockFrame::Critical { current_items, .. } => current_items.push(item),
             BlockFrame::Loop { items, .. } | BlockFrame::Opt { items, .. } => items.push(item),
-            BlockFrame::Box {
-                participant_ids, ..
-            } => {
-                // Box only holds participants — items leak to the diagram level.
-                if let SequenceItem::Message(_) = &item {
-                    diag.items.push(item);
-                } else {
-                    diag.items.push(item);
-                }
-                let _ = participant_ids;
-            }
+            // A box only groups participants; any messages/notes inside it are
+            // ordinary events that belong at the diagram level.
+            BlockFrame::Box { .. } => diag.items.push(item),
         }
     } else {
         diag.items.push(item);
@@ -388,6 +406,66 @@ fn parse_note(line: &str) -> Option<SequenceNote> {
         participants,
         text,
     })
+}
+
+/// Split a `box <color> <label>` header into an optional leading color and the
+/// remaining label. Mermaid treats the first token as a color when it is a hex
+/// value, an `rgb(...)`/`rgba(...)` function, or a named CSS color; otherwise
+/// the whole string is the label.
+fn split_box_color(s: &str) -> (Option<String>, String) {
+    if let Some(rest) = s.strip_prefix("rgb(").or_else(|| s.strip_prefix("rgba(")) {
+        if let Some(close) = rest.find(')') {
+            let end = s.len() - rest.len() + close + 1;
+            let color = s[..end].to_string();
+            let label = s[end..].trim().to_string();
+            return (Some(color), label);
+        }
+    }
+    let (first, rest) = match s.split_once(char::is_whitespace) {
+        Some((a, b)) => (a, b.trim()),
+        None => (s, ""),
+    };
+    if is_color_token(first) {
+        (Some(first.to_string()), rest.to_string())
+    } else {
+        (None, s.to_string())
+    }
+}
+
+fn is_color_token(tok: &str) -> bool {
+    if tok.starts_with('#') {
+        return true;
+    }
+    const NAMED: &[&str] = &[
+        "transparent",
+        "aqua",
+        "black",
+        "blue",
+        "cyan",
+        "fuchsia",
+        "gray",
+        "grey",
+        "green",
+        "lightblue",
+        "lightgray",
+        "lightgreen",
+        "lightgrey",
+        "lightyellow",
+        "lime",
+        "magenta",
+        "maroon",
+        "navy",
+        "olive",
+        "orange",
+        "pink",
+        "purple",
+        "red",
+        "silver",
+        "teal",
+        "white",
+        "yellow",
+    ];
+    NAMED.contains(&tok.to_ascii_lowercase().as_str())
 }
 
 fn parse_participant(
@@ -637,6 +715,47 @@ mod tests {
         let d = parse("sequenceDiagram\ntitle Login\nactor u as User\nu->>X: hi\n").unwrap();
         assert_eq!(d.title.as_deref(), Some("Login"));
         assert_eq!(d.participants[0].kind, ParticipantKind::Actor);
+    }
+
+    fn first_box(d: &SequenceDiagram) -> &SequenceBox {
+        d.items
+            .iter()
+            .find_map(|i| match i {
+                SequenceItem::Box(b) => Some(b),
+                _ => None,
+            })
+            .expect("no box")
+    }
+
+    #[test]
+    fn box_captures_members_and_color() {
+        let d = parse(
+            "sequenceDiagram\nbox Aqua Group\nparticipant A\nactor B\nend\nparticipant C\nA->>C: hi\n",
+        )
+        .unwrap();
+        let b = first_box(&d);
+        assert_eq!(b.color.as_deref(), Some("Aqua"));
+        assert_eq!(b.label, "Group");
+        assert_eq!(b.participant_ids, vec!["A".to_string(), "B".to_string()]);
+        // C declared outside the box is not a member.
+        assert!(!b.participant_ids.contains(&"C".to_string()));
+    }
+
+    #[test]
+    fn box_without_color_keeps_full_label() {
+        let d = parse("sequenceDiagram\nbox My Team\nparticipant A\nend\n").unwrap();
+        let b = first_box(&d);
+        assert_eq!(b.color, None);
+        assert_eq!(b.label, "My Team");
+    }
+
+    #[test]
+    fn box_rgb_color() {
+        let d =
+            parse("sequenceDiagram\nbox rgb(200, 200, 255) Team\nparticipant A\nend\n").unwrap();
+        let b = first_box(&d);
+        assert_eq!(b.color.as_deref(), Some("rgb(200, 200, 255)"));
+        assert_eq!(b.label, "Team");
     }
 
     #[test]
