@@ -9,7 +9,7 @@ use crate::parse::{
 };
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{curve_basis_path, escape, fnum, SvgBuilder};
+use super::builder::{curve_basis_path, escape, fnum, split_label_lines, SvgBuilder};
 use super::style::{resolve_edge_style, resolve_style, ResolvedStyle};
 use super::theme::Theme;
 
@@ -136,7 +136,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
 // ---- node sizing & drawing -------------------------------------------------
 
 fn node_size(n: &FlowNode) -> (f64, f64) {
-    let lines: Vec<&str> = n.text.split("\\n").collect();
+    let lines = split_label_lines(&n.text);
     let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
     let w = (max_chars as f64 * CHAR_W + PAD_X * 2.0).max(MIN_W);
     let h = (lines.len() as f64 * LINE_H + PAD_Y * 2.0).max(MIN_H);
@@ -401,7 +401,7 @@ fn draw_label(
     fg: &str,
     font_size: Option<&str>,
 ) {
-    let lines: Vec<&str> = text.split("\\n").collect();
+    let lines = split_label_lines(text);
     let n = lines.len() as f64;
     let line_h = 18.0;
     let y0 = cy - ((n - 1.0) * line_h) / 2.0 + 5.0;
@@ -772,6 +772,19 @@ mod tests {
             "flowchart TD\nA[/par/] --> B[\\palt\\]\nB --> C[/trap\\]\nC --> D[\\tralt/]\nD --> E>flag]\n",
         ), &Theme::default());
         assert!(svg.starts_with("<svg"));
+    }
+
+    #[test]
+    fn node_label_br_splits_into_lines() {
+        let svg = render(
+            &parse_flow("flowchart TB\nPX[\"line one<br/>line two<br/>line three\"]\n"),
+            &Theme::default(),
+        );
+        // Three separate <text> lines, none containing literal <br> markup.
+        assert_eq!(svg.matches("line one").count(), 1);
+        assert_eq!(svg.matches("line three").count(), 1);
+        assert!(!svg.contains("&lt;br"));
+        assert!(!svg.contains("<br"));
     }
 
     #[test]

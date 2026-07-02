@@ -164,3 +164,8 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
   `src/parse/flowchart.rs` and rendered in `src/svg/flowchart.rs`.
+- Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
+  label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
+  the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
+  `<tspan>`s for multi-line labels, so every renderer honors `<br>` for free;
+  flowchart also sizes nodes from the resulting line count / widest line.
