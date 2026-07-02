@@ -11,7 +11,8 @@
 //! ```
 //!
 //! Sections are optional. A line `2002 : LinkedIn : Facebook` produces a
-//! period `2002` with two events.
+//! period `2002` with two events. A continuation line starting with `:` (e.g.
+//! `: Google`) appends its events to the most recent period.
 
 use super::ast::{TimelineDiagram, TimelinePeriod, TimelineSection};
 use super::{strip_comment, ParseError};
@@ -53,6 +54,27 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
                 name: Some(rest.trim().to_string()),
                 periods: Vec::new(),
             });
+        } else if let Some(rest) = line.strip_prefix(':') {
+            let events = parse_events(rest);
+            if events.is_empty() {
+                return Err(ParseError::Syntax {
+                    message: "continuation line has no events".into(),
+                    line: line_no,
+                });
+            }
+            let periods = match &mut current {
+                Some(s) => &mut s.periods,
+                None => &mut implicit.periods,
+            };
+            match periods.last_mut() {
+                Some(period) => period.events.extend(events),
+                None => {
+                    return Err(ParseError::Syntax {
+                        message: "continuation line before any period".into(),
+                        line: line_no,
+                    });
+                }
+            }
         } else {
             let period = parse_period(line, line_no)?;
             match &mut current {
@@ -75,25 +97,17 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
 }
 
 fn parse_period(line: &str, line_no: usize) -> Result<TimelinePeriod, ParseError> {
-    let mut parts = line.split(':');
-    let label = parts
-        .next()
-        .ok_or_else(|| ParseError::Syntax {
-            message: format!("expected '<period> : <event>': '{line}'"),
-            line: line_no,
-        })?
-        .trim()
-        .to_string();
+    let (label, rest) = match line.split_once(':') {
+        Some((label, rest)) => (label.trim().to_string(), rest),
+        None => (line.trim().to_string(), ""),
+    };
     if label.is_empty() {
         return Err(ParseError::Syntax {
             message: "empty period label".into(),
             line: line_no,
         });
     }
-    let events: Vec<String> = parts
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let events = parse_events(rest);
     if events.is_empty() {
         return Err(ParseError::Syntax {
             message: format!("period '{label}' has no events"),
@@ -101,6 +115,13 @@ fn parse_period(line: &str, line_no: usize) -> Result<TimelinePeriod, ParseError
         });
     }
     Ok(TimelinePeriod { label, events })
+}
+
+fn parse_events(rest: &str) -> Vec<String> {
+    rest.split(':')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -132,6 +153,45 @@ mod tests {
         assert_eq!(d.title.as_deref(), Some("T"));
         assert_eq!(d.sections.len(), 2);
         assert_eq!(d.sections[0].periods.len(), 2);
+    }
+
+    #[test]
+    fn continuation_events() {
+        let d = parse("timeline\n2004 : Facebook\n     : Google\n2005 : Youtube\n").unwrap();
+        assert_eq!(d.sections[0].periods.len(), 2);
+        assert_eq!(
+            d.sections[0].periods[0].events,
+            vec!["Facebook".to_string(), "Google".to_string()]
+        );
+        assert_eq!(d.sections[0].periods[1].label, "2005");
+    }
+
+    #[test]
+    fn continuation_multi_event() {
+        let d = parse("timeline\n2004 : Facebook\n : Google : Twitter\n").unwrap();
+        assert_eq!(
+            d.sections[0].periods[0].events,
+            vec![
+                "Facebook".to_string(),
+                "Google".to_string(),
+                "Twitter".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn continuation_within_section() {
+        let d = parse("timeline\nsection S\n2004 : Facebook\n : Google\n").unwrap();
+        assert_eq!(d.sections[0].name.as_deref(), Some("S"));
+        assert_eq!(d.sections[0].periods[0].events.len(), 2);
+    }
+
+    #[test]
+    fn continuation_before_period_errors() {
+        assert!(matches!(
+            parse("timeline\n : Google\n"),
+            Err(ParseError::Syntax { .. })
+        ));
     }
 
     #[test]
