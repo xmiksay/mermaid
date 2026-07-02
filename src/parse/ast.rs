@@ -536,11 +536,16 @@ pub struct Namespace {
 pub struct ErDiagram {
     pub entities: Vec<Entity>,
     pub relations: Vec<ErRelation>,
+    /// `direction TB/BT/LR/RL`; drives the same layout transpose as flowchart.
+    pub direction: FlowDirection,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entity {
+    /// Stable identifier used by relations.
     pub name: String,
+    /// Display text; equals `name` unless an `id[Alias]` form set an alias.
+    pub label: String,
     pub attributes: Vec<EntityAttribute>,
 }
 

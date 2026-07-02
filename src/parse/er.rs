@@ -1,15 +1,19 @@
-//! ER diagram parser (v0.1 subset).
+//! ER diagram parser.
 //!
 //! Supports:
-//!   * `erDiagram` header.
-//!   * Entity blocks: `ENTITY { type name [PK|FK|UK] ... }`.
+//!   * `erDiagram` header and `direction TB/BT/LR/RL`.
+//!   * Entity blocks `ENTITY { type name [PK[, FK ...]] "comment" }` and the
+//!     alias form `id[Alias] { ... }` (id stays clean, Alias is the label).
 //!   * Relations with Crow's Foot cardinality:
 //!     `LEFT <leftCard><line><rightCard> RIGHT : label`
-//!     where `<line>` is `--` (identifying) or `..` (non-identifying).
+//!     where `<line>` is `--` (identifying) or `..` (non-identifying), plus the
+//!     verbal form `LEFT <card> to|optionally to <card> RIGHT : label` with
+//!     word/numeric cardinalities (`only one`, `zero or more`, `one or many`,
+//!     `0+`, `1`, …).
 
 use std::collections::HashMap;
 
-use super::ast::{Cardinality, Entity, EntityAttribute, ErDiagram, ErRelation};
+use super::ast::{Cardinality, Entity, EntityAttribute, ErDiagram, ErRelation, FlowDirection};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
@@ -47,19 +51,43 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
             continue;
         }
 
-        // Entity block opener: `NAME {`
-        if let Some(name) = line.strip_suffix('{') {
-            let name = name.trim().to_string();
-            ensure_entity(&mut diag, &mut by_name, &name);
+        // `direction TB/BT/LR/RL` — drives the layout transpose.
+        if let Some(rest) = line.strip_prefix("direction ") {
+            diag.direction = match rest.trim() {
+                "TB" | "TD" => FlowDirection::TopDown,
+                "BT" => FlowDirection::BottomTop,
+                "LR" => FlowDirection::LeftRight,
+                "RL" => FlowDirection::RightLeft,
+                other => {
+                    return Err(ParseError::Syntax {
+                        message: format!("unknown direction: '{other}'"),
+                        line: line_no,
+                    })
+                }
+            };
+            continue;
+        }
+
+        // Entity block opener: `NAME {` (or `id[Alias] {`).
+        if let Some(head) = line.strip_suffix('{') {
+            let (name, label) = split_id_label(head.trim());
+            ensure_entity(&mut diag, &mut by_name, &name, Some(&label));
             current_entity = Some(name);
             continue;
         }
 
         // Relation line: `LEFT <card><line><card> RIGHT : label`
         if let Some(rel) = parse_relation(line) {
-            ensure_entity(&mut diag, &mut by_name, &rel.left);
-            ensure_entity(&mut diag, &mut by_name, &rel.right);
+            ensure_entity(&mut diag, &mut by_name, &rel.left, None);
+            ensure_entity(&mut diag, &mut by_name, &rel.right, None);
             diag.relations.push(rel);
+            continue;
+        }
+
+        // Bare entity declaration: `NAME` or `id[Alias]`.
+        if is_entity_decl(line) {
+            let (name, label) = split_id_label(line);
+            ensure_entity(&mut diag, &mut by_name, &name, Some(&label));
             continue;
         }
 
@@ -73,6 +101,39 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
         return Err(ParseError::Empty);
     }
     Ok(diag)
+}
+
+/// A standalone entity declaration is a single identifier, optionally with an
+/// `[Alias]` suffix — no relation connector, no attribute block.
+fn is_entity_decl(line: &str) -> bool {
+    let id = match line.split_once('[') {
+        Some((id, rest)) => {
+            if !rest.ends_with(']') {
+                return false;
+            }
+            id.trim()
+        }
+        None => line,
+    };
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Split an `id[Alias]` form into `(id, label)`; a plain id reuses itself as
+/// the label. Mirrors the flowchart node-label split.
+fn split_id_label(s: &str) -> (String, String) {
+    let s = s.trim();
+    if let Some(open) = s.find('[') {
+        if s.ends_with(']') {
+            let id = s[..open].trim();
+            let label = s[open + 1..s.len() - 1].trim();
+            let id = if id.is_empty() { label } else { id };
+            return (id.to_string(), label.to_string());
+        }
+    }
+    (s.to_string(), s.to_string())
 }
 
 fn parse_attribute(line: &str) -> EntityAttribute {
@@ -92,7 +153,19 @@ fn parse_attribute(line: &str) -> EntityAttribute {
     let mut parts = head.split_whitespace();
     let ty = parts.next().unwrap_or("").to_string();
     let name = parts.next().unwrap_or("").to_string();
-    let key = parts.next().map(|k| k.to_string());
+    // Remaining tokens are key constraints; upstream allows several
+    // (`id PK, FK`), comma- or space-separated. Normalize to `PK, FK`.
+    let keys: Vec<String> = parts
+        .flat_map(|tok| tok.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let key = if keys.is_empty() {
+        None
+    } else {
+        Some(keys.join(", "))
+    };
     EntityAttribute {
         type_: ty,
         name,
@@ -102,92 +175,139 @@ fn parse_attribute(line: &str) -> EntityAttribute {
 }
 
 fn parse_relation(line: &str) -> Option<ErRelation> {
-    // Find the connector substring. It's surrounded by spaces (typical) but we
-    // scan for the line separator (`--` or `..`) anywhere.
-    let line_styles = ["--", ".."];
-    let (line_start, line_style) = line_styles
-        .iter()
-        .filter_map(|s| line.find(s).map(|p| (p, *s)))
-        .min_by_key(|x| x.0)?;
-
-    // The cardinality token sits immediately before `line_start`. Strip any
-    // trailing whitespace from the left-of-line text.
-    let left_part = &line[..line_start];
-    let left_trim_end = left_part.trim_end_matches(' ');
-    // The token can be 1 or 2 chars: `||`, `o|`, `|{`, `o{`, then mirrored
-    // versions on the other side. We match longest first.
-    let (left_card_len, left_card) = scan_card_end(left_trim_end)?;
-    let left_name = left_trim_end[..left_trim_end.len() - left_card_len]
-        .trim()
-        .to_string();
-
-    let after_line = &line[line_start + line_style.len()..];
-    let (right_card_len, right_card) = scan_card_start(after_line)?;
-    let after_card = &after_line[right_card_len..];
-
-    // Remaining: ` RIGHT : label`
-    let after_card = after_card.trim_start();
-    let (right_name, label) = match after_card.split_once(':') {
-        Some((a, b)) => (a.trim().to_string(), b.trim().trim_matches('"').to_string()),
-        None => (after_card.trim().to_string(), String::new()),
+    // Split off the trailing `: label` first (entity ids never contain `:`).
+    let (spec, label) = match line.split_once(':') {
+        Some((a, b)) => (a.trim(), b.trim().trim_matches('"').to_string()),
+        None => (line.trim(), String::new()),
     };
-    if right_name.is_empty() {
+
+    // Locate the relationship connector between the two cardinalities. It is
+    // either a glyph line (`--`/`..`) or a verbal form (`to`/`optionally to`).
+    let (sep_start, sep_len, identifying) = find_reltype(spec)?;
+    let left_part = spec[..sep_start].trim();
+    let right_part = spec[sep_start + sep_len..].trim();
+
+    let (left_name, left_card) = split_card_end(left_part)?;
+    let (right_card, right_name) = split_card_start(right_part)?;
+    if left_name.is_empty() || right_name.is_empty() {
         return None;
     }
 
     Some(ErRelation {
-        left: left_name,
-        right: right_name,
+        left: split_id_label(left_name).0,
+        right: split_id_label(right_name).0,
         left_card,
         right_card,
-        identifying: line_style == "--",
+        identifying,
         label,
     })
 }
 
-/// Match a cardinality token at the END of `s`. Returns (length, card).
-fn scan_card_end(s: &str) -> Option<(usize, Cardinality)> {
-    // Left-side tokens (incoming line direction): `||`, `|o`, `}|`, `}o`
-    // These are mirrored versions of the right-side tokens.
-    const ENDS: &[(&str, Cardinality)] = &[
+/// Locate the relationship connector, returning `(byte offset, length,
+/// identifying)`. Verbal forms take precedence over the glyph lines so an
+/// `optionally to` isn't mistaken for a bare `to`.
+fn find_reltype(spec: &str) -> Option<(usize, usize, bool)> {
+    const VERBAL: &[(&str, bool)] = &[(" optionally to ", false), (" to ", true)];
+    for (tok, identifying) in VERBAL {
+        if let Some(p) = spec.find(tok) {
+            return Some((p, tok.len(), *identifying));
+        }
+    }
+    ["--", ".."]
+        .iter()
+        .filter_map(|s| spec.find(s).map(|p| (p, *s)))
+        .min_by_key(|x| x.0)
+        .map(|(p, s)| (p, s.len(), s == "--"))
+}
+
+/// Verbal / numeric cardinality aliases (upstream `erDiagram` grammar), matched
+/// as whole words. Glyph tokens are handled separately.
+const CARD_WORDS: &[(&str, Cardinality)] = &[
+    ("only one", Cardinality::ExactlyOne),
+    ("zero or one", Cardinality::ZeroOrOne),
+    ("one or zero", Cardinality::ZeroOrOne),
+    ("zero or more", Cardinality::ZeroOrMore),
+    ("zero or many", Cardinality::ZeroOrMore),
+    ("one or more", Cardinality::OneOrMore),
+    ("one or many", Cardinality::OneOrMore),
+    ("many(1)", Cardinality::OneOrMore),
+    ("many(0)", Cardinality::ZeroOrMore),
+    ("0+", Cardinality::ZeroOrMore),
+    ("1+", Cardinality::OneOrMore),
+    ("1", Cardinality::ExactlyOne),
+];
+
+/// Split `NAME <card>` where the cardinality sits at the END. Handles verbal /
+/// numeric words as well as the crow's-foot glyphs.
+fn split_card_end(s: &str) -> Option<(&str, Cardinality)> {
+    let s = s.trim_end();
+    for (tok, card) in CARD_WORDS {
+        if let Some(name) = s.strip_suffix(tok) {
+            if name.is_empty() || name.ends_with(char::is_whitespace) {
+                return Some((name.trim_end(), *card));
+            }
+        }
+    }
+    const GLYPHS: &[(&str, Cardinality)] = &[
         ("}o", Cardinality::ZeroOrMore),
         ("}|", Cardinality::OneOrMore),
         ("o|", Cardinality::ZeroOrOne),
         ("||", Cardinality::ExactlyOne),
         ("|o", Cardinality::ZeroOrOne),
     ];
-    for (tok, card) in ENDS {
-        if s.ends_with(tok) {
-            return Some((tok.len(), *card));
+    for (tok, card) in GLYPHS {
+        if let Some(name) = s.strip_suffix(tok) {
+            return Some((name.trim_end(), *card));
         }
     }
     None
 }
 
-/// Match a cardinality token at the START of `s`. Returns (length, card).
-fn scan_card_start(s: &str) -> Option<(usize, Cardinality)> {
-    const STARTS: &[(&str, Cardinality)] = &[
+/// Split `<card> NAME` where the cardinality sits at the START.
+fn split_card_start(s: &str) -> Option<(Cardinality, &str)> {
+    let s = s.trim_start();
+    for (tok, card) in CARD_WORDS {
+        if let Some(name) = s.strip_prefix(tok) {
+            if name.is_empty() || name.starts_with(char::is_whitespace) {
+                return Some((*card, name.trim_start()));
+            }
+        }
+    }
+    const GLYPHS: &[(&str, Cardinality)] = &[
         ("o{", Cardinality::ZeroOrMore),
         ("|{", Cardinality::OneOrMore),
         ("o|", Cardinality::ZeroOrOne),
         ("||", Cardinality::ExactlyOne),
         ("|o", Cardinality::ZeroOrOne),
     ];
-    for (tok, card) in STARTS {
-        if s.starts_with(tok) {
-            return Some((tok.len(), *card));
+    for (tok, card) in GLYPHS {
+        if let Some(name) = s.strip_prefix(tok) {
+            return Some((*card, name.trim_start()));
         }
     }
     None
 }
 
-fn ensure_entity(diag: &mut ErDiagram, by_name: &mut HashMap<String, usize>, name: &str) {
-    if by_name.contains_key(name) {
+fn ensure_entity(
+    diag: &mut ErDiagram,
+    by_name: &mut HashMap<String, usize>,
+    name: &str,
+    label: Option<&str>,
+) {
+    if let Some(&i) = by_name.get(name) {
+        // A later `id[Alias]` (or block opener) upgrades a placeholder label
+        // materialized by an earlier relation reference.
+        if let Some(l) = label {
+            if diag.entities[i].label == diag.entities[i].name {
+                diag.entities[i].label = l.to_string();
+            }
+        }
         return;
     }
     by_name.insert(name.to_string(), diag.entities.len());
     diag.entities.push(Entity {
         name: name.to_string(),
+        label: label.unwrap_or(name).to_string(),
         attributes: Vec::new(),
     });
 }
@@ -226,5 +346,82 @@ mod tests {
         let c = d.entities.iter().find(|e| e.name == "CUSTOMER").unwrap();
         assert_eq!(c.attributes.len(), 2);
         assert_eq!(c.attributes[1].key.as_deref(), Some("PK"));
+    }
+
+    #[test]
+    fn verbal_cardinalities() {
+        let s = "erDiagram\nCAR only one to zero or more NAMED-DRIVER : allows\n";
+        let d = parse(s).unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.left, "CAR");
+        assert_eq!(r.right, "NAMED-DRIVER");
+        assert_eq!(r.left_card, Cardinality::ExactlyOne);
+        assert_eq!(r.right_card, Cardinality::ZeroOrMore);
+        assert!(r.identifying);
+        assert_eq!(r.label, "allows");
+    }
+
+    #[test]
+    fn optionally_to_is_nonidentifying() {
+        let d = parse("erDiagram\nA one or many optionally to one or zero B : x\n").unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.left_card, Cardinality::OneOrMore);
+        assert_eq!(r.right_card, Cardinality::ZeroOrOne);
+        assert!(!r.identifying);
+    }
+
+    #[test]
+    fn numeric_cardinalities() {
+        let d = parse("erDiagram\nPERSON 1--1 CAR : owns\n").unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.left, "PERSON");
+        assert_eq!(r.right, "CAR");
+        assert_eq!(r.left_card, Cardinality::ExactlyOne);
+        assert_eq!(r.right_card, Cardinality::ExactlyOne);
+    }
+
+    #[test]
+    fn entity_alias_no_duplicate() {
+        let s = "erDiagram\np[Person] {\nstring name\n}\np ||--o{ ORDER : places\n";
+        let d = parse(s).unwrap();
+        assert_eq!(d.entities.iter().filter(|e| e.name == "p").count(), 1);
+        let p = d.entities.iter().find(|e| e.name == "p").unwrap();
+        assert_eq!(p.label, "Person");
+        assert_eq!(p.attributes.len(), 1);
+    }
+
+    #[test]
+    fn alias_upgrades_earlier_reference() {
+        // Relation references `p` before its aliased block appears.
+        let s = "erDiagram\np ||--o{ ORDER : places\np[Person] {\nstring name\n}\n";
+        let d = parse(s).unwrap();
+        assert_eq!(d.entities.iter().filter(|e| e.name == "p").count(), 1);
+        assert_eq!(
+            d.entities.iter().find(|e| e.name == "p").unwrap().label,
+            "Person"
+        );
+    }
+
+    #[test]
+    fn direction_keyword() {
+        let d = parse("erDiagram\ndirection LR\nA ||--o{ B : x\n").unwrap();
+        assert_eq!(d.direction, FlowDirection::LeftRight);
+    }
+
+    #[test]
+    fn multiple_key_constraints() {
+        let d = parse("erDiagram\nORDER {\nstring id PK, FK\n}\n").unwrap();
+        let o = d.entities.iter().find(|e| e.name == "ORDER").unwrap();
+        assert_eq!(o.attributes[0].key.as_deref(), Some("PK, FK"));
+    }
+
+    #[test]
+    fn attribute_comment_parsed() {
+        let d = parse("erDiagram\nCUSTOMER {\nstring name \"the customer name\"\n}\n").unwrap();
+        let c = d.entities.iter().find(|e| e.name == "CUSTOMER").unwrap();
+        assert_eq!(
+            c.attributes[0].comment.as_deref(),
+            Some("the customer name")
+        );
     }
 }
