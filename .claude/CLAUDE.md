@@ -154,7 +154,11 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   draws labeled frames with tab labels.
 - Sequence `autonumber` prefixes each message text with a sequence number.
 - Sequence `activate`/`deactivate` is paired and drawn as an activation band
-  on the lifeline.
+  on the lifeline. `draw_activations` keeps a **stack** of open start-ys per
+  participant (`HashMap<String, Vec<f64>>`) so nested/stacked activations (the
+  `->>+` shorthand) draw one band per level, each offset `level * 3px` to the
+  right instead of overwriting. Activations still open at the end of the event
+  loop are flushed down to `lifeline_bottom`.
 - State `state X { ... }` is stored in `composites`; parallel regions are
   separated by `--`. Renderer draws a dashed rounded outline with a label.
 - State `note right of X: text` (one-liner) and `note left of X\n…\nend note`

@@ -119,7 +119,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     }
 
     // Activation bands (computed from activate/deactivate events).
-    draw_activations(&mut svg, &events, &x_of);
+    draw_activations(&mut svg, &events, &x_of, lifeline_bottom);
 
     // Block frames
     draw_block_frames(&mut svg, &events, &x_of, theme);
@@ -614,31 +614,57 @@ fn draw_block_frame(
     }
 }
 
-fn draw_activations(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>) {
-    // Find paired activate/deactivate per participant id.
-    let mut open: HashMap<String, f64> = HashMap::new();
+fn draw_activations(
+    svg: &mut SvgBuilder,
+    events: &[Event],
+    x_of: &HashMap<String, f64>,
+    lifeline_bottom: f64,
+) {
+    // A stack of open start-ys per participant so nested activations
+    // (e.g. the `->>+` shorthand) stack instead of overwriting. Each nesting
+    // level is offset horizontally so the outer band stays visible.
+    let mut open: HashMap<String, Vec<f64>> = HashMap::new();
     for ev in events {
         match &ev.kind {
             EventKind::Activate(id) => {
-                open.insert(id.clone(), ev.y);
+                open.entry(id.clone()).or_default().push(ev.y);
             }
             EventKind::Deactivate(id) => {
-                if let Some(start_y) = open.remove(id) {
-                    if let Some(&cx) = x_of.get(id) {
-                        svg.rect(
-                            cx - ACTIVATION_W / 2.0,
-                            start_y,
-                            ACTIVATION_W,
-                            (ev.y - start_y).max(8.0),
-                            "fill=\"#ECECFF\" stroke=\"#9370DB\" stroke-width=\"1\"",
-                        );
-                    }
+                if let Some(start_y) = open.get_mut(id).and_then(Vec::pop) {
+                    // The popped entry sat at depth == current stack length.
+                    let level = open.get(id).map_or(0, Vec::len);
+                    draw_activation_band(svg, x_of, id, start_y, ev.y, level);
                 }
             }
             _ => {}
         }
     }
-    // Any still-open activations — leave them open until lifeline_bottom.
+    // Unclosed activations extend to the bottom of the lifelines.
+    for (id, starts) in &open {
+        for (level, &start_y) in starts.iter().enumerate() {
+            draw_activation_band(svg, x_of, id, start_y, lifeline_bottom, level);
+        }
+    }
+}
+
+fn draw_activation_band(
+    svg: &mut SvgBuilder,
+    x_of: &HashMap<String, f64>,
+    id: &str,
+    start_y: f64,
+    end_y: f64,
+    level: usize,
+) {
+    if let Some(&cx) = x_of.get(id) {
+        let offset = level as f64 * 3.0;
+        svg.rect(
+            cx - ACTIVATION_W / 2.0 + offset,
+            start_y,
+            ACTIVATION_W,
+            (end_y - start_y).max(8.0),
+            "fill=\"#ECECFF\" stroke=\"#9370DB\" stroke-width=\"1\"",
+        );
+    }
 }
 
 fn stroke_for(a: ArrowKind) -> (&'static str, &'static str) {
@@ -792,5 +818,53 @@ mod tests {
         );
         // activation rect uses #ECECFF
         assert!(svg.contains("#ECECFF"));
+    }
+
+    #[test]
+    fn nested_activations_stack_and_offset() {
+        // Two activations on B open before either closes: the bands must not
+        // overwrite each other, and the inner one is offset horizontally.
+        let events = vec![
+            Event {
+                y: 10.0,
+                kind: EventKind::Activate("B".into()),
+            },
+            Event {
+                y: 20.0,
+                kind: EventKind::Activate("B".into()),
+            },
+            Event {
+                y: 30.0,
+                kind: EventKind::Deactivate("B".into()),
+            },
+            Event {
+                y: 40.0,
+                kind: EventKind::Deactivate("B".into()),
+            },
+        ];
+        let mut x_of = HashMap::new();
+        x_of.insert("B".to_string(), 100.0);
+        let mut svg = SvgBuilder::new(300.0, 300.0);
+        draw_activations(&mut svg, &events, &x_of, 200.0);
+        let out = svg.finish();
+        // Outer band starts at x = 95 (100 - 10/2 + 0), inner offset by 3 → 98.
+        assert!(out.contains("x=\"95\""), "outer band at base x");
+        assert!(out.contains("x=\"98\""), "inner band offset by level*3");
+    }
+
+    #[test]
+    fn unclosed_activation_extends_to_bottom() {
+        let events = vec![Event {
+            y: 10.0,
+            kind: EventKind::Activate("B".into()),
+        }];
+        let mut x_of = HashMap::new();
+        x_of.insert("B".to_string(), 100.0);
+        let mut svg = SvgBuilder::new(300.0, 300.0);
+        draw_activations(&mut svg, &events, &x_of, 200.0);
+        let out = svg.finish();
+        // Band height = lifeline_bottom - start_y = 200 - 10 = 190.
+        assert!(out.contains("#ECECFF"), "unclosed activation is drawn");
+        assert!(out.contains("height=\"190\""), "extends to lifeline bottom");
     }
 }
