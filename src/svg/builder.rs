@@ -5,6 +5,9 @@
 
 use std::fmt::Write as _;
 
+/// Baseline-to-baseline spacing used when a label is split across lines.
+pub const LABEL_LINE_H: f64 = 18.0;
+
 pub struct SvgBuilder {
     pub body: String,
     pub defs: String,
@@ -94,13 +97,40 @@ impl SvgBuilder {
     }
 
     pub fn text(&mut self, x: f64, y: f64, attrs: &str, content: &str) {
+        let lines = split_label_lines(content);
+        if lines.len() <= 1 {
+            let _ = write!(
+                self.body,
+                "<text x=\"{}\" y=\"{}\" {}>{}</text>",
+                fnum(x),
+                fnum(y),
+                attrs,
+                escape(content)
+            );
+            return;
+        }
+        // Multi-line label: stack the lines as <tspan>s centered vertically on
+        // the baseline `y`, so <br>/\n behave like line breaks instead of
+        // leaking through as literal text.
+        let first_dy = -((lines.len() as f64 - 1.0) * LABEL_LINE_H) / 2.0;
+        let mut spans = String::new();
+        for (i, line) in lines.iter().enumerate() {
+            let dy = if i == 0 { first_dy } else { LABEL_LINE_H };
+            let _ = write!(
+                spans,
+                "<tspan x=\"{}\" dy=\"{}\">{}</tspan>",
+                fnum(x),
+                fnum(dy),
+                escape(line)
+            );
+        }
         let _ = write!(
             self.body,
             "<text x=\"{}\" y=\"{}\" {}>{}</text>",
             fnum(x),
             fnum(y),
             attrs,
-            escape(content)
+            spans
         );
     }
 
@@ -110,6 +140,64 @@ impl SvgBuilder {
 
     pub fn raw(&mut self, raw: &str) {
         self.body.push_str(raw);
+    }
+}
+
+/// Split a label into display lines, honoring the line breaks that upstream
+/// Mermaid recognizes: HTML `<br>` / `<br/>` / `<br />` (case-insensitive, with
+/// optional inner whitespace) and `\n` — the latter as a real newline or the
+/// two-character literal escape `\n` that survives in Mermaid source. Each line
+/// is trimmed of surrounding whitespace. A label with no breaks yields a single
+/// element, so callers keep their existing single-line behavior.
+pub fn split_label_lines(s: &str) -> Vec<&str> {
+    let b = s.as_bytes();
+    let mut lines: Vec<&str> = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\n' {
+            lines.push(s[start..i].trim());
+            i += 1;
+            start = i;
+        } else if b[i] == b'\\' && i + 1 < b.len() && b[i + 1] == b'n' {
+            lines.push(s[start..i].trim());
+            i += 2;
+            start = i;
+        } else if let Some(len) = match_br(&b[i..]) {
+            lines.push(s[start..i].trim());
+            i += len;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    lines.push(s[start..].trim());
+    lines
+}
+
+/// Length of a `<br>`-style tag at the start of `b`, or `None`. Matches `<br`
+/// then optional whitespace, an optional `/`, more optional whitespace, and `>`.
+fn match_br(b: &[u8]) -> Option<usize> {
+    if b.len() < 4 || b[0] != b'<' {
+        return None;
+    }
+    if !b[1].eq_ignore_ascii_case(&b'b') || !b[2].eq_ignore_ascii_case(&b'r') {
+        return None;
+    }
+    let mut j = 3;
+    while j < b.len() && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if j < b.len() && b[j] == b'/' {
+        j += 1;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+    }
+    if j < b.len() && b[j] == b'>' {
+        Some(j + 1)
+    } else {
+        None
     }
 }
 
@@ -256,6 +344,43 @@ mod tests {
             .finish();
         assert!(svg.contains("font-family=\"Inter, sans-serif\""));
         assert!(svg.contains("font-size=\"16\""));
+    }
+
+    #[test]
+    fn splits_labels_on_br_and_newlines() {
+        assert_eq!(split_label_lines("one line"), vec!["one line"]);
+        assert_eq!(split_label_lines("a<br>b"), vec!["a", "b"]);
+        assert_eq!(split_label_lines("a<br/>b<br />c"), vec!["a", "b", "c"]);
+        assert_eq!(split_label_lines("a<BR/>b"), vec!["a", "b"]);
+        assert_eq!(split_label_lines("a<br  / >b"), vec!["a", "b"]);
+        // Real newline and the two-char literal escape both split.
+        assert_eq!(split_label_lines("a\nb"), vec!["a", "b"]);
+        assert_eq!(split_label_lines("a\\nb"), vec!["a", "b"]);
+        // Each line is trimmed of surrounding whitespace.
+        assert_eq!(split_label_lines("a <br/> b"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn br_not_matched_inside_words() {
+        assert_eq!(split_label_lines("abrupt"), vec!["abrupt"]);
+        assert_eq!(split_label_lines("<break>"), vec!["<break>"]);
+    }
+
+    #[test]
+    fn multiline_text_emits_tspans_no_literal_br() {
+        let mut b = SvgBuilder::new(200.0, 60.0);
+        b.text(
+            50.0,
+            30.0,
+            "text-anchor=\"middle\"",
+            "line1<br/>line2<br/>line3",
+        );
+        let svg = b.finish();
+        assert_eq!(svg.matches("<tspan").count(), 3);
+        assert!(svg.contains(">line1</tspan>"));
+        assert!(svg.contains(">line3</tspan>"));
+        assert!(!svg.contains("br/"));
+        assert!(!svg.contains("&lt;br"));
     }
 
     #[test]
