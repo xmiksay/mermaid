@@ -580,12 +580,21 @@ fn draw_message(
 ) {
     let fg = theme.fg;
     let arrow_stroke = theme.arrow_stroke;
-    let (dash, marker) = stroke_for(arrow);
+    let (dash, start_marker, end_marker) = stroke_for(arrow);
     let dash_attr = if dash.is_empty() {
         String::new()
     } else {
         format!(" stroke-dasharray=\"{dash}\"")
     };
+    let marker_attr = |m: Option<&str>, kind: &str| match m {
+        Some(name) => format!(" marker-{kind}=\"url(#{name})\""),
+        None => String::new(),
+    };
+    let markers = format!(
+        "{}{}",
+        marker_attr(start_marker, "start"),
+        marker_attr(end_marker, "end")
+    );
 
     if (x1 - x2).abs() < 1e-6 {
         let r = 20.0;
@@ -599,7 +608,7 @@ fn draw_message(
         svg.path(
             &d_attr,
             &format!(
-                "fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
+                "fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr}{markers}"
             ),
         );
         if !text.is_empty() {
@@ -618,9 +627,7 @@ fn draw_message(
         y,
         x2,
         y,
-        &format!(
-            "stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
-        ),
+        &format!("stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr}{markers}"),
     );
     if !text.is_empty() {
         let mid = (x1 + x2) / 2.0;
@@ -866,14 +873,18 @@ fn draw_activation_band(
     }
 }
 
-fn stroke_for(a: ArrowKind) -> (&'static str, &'static str) {
+/// Returns `(dash, start_marker, end_marker)` for an arrow kind. Plain `->`/`-->`
+/// are bare lines (no marker); bidirectional arrows carry a marker at both ends.
+fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'static str>) {
     match a {
-        ArrowKind::Solid => ("", "arrow-open"),
-        ArrowKind::SolidArrow => ("", "arrow-filled"),
-        ArrowKind::Dashed => ("6 4", "arrow-open"),
-        ArrowKind::DashedArrow => ("6 4", "arrow-filled"),
-        ArrowKind::Cross => ("", "arrow-cross"),
-        ArrowKind::Open => ("", "arrow-open"),
+        ArrowKind::Solid => ("", None, None),
+        ArrowKind::SolidArrow => ("", None, Some("arrow-filled")),
+        ArrowKind::Dashed => ("6 4", None, None),
+        ArrowKind::DashedArrow => ("6 4", None, Some("arrow-filled")),
+        ArrowKind::Cross => ("", None, Some("arrow-cross")),
+        ArrowKind::Open => ("", None, Some("arrow-open")),
+        ArrowKind::BiSolidArrow => ("", Some("arrow-filled"), Some("arrow-filled")),
+        ArrowKind::BiDashedArrow => ("6 4", Some("arrow-filled"), Some("arrow-filled")),
     }
 }
 
@@ -931,6 +942,27 @@ mod tests {
         assert!(svg.contains(">Login<"));
         assert!(svg.contains(">hi<"));
         assert!(svg.contains("arrow-filled"));
+    }
+
+    #[test]
+    fn plain_line_arrows_have_no_marker() {
+        // `->` / `-->` are bare lines with no arrowhead (issue #57).
+        let svg = render(&build("sequenceDiagram\nA->B: x\n"), &Theme::default());
+        assert!(!svg.contains("marker-end"));
+        assert!(!svg.contains("marker-start"));
+        let svg = render(&build("sequenceDiagram\nA-->B: y\n"), &Theme::default());
+        assert!(!svg.contains("marker-end"));
+        assert!(!svg.contains("marker-start"));
+    }
+
+    #[test]
+    fn bidirectional_arrow_marks_both_ends() {
+        let svg = render(
+            &build("sequenceDiagram\nAlice<<->>Bob: hi\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains("marker-start=\"url(#arrow-filled)\""));
+        assert!(svg.contains("marker-end=\"url(#arrow-filled)\""));
     }
 
     #[test]
