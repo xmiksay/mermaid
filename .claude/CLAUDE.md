@@ -191,6 +191,12 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
+- Flowchart `;` is a **statement terminator/separator** anywhere a newline is
+  accepted (upstream grammar). `parse()` flattens each source line into its
+  `;`-separated statements via `split_semicolons` before dispatch, so `graph
+  TD;`, `A-->B;`, and `graph LR; A-->B` (header + statements on one line) all
+  parse. A `;` inside a quoted string, a shape bracket, or an edge-label `|…|`
+  run is left intact (so `["a;b"]` and `#59;` entity codes survive).
 - Flowchart `~~~` is the **invisible link** (`EdgeLine::Invisible`): `parse_arrow`
   accepts `~` as an opener, requires ≥3 tildes, and forbids any head/tail. It is
   a real edge (so it shapes the sugiyama layout) but `draw_edge` returns early
