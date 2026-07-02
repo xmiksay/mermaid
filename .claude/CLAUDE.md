@@ -370,3 +370,12 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `$c4ShapeInRow`/`$c4BoundaryInRow` override the row-flow wrap counts
   (`flow_layout`'s `shape_in_row`/`boundary_in_row`). `C4Relation.direction`
   (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout.
+- gitGraph header (`src/parse/gitgraph.rs`) tolerates a trailing colon on both
+  the keyword and the direction token — `gitGraph:`, `gitGraph TB:`,
+  `gitGraph BT:` all parse (the dispatcher in `src/parse/mod.rs` also trims a
+  trailing `:` off the head token). `branch <name> order: <n>` consumes the
+  `order:`/`tag:` attributes instead of swallowing them into the branch name
+  (`parse_branch`); `order` reaches `GitEvent::Branch.order`. The renderer
+  (`src/svg/gitgraph.rs`) sorts lanes by explicit `order` (falling back to
+  insertion order) and, for `BT`, flips the commit axis (`cols - 1 - col`) so
+  newer commits sit higher.

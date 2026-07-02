@@ -850,6 +850,8 @@ pub enum GitEvent {
     },
     Branch {
         name: String,
+        /// Explicit lane ordering from `branch <name> order: <n>`.
+        order: Option<usize>,
     },
     Checkout {
         name: String,

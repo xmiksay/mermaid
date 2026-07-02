@@ -34,6 +34,9 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     // Walk events building commits and branch state.
     let mut nodes: Vec<CommitNode> = Vec::new();
     let mut branches: Vec<String> = vec![MAIN_BRANCH.into()];
+    // Explicit `order:` per branch (parallel to `branches`); None keeps
+    // insertion order.
+    let mut branch_orders: Vec<Option<usize>> = vec![None];
     let mut current_branch = MAIN_BRANCH.to_string();
     // last commit id per branch.
     let mut head: BTreeMap<String, String> = BTreeMap::new();
@@ -68,9 +71,14 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 });
                 col += 1;
             }
-            GitEvent::Branch { name } => {
-                if !branches.contains(name) {
+            GitEvent::Branch { name, order } => {
+                if let Some(pos) = branches.iter().position(|b| b == name) {
+                    if order.is_some() {
+                        branch_orders[pos] = *order;
+                    }
+                } else {
                     branches.push(name.clone());
+                    branch_orders.push(*order);
                 }
                 if let Some(h) = head.get(&current_branch).cloned() {
                     head.insert(name.clone(), h);
@@ -81,6 +89,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 current_branch = name.clone();
                 if !branches.contains(name) {
                     branches.push(name.clone());
+                    branch_orders.push(None);
                 }
             }
             GitEvent::Merge { from, id, tag } => {
@@ -125,8 +134,25 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
         }
     }
 
+    // Lane order: explicit `order:` wins, otherwise insertion order. Nodes and
+    // labels are keyed by insertion index during the walk, then remapped here.
+    let lane_of_seq: Vec<usize> = {
+        let key = |i: usize| (branch_orders[i].unwrap_or(i), i);
+        let mut idxs: Vec<usize> = (0..branches.len()).collect();
+        idxs.sort_by_key(|&i| key(i));
+        let mut lane = vec![0usize; branches.len()];
+        for (rank, &i) in idxs.iter().enumerate() {
+            lane[i] = rank;
+        }
+        lane
+    };
+    for n in &mut nodes {
+        n.lane = lane_of_seq[n.lane];
+    }
+
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let horizontal = matches!(d.direction, GitDirection::LeftRight);
+    let bottom_top = matches!(d.direction, GitDirection::BottomTop);
     let cols = nodes.iter().map(|n| n.col).max().unwrap_or(0) + 1;
     let lanes = branches.len();
     let (chart_w, chart_h) = if horizontal {
@@ -163,21 +189,28 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 origin_y + n.lane as f64 * LANE_GAP,
             )
         } else {
+            // BT flows bottom-to-top: newer commits sit higher up the axis.
+            let row = if bottom_top {
+                (cols - 1 - n.col) as f64
+            } else {
+                n.col as f64
+            };
             (
                 origin_x + n.lane as f64 * LANE_GAP,
-                origin_y + n.col as f64 * COMMIT_GAP,
+                origin_y + row * COMMIT_GAP,
             )
         }
     };
 
     // Branch labels.
     for (i, b) in branches.iter().enumerate() {
+        let lane = lane_of_seq[i];
         let (x, y) = if horizontal {
-            (PAD, origin_y + i as f64 * LANE_GAP + 4.0)
+            (PAD, origin_y + lane as f64 * LANE_GAP + 4.0)
         } else {
-            (origin_x + i as f64 * LANE_GAP, PAD + title_h + 14.0)
+            (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 14.0)
         };
-        let color = theme.pie_color(i);
+        let color = theme.pie_color(lane);
         svg.text(
             x,
             y,
@@ -188,9 +221,10 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
 
     // Lane lines.
     for (i, _) in branches.iter().enumerate() {
-        let color = theme.pie_color(i);
+        let lane = lane_of_seq[i];
+        let color = theme.pie_color(lane);
         if horizontal {
-            let y = origin_y + i as f64 * LANE_GAP;
+            let y = origin_y + lane as f64 * LANE_GAP;
             svg.line(
                 origin_x,
                 y,
@@ -199,7 +233,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 &format!("stroke=\"{color}\" stroke-width=\"2\""),
             );
         } else {
-            let x = origin_x + i as f64 * LANE_GAP;
+            let x = origin_x + lane as f64 * LANE_GAP;
             svg.line(
                 x,
                 origin_y,
@@ -310,7 +344,10 @@ mod tests {
                     tag: Some("v1".into()),
                     kind: CommitKind::Highlight,
                 },
-                GitEvent::Branch { name: "dev".into() },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
                 GitEvent::Commit {
                     id: None,
                     tag: None,
@@ -323,5 +360,71 @@ mod tests {
         assert!(svg.contains(">git<"));
         assert!(svg.contains(">main<"));
         assert!(svg.contains(">dev<"));
+    }
+
+    fn linear(direction: GitDirection) -> GitGraphDiagram {
+        GitGraphDiagram {
+            title: None,
+            direction,
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tag: None,
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Commit {
+                    id: Some("b".into()),
+                    tag: None,
+                    kind: CommitKind::Normal,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn bt_flips_the_commit_axis() {
+        // BT must not render identically to TB (issue #61, bug 4).
+        let tb = render(&linear(GitDirection::TopDown), &Theme::default());
+        let bt = render(&linear(GitDirection::BottomTop), &Theme::default());
+        assert_ne!(tb, bt);
+    }
+
+    #[test]
+    fn branch_order_reorders_lanes() {
+        // `low` is declared *after* `high` but its smaller order must place it
+        // in the earlier lane (issue #61, bug 2).
+        let d = GitGraphDiagram {
+            title: None,
+            direction: GitDirection::TopDown,
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tag: None,
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "high".into(),
+                    order: Some(5),
+                },
+                GitEvent::Branch {
+                    name: "low".into(),
+                    order: Some(1),
+                },
+            ],
+        };
+        let svg = render(&d, &Theme::default());
+        let low_x = lane_x_before(&svg, svg.find(">low<").unwrap());
+        let high_x = lane_x_before(&svg, svg.find(">high<").unwrap());
+        assert!(low_x < high_x, "lower order should claim the earlier lane");
+    }
+
+    /// Reads the `x="…"` of the `<text>` element ending just before byte `end`.
+    fn lane_x_before(svg: &str, end: usize) -> f64 {
+        let text_start = svg[..end].rfind("<text").unwrap();
+        let seg = &svg[text_start..end];
+        let x_pos = seg.find("x=\"").unwrap() + 3;
+        let rest = &seg[x_pos..];
+        let x_end = rest.find('"').unwrap();
+        rest[..x_end].parse().unwrap()
     }
 }
