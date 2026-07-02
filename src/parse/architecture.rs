@@ -145,29 +145,32 @@ fn parse_edge(line: &str, line_no: usize) -> Result<ArchEdge, ParseError> {
     let (from, from_side) = parse_side(left)?;
     let (to_side, to) = parse_side_left(right)?;
 
-    // group edge marker: id{group}
-    if from.contains('{') || to.contains('{') {
-        group = true;
-    }
+    // group edge marker: id{group} — an endpoint referring to a group box
+    // rather than a service. Strip the whole `{group}` suffix as a unit; a
+    // char-by-char trim would eat the `}` first and leave `{group` dangling.
+    let (from, from_group) = strip_group_marker(&from);
+    let (to, to_group) = strip_group_marker(&to);
+    group |= from_group || to_group;
 
     Ok(ArchEdge {
-        from: from
-            .trim_end_matches('{')
-            .trim_end_matches('}')
-            .trim_end_matches("{group}")
-            .to_string(),
+        from,
         from_side,
         from_arrow,
-        to: to
-            .trim_end_matches('{')
-            .trim_end_matches('}')
-            .trim_end_matches("{group}")
-            .to_string(),
+        to,
         to_side,
         to_arrow,
         label: None,
         group,
     })
+}
+
+/// Strips a trailing `{group}` endpoint marker, returning the bare id and
+/// whether the marker was present.
+fn strip_group_marker(id: &str) -> (String, bool) {
+    match id.strip_suffix("{group}") {
+        Some(base) => (base.trim_end().to_string(), true),
+        None => (id.to_string(), false),
+    }
 }
 
 fn parse_side(s: &str) -> Result<(String, ArchSide), ParseError> {
@@ -205,5 +208,20 @@ mod tests {
         assert_eq!(d.services[0].parent.as_deref(), Some("api"));
         assert_eq!(d.edges[0].from, "db");
         assert_eq!(d.edges[0].to, "disk1");
+    }
+
+    #[test]
+    fn group_edge_ids_strip_marker() {
+        // `{group}` marks an endpoint as a group box; the whole suffix must be
+        // stripped as a unit (regression: trim ate `}` first, leaving `{group`).
+        let src = "architecture-beta\ngroup left_disk(disk)[Left]\ngroup right_disk(disk)[Right]\nleft_disk{group}:R -- L:right_disk{group}\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges.len(), 1);
+        let e = &d.edges[0];
+        assert_eq!(e.from, "left_disk");
+        assert_eq!(e.to, "right_disk");
+        assert_eq!(e.from_side, ArchSide::Right);
+        assert_eq!(e.to_side, ArchSide::Left);
+        assert!(e.group);
     }
 }
