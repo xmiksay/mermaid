@@ -286,6 +286,14 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `ClassRelation.from_card`/`to_card`; the renderer draws them as small labels
   near each edge end. Token scanning is quote-aware so cards like `"1..*"`
   (which embed the `..` token) don't split the line.
+- Class relation marker orientation: `ClassRelation.reversed` records whether
+  the token's decorated end (triangle/diamond/circle/arrow) is on the left, at
+  the `from` class — set by `is_reversed_token` for tokens opening with `<`,
+  `*`, or `o` (`<|--`, `*--`, `o--`, `<--`, `<..`). `from`→`to` order (hence
+  layout) is preserved; only the marker end moves. `style_for(kind, reversed)`
+  emits the single decorated marker as `marker-start` (reversed) or `marker-end`
+  (forward); `orient="auto-start-reverse"` points it into its node at either
+  end. Composition/aggregation draw *only* the diamond — no far-end arrowhead.
 - Class generics `~T~` are converted to angle brackets at render time
   (`convert_generics` in `src/svg/class.rs`) for class names and member/return
   types — `List~int~` → `List<int>`, nested `List~List~int~~` →

@@ -182,10 +182,11 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
             diag.relations.push(ClassRelation {
                 from,
                 to: to_clean,
-                kind: normalize_direction(tok, kind),
+                kind,
                 label,
                 from_card,
                 to_card,
+                reversed: is_reversed_token(tok),
             });
             continue;
         }
@@ -401,12 +402,13 @@ fn find_relation(line: &str) -> Option<(usize, &'static str, ClassRelationKind)>
     best
 }
 
-fn normalize_direction(tok: &str, kind: ClassRelationKind) -> ClassRelationKind {
-    // Reverse-direction tokens like `<|..`, `--|>`, `--*`, `--o`, `<--`, `<..`
-    // are mirrored. For UML we don't track direction in the AST beyond the kind
-    // — the from/to ordering already encodes it.
-    let _ = tok;
-    kind
+/// A relation token is "reversed" when its decorated end (triangle/diamond/
+/// circle/arrow) is on the left — attached to the `from` class — i.e. it opens
+/// with `<`, `*`, or `o` (`<|--`, `<|..`, `*--`, `o--`, `<--`, `<..`). The
+/// marker is then drawn at the `from` end instead of `to`. Plain links (`--`,
+/// `..`) have no marker, so the flag is irrelevant for them.
+fn is_reversed_token(tok: &str) -> bool {
+    tok.starts_with(['<', '*', 'o'])
 }
 
 fn get_class<'a>(
@@ -468,6 +470,32 @@ mod tests {
         assert_eq!(d.relations[0].kind, ClassRelationKind::Inheritance);
         assert_eq!(d.relations[1].kind, ClassRelationKind::Composition);
         assert_eq!(d.relations[2].kind, ClassRelationKind::Realization);
+    }
+
+    #[test]
+    fn reversed_tokens_flag_the_from_end() {
+        let s = "classDiagram\n\
+                 Animal <|-- Dog\n\
+                 Dog --|> Animal\n\
+                 A --* B\n\
+                 A *-- B\n\
+                 A --o B\n\
+                 A <-- B\n\
+                 A <.. B\n\
+                 A -- B\n";
+        let d = parse(s).unwrap();
+        // from/to ordering (and thus layout) is preserved; only the marker end
+        // moves. `<|--`/`*--`/`o--`/`<--`/`<..` are reversed (marker at `from`).
+        assert!(d.relations[0].reversed); // Animal <|-- Dog
+        assert_eq!(d.relations[0].from, "Animal");
+        assert_eq!(d.relations[0].to, "Dog");
+        assert!(!d.relations[1].reversed); // Dog --|> Animal
+        assert!(!d.relations[2].reversed); // A --* B
+        assert!(d.relations[3].reversed); // A *-- B
+        assert!(!d.relations[4].reversed); // A --o B
+        assert!(d.relations[5].reversed); // A <-- B
+        assert!(d.relations[6].reversed); // A <.. B
+        assert!(!d.relations[7].reversed); // A -- B (plain link)
     }
 
     #[test]
