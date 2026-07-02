@@ -242,6 +242,13 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `ClassRelation.from_card`/`to_card`; the renderer draws them as small labels
   near each edge end. Token scanning is quote-aware so cards like `"1..*"`
   (which embed the `..` token) don't split the line.
+- Class generics `~T~` are converted to angle brackets at render time
+  (`convert_generics` in `src/svg/class.rs`) for class names and member/return
+  types — `List~int~` → `List<int>`, nested `List~List~int~~` →
+  `List<List<int>>`, `Map~string, int~` → `Map<string, int>` (innermost pair
+  first; a lone unmatched `~` is left alone). The same `member_display` pass
+  strips the trailing UML classifier (`*` abstract → `font-style="italic"`,
+  `$` static → `text-decoration="underline"`).
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`).
 - Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;

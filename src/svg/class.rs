@@ -151,7 +151,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
 }
 
 fn class_size(c: &UmlClass) -> (f64, f64) {
-    let mut max_chars = c.name.chars().count();
+    let mut max_chars = convert_generics(&c.name).chars().count();
     if let Some(s) = &c.stereotype {
         max_chars = max_chars.max(s.chars().count() + 4);
     }
@@ -166,7 +166,7 @@ fn class_size(c: &UmlClass) -> (f64, f64) {
         .filter(|m| m.kind == MemberKind::Method)
         .count();
     for m in &c.members {
-        let len = render_member(m).chars().count();
+        let len = member_display(m).text.chars().count();
         if len > max_chars {
             max_chars = len;
         }
@@ -191,7 +191,16 @@ fn class_size(c: &UmlClass) -> (f64, f64) {
     (w, h)
 }
 
-fn render_member(m: &crate::parse::ClassMember) -> String {
+/// A member ready to draw: its display text (visibility marker + generics
+/// converted to angle brackets, classifier suffix stripped) plus the styling
+/// the classifier implies — `*` (abstract) → italic, `$` (static) → underline.
+struct MemberDisplay {
+    text: String,
+    is_abstract: bool,
+    is_static: bool,
+}
+
+fn member_display(m: &crate::parse::ClassMember) -> MemberDisplay {
     let vis = match m.visibility {
         Visibility::Public => "+",
         Visibility::Private => "-",
@@ -199,7 +208,55 @@ fn render_member(m: &crate::parse::ClassMember) -> String {
         Visibility::Package => "~",
         Visibility::Default => "",
     };
-    format!("{vis}{}", m.text)
+    let (body, is_abstract, is_static) = split_classifier(m.text.trim());
+    MemberDisplay {
+        text: format!("{vis}{}", convert_generics(body.trim())),
+        is_abstract,
+        is_static,
+    }
+}
+
+/// Strip a trailing UML classifier: `*` marks an abstract member, `$` a static
+/// one. Returns the text without the classifier and the two flags.
+fn split_classifier(text: &str) -> (&str, bool, bool) {
+    match text.chars().last() {
+        Some('*') => (&text[..text.len() - 1], true, false),
+        Some('$') => (&text[..text.len() - 1], false, true),
+        _ => (text, false, false),
+    }
+}
+
+/// Convert Mermaid generic syntax `~T~` to `<T>`, innermost pair first so that
+/// nested generics like `List~List~int~~` become `List<List<int>>` and
+/// comma-separated ones like `Map~string, int~` become `Map<string, int>`. A
+/// lone unmatched `~` is left untouched.
+fn convert_generics(s: &str) -> String {
+    let mut s = s.to_string();
+    loop {
+        let tildes: Vec<usize> = s.match_indices('~').map(|(i, _)| i).collect();
+        // Innermost pair = the adjacent tilde pair with non-empty content and
+        // the largest opening index; replacing it first unwinds nesting.
+        let chosen = tildes
+            .windows(2)
+            .filter(|w| w[1] > w[0] + 1)
+            .map(|w| (w[0], w[1]))
+            .next_back();
+        let Some((a, b)) = chosen else { break };
+        s = format!("{}<{}>{}", &s[..a], &s[a + 1..b], &s[b + 1..]);
+    }
+    s
+}
+
+fn draw_member(svg: &mut SvgBuilder, x: f64, y: f64, m: &crate::parse::ClassMember, fg: &str) {
+    let md = member_display(m);
+    let mut attrs = format!("fill=\"{fg}\" font-size=\"13\"");
+    if md.is_abstract {
+        attrs.push_str(" font-style=\"italic\"");
+    }
+    if md.is_static {
+        attrs.push_str(" text-decoration=\"underline\"");
+    }
+    svg.text(x, y, &attrs, &md.text);
 }
 
 fn draw_class(
@@ -236,7 +293,7 @@ fn draw_class(
         cx,
         cursor,
         &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
-        &c.name,
+        &convert_generics(&c.name),
     );
     cursor += 4.0;
 
@@ -263,12 +320,7 @@ fn draw_class(
         cursor += COMPARTMENT_PAD;
         for m in attrs {
             cursor += LINE_H - 4.0;
-            svg.text(
-                x + 8.0,
-                cursor,
-                &format!("fill=\"{fg}\" font-size=\"13\""),
-                &render_member(m),
-            );
+            draw_member(svg, x + 8.0, cursor, m, fg);
             cursor += 4.0;
         }
         cursor += COMPARTMENT_PAD - 4.0;
@@ -285,12 +337,7 @@ fn draw_class(
         cursor += COMPARTMENT_PAD;
         for m in meths {
             cursor += LINE_H - 4.0;
-            svg.text(
-                x + 8.0,
-                cursor,
-                &format!("fill=\"{fg}\" font-size=\"13\""),
-                &render_member(m),
-            );
+            draw_member(svg, x + 8.0, cursor, m, fg);
             cursor += 4.0;
         }
     }
@@ -538,6 +585,35 @@ mod tests {
         let d = build("classDiagram\nAnimal --> Dog\nstyle Animal fill:#abc\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("fill=\"#abc\""));
+    }
+
+    #[test]
+    fn generics_convert_to_angle_brackets() {
+        assert_eq!(convert_generics("List~int~"), "List<int>");
+        assert_eq!(convert_generics("Map~string, int~"), "Map<string, int>");
+        assert_eq!(convert_generics("List~List~int~~"), "List<List<int>>");
+        // A lone unmatched tilde is left alone.
+        assert_eq!(convert_generics("a~b"), "a~b");
+    }
+
+    #[test]
+    fn generics_render_in_name_and_members() {
+        let d = build("classDiagram\nclass List~T~ {\n+items List~int~\n+get() T\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">List&lt;T&gt;<"));
+        assert!(svg.contains("items List&lt;int&gt;"));
+        assert!(!svg.contains('~'));
+    }
+
+    #[test]
+    fn abstract_and_static_classifiers_style_members() {
+        let d = build("classDiagram\nclass Shape {\n+area() float*\n+count int$\n}\n");
+        let svg = render(&d, &Theme::default());
+        // Classifier chars are consumed, not rendered.
+        assert!(!svg.contains('*'));
+        assert!(!svg.contains('$'));
+        assert!(svg.contains("font-style=\"italic\""));
+        assert!(svg.contains("text-decoration=\"underline\""));
     }
 
     #[test]
