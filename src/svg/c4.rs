@@ -1,20 +1,24 @@
 //! C4 diagram renderer.
 //!
-//! Layout: sugiyama layered placement driven by relations (matches upstream
-//! mermaid's dagre-based behaviour). Boundaries are drawn as an outline around
-//! the bounding box of their members after layout: dashed `7.0,7.0` for most
-//! kinds, but solid for `Deployment_Node` (matching upstream's `nodeType`
+//! Layout: upstream-style row-flow placement. Mermaid's `c4Renderer` does *not*
+//! run a graph layout for C4 — it flows shapes into rows. We mirror that: each
+//! boundary lays its members out left-to-right, wrapping after `SHAPE_IN_ROW`
+//! shapes, and is then sized from that content; sibling boundaries (and any
+//! unbounded elements) are themselves flowed `BOUNDARY_IN_ROW` per row. Boundary
+//! boxes therefore never overlap by construction.
+//!
+//! Boundaries are drawn as an outline around their content: dashed `7.0,7.0` for
+//! most kinds, but solid for `Deployment_Node` (matching upstream's `nodeType`
 //! special-case). Stroke is `#444444`, width 1.
 //!
-//! Relations are solid `#444444` quadratic Bézier curves through the routed
-//! sugiyama midpoint, with an arrow head on the destination side (and on the
-//! source side for `BiRel`). Labels sit at the curve midpoint with no
-//! background; `[techn]` renders italic below the label.
+//! Relations are `#444444` quadratic Bézier curves between the placed shapes,
+//! clipped to each node's rectangle, with an arrow head on the destination side
+//! (and on the source side for `BiRel`). Labels sit at the segment midpoint with
+//! no background; `[techn]` renders italic below the label.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::parse::{C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4Kind, C4Relation};
-use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
@@ -27,6 +31,14 @@ const BOX_H: f64 = 130.0;
 
 const BOUNDARY_HDR: f64 = 28.0;
 const BOUNDARY_PAD: f64 = 20.0;
+const BOUNDARY_MIN_W: f64 = 200.0;
+
+// Row-flow knobs — upstream defaults (settable via UpdateLayoutConfig, see #14).
+const SHAPE_IN_ROW: usize = 4;
+const BOUNDARY_IN_ROW: usize = 2;
+
+const H_GAP: f64 = 40.0;
+const V_GAP: f64 = 40.0;
 
 /// Boundary outlines and relation lines both use upstream's `#444444`.
 const C4_LINE: &str = "#444444";
@@ -36,76 +48,28 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let fg_muted = theme.fg_muted;
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
 
-    // Boundary headers extend BOUNDARY_HDR + BOUNDARY_PAD above their topmost
-    // member. Reserve that overhang above the content origin so the topmost
-    // boundary clears the title (and the canvas top when there is no title).
-    let boundary_overhang = if has_any_boundary(&d.elements) {
-        BOUNDARY_HDR + BOUNDARY_PAD
-    } else {
-        0.0
-    };
-
-    let flat = flatten(&d.elements, None);
-    let alias_to_id: HashMap<String, NodeId> = flat
-        .iter()
-        .enumerate()
-        .map(|(i, f)| (f.el.alias.clone(), i as NodeId))
-        .collect();
-
-    let mut g = Graph::default();
-    for (i, _) in flat.iter().enumerate() {
-        g.nodes.push(i as NodeId);
-    }
-    for (i, f) in flat.iter().enumerate() {
-        let (w, h) = shape_size(f.el.kind);
-        g.node_size.insert(i as NodeId, (w, h));
-        let _ = f;
-        let _ = i;
-    }
-    for r in &d.relations {
-        if let (Some(&u), Some(&v)) = (alias_to_id.get(&r.from), alias_to_id.get(&r.to)) {
-            g.edges.push((u, v));
-        }
-    }
-
-    let cfg = LayoutConfig {
-        layer_gap: 90.0,
-        node_gap: 50.0,
-        ..LayoutConfig::default()
-    };
-    let layout = layout_with(&g, &cfg).unwrap_or_default();
-
     let origin_x = PAD;
-    let origin_y = PAD + title_h + boundary_overhang;
+    let origin_y = PAD + title_h;
+
+    let (nodes, _cw, _ch) = flow_layout(&d.elements);
 
     let mut pos: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
-    for (i, f) in flat.iter().enumerate() {
-        let (w, h) = shape_size(f.el.kind);
-        let id = i as NodeId;
-        let (cx, cy) = layout
-            .node_pos
-            .get(&id)
-            .copied()
-            .unwrap_or((BOX_W / 2.0, BOX_H / 2.0));
-        let x = origin_x + cx - w / 2.0;
-        let y = origin_y + cy - h / 2.0;
-        pos.insert(f.el.alias.clone(), (x, y, w, h));
-    }
+    let mut boundaries: Vec<BoundaryBox> = Vec::new();
+    let mut leaves: Vec<(C4Element, f64, f64, f64, f64)> = Vec::new();
+    place_absolute(
+        &nodes,
+        origin_x,
+        origin_y,
+        &mut pos,
+        &mut boundaries,
+        &mut leaves,
+    );
 
-    let boundaries = collect_boundaries(&d.elements, &pos);
-    for b in &boundaries {
-        pos.insert(b.alias.clone(), (b.x, b.y, b.w, b.h));
-    }
-
-    let mut max_x = origin_x + layout.width;
-    let mut max_y = origin_y + layout.height;
-    for (_, &(x, y, w, h)) in pos.iter() {
-        if x + w > max_x {
-            max_x = x + w;
-        }
-        if y + h > max_y {
-            max_y = y + h;
-        }
+    let mut max_x = origin_x;
+    let mut max_y = origin_y;
+    for &(x, y, w, h) in pos.values() {
+        max_x = max_x.max(x + w);
+        max_y = max_y.max(y + h);
     }
 
     let width = (max_x + PAD).max(600.0);
@@ -147,44 +111,18 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
         draw_boundary_rect(b, &mut svg, theme);
     }
 
-    for f in &flat {
-        if let Some(&(x, y, w, h)) = pos.get(&f.el.alias) {
-            draw_element(&f.el, x, y, w, h, &mut svg, theme);
-        }
+    for (el, x, y, w, h) in &leaves {
+        draw_element(el, *x, *y, *w, *h, &mut svg, theme);
     }
 
     for r in &d.relations {
-        draw_rel(r, &pos, &layout, &alias_to_id, &mut svg, theme);
+        draw_rel(r, &pos, &mut svg, theme);
     }
 
     svg.finish()
 }
 
-struct FlatElement {
-    el: C4Element,
-}
-
-fn has_any_boundary(elements: &[C4Element]) -> bool {
-    elements
-        .iter()
-        .any(|el| el.boundary_kind.is_some() || has_any_boundary(&el.members))
-}
-
-fn flatten(elements: &[C4Element], _parent: Option<String>) -> Vec<FlatElement> {
-    let mut out = Vec::new();
-    for el in elements {
-        if el.boundary_kind.is_some() {
-            let mut nested = flatten(&el.members, Some(el.alias.clone()));
-            out.append(&mut nested);
-        } else {
-            out.push(FlatElement { el: el.clone() });
-        }
-    }
-    out
-}
-
 struct BoundaryBox {
-    alias: String,
     label: String,
     kind: C4BoundaryKind,
     x: f64,
@@ -193,81 +131,143 @@ struct BoundaryBox {
     h: f64,
 }
 
-fn collect_boundaries(
-    elements: &[C4Element],
-    pos: &HashMap<String, (f64, f64, f64, f64)>,
-) -> Vec<BoundaryBox> {
-    let mut out = Vec::new();
-    walk_boundaries(elements, pos, &mut out);
-    out
+/// A placed element in the row-flow layout. Coordinates are relative to the
+/// top-left origin of the level the node belongs to; a boundary's `children`
+/// are relative to the boundary's own top-left.
+struct LayoutNode {
+    el: C4Element,
+    is_boundary: bool,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    children: Vec<LayoutNode>,
 }
 
-fn walk_boundaries(
-    elements: &[C4Element],
-    pos: &HashMap<String, (f64, f64, f64, f64)>,
-    out: &mut Vec<BoundaryBox>,
-) {
-    for el in elements {
-        if el.boundary_kind.is_some() {
-            let mut min_x = f64::INFINITY;
-            let mut min_y = f64::INFINITY;
-            let mut max_x = f64::NEG_INFINITY;
-            let mut max_y = f64::NEG_INFINITY;
-            collect_member_bounds(
-                &el.members,
-                pos,
-                &mut min_x,
-                &mut min_y,
-                &mut max_x,
-                &mut max_y,
-            );
-            if min_x.is_finite() {
-                let pad = BOUNDARY_PAD;
-                out.push(BoundaryBox {
-                    alias: el.alias.clone(),
-                    label: el.label.clone(),
-                    kind: el.boundary_kind.unwrap_or(C4BoundaryKind::Generic),
-                    x: min_x - pad,
-                    y: min_y - pad - BOUNDARY_HDR,
-                    w: (max_x - min_x) + pad * 2.0,
-                    h: (max_y - min_y) + pad * 2.0 + BOUNDARY_HDR,
-                });
+/// Lay out `items` with the upstream row-flow: size each item (recursively for
+/// boundaries), then place items left-to-right, wrapping after `SHAPE_IN_ROW`
+/// shapes / `BOUNDARY_IN_ROW` boundaries. Returns the placed nodes plus the
+/// total content size.
+fn flow_layout(items: &[C4Element]) -> (Vec<LayoutNode>, f64, f64) {
+    let mut nodes: Vec<LayoutNode> = items
+        .iter()
+        .map(|item| {
+            if item.boundary_kind.is_some() {
+                let (mut kids, cw, ch) = flow_layout(&item.members);
+                let dx = BOUNDARY_PAD;
+                let dy = BOUNDARY_PAD + BOUNDARY_HDR;
+                for k in &mut kids {
+                    k.x += dx;
+                    k.y += dy;
+                }
+                let w = (cw + 2.0 * BOUNDARY_PAD)
+                    .max(BOUNDARY_MIN_W)
+                    .max(header_min_w(item));
+                let h = ch + 2.0 * BOUNDARY_PAD + BOUNDARY_HDR;
+                LayoutNode {
+                    el: item.clone(),
+                    is_boundary: true,
+                    x: 0.0,
+                    y: 0.0,
+                    w,
+                    h,
+                    children: kids,
+                }
+            } else {
+                let (w, h) = shape_size(item.kind);
+                LayoutNode {
+                    el: item.clone(),
+                    is_boundary: false,
+                    x: 0.0,
+                    y: 0.0,
+                    w,
+                    h,
+                    children: Vec::new(),
+                }
             }
-            walk_boundaries(&el.members, pos, out);
+        })
+        .collect();
+
+    let mut x = 0.0;
+    let mut y = 0.0;
+    let mut row_h: f64 = 0.0;
+    let mut col = 0usize;
+    let mut total_w: f64 = 0.0;
+    for node in &mut nodes {
+        let per_row = if node.is_boundary {
+            BOUNDARY_IN_ROW
+        } else {
+            SHAPE_IN_ROW
+        };
+        if col >= per_row {
+            x = 0.0;
+            y += row_h + V_GAP;
+            row_h = 0.0;
+            col = 0;
         }
+        node.x = x;
+        node.y = y;
+        x += node.w + H_GAP;
+        row_h = row_h.max(node.h);
+        total_w = total_w.max(x - H_GAP);
+        col += 1;
     }
+    let total_h = y + row_h;
+    (nodes, total_w, total_h)
 }
 
-fn collect_member_bounds(
-    members: &[C4Element],
-    pos: &HashMap<String, (f64, f64, f64, f64)>,
-    min_x: &mut f64,
-    min_y: &mut f64,
-    max_x: &mut f64,
-    max_y: &mut f64,
+/// Walk the placed tree, converting relative coords to absolute canvas coords
+/// and collecting boundary frames, leaf draw entries, and the alias → rect map
+/// used to route relations.
+fn place_absolute(
+    nodes: &[LayoutNode],
+    ox: f64,
+    oy: f64,
+    pos: &mut HashMap<String, (f64, f64, f64, f64)>,
+    boundaries: &mut Vec<BoundaryBox>,
+    leaves: &mut Vec<(C4Element, f64, f64, f64, f64)>,
 ) {
-    for m in members {
-        if m.boundary_kind.is_some() {
-            collect_member_bounds(&m.members, pos, min_x, min_y, max_x, max_y);
-        } else if let Some(&(x, y, w, h)) = pos.get(&m.alias) {
-            if x < *min_x {
-                *min_x = x;
-            }
-            if y < *min_y {
-                *min_y = y;
-            }
-            if x + w > *max_x {
-                *max_x = x + w;
-            }
-            if y + h > *max_y {
-                *max_y = y + h;
-            }
+    for n in nodes {
+        let ax = ox + n.x;
+        let ay = oy + n.y;
+        pos.insert(n.el.alias.clone(), (ax, ay, n.w, n.h));
+        if n.is_boundary {
+            boundaries.push(BoundaryBox {
+                label: n.el.label.clone(),
+                kind: n.el.boundary_kind.unwrap_or(C4BoundaryKind::Generic),
+                x: ax,
+                y: ay,
+                w: n.w,
+                h: n.h,
+            });
+            place_absolute(&n.children, ax, ay, pos, boundaries, leaves);
+        } else {
+            leaves.push((n.el.clone(), ax, ay, n.w, n.h));
         }
     }
 }
 
 fn shape_size(_kind: C4ElementKind) -> (f64, f64) {
     (BOX_W, BOX_H)
+}
+
+/// Minimum boundary width so the header label and the `[kind]` tag (stacked
+/// below it) don't get clipped.
+fn header_min_w(b: &C4Element) -> f64 {
+    let kind = boundary_kind_label(b.boundary_kind.unwrap_or(C4BoundaryKind::Generic));
+    let label_w = b.label.chars().count() as f64 * 8.0;
+    let kind_w = kind.chars().count() as f64 * 6.0;
+    label_w.max(kind_w) + 28.0
+}
+
+fn boundary_kind_label(kind: C4BoundaryKind) -> &'static str {
+    match kind {
+        C4BoundaryKind::Enterprise => "Enterprise Boundary",
+        C4BoundaryKind::System => "System Boundary",
+        C4BoundaryKind::Container => "Container Boundary",
+        C4BoundaryKind::Deployment => "Deployment Node",
+        C4BoundaryKind::Generic => "Boundary",
+    }
 }
 
 fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
@@ -289,13 +289,7 @@ fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
             "fill=\"none\" stroke=\"{C4_LINE}\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\"{dash}"
         ),
     );
-    let kind = match b.kind {
-        C4BoundaryKind::Enterprise => "Enterprise Boundary",
-        C4BoundaryKind::System => "System Boundary",
-        C4BoundaryKind::Container => "Container Boundary",
-        C4BoundaryKind::Deployment => "Deployment Node",
-        C4BoundaryKind::Generic => "Boundary",
-    };
+    let kind = boundary_kind_label(b.kind);
     let label_size = theme.font_size + 2.0;
     svg.text(
         b.x + 14.0,
@@ -580,8 +574,6 @@ fn is_dark_fill(fill: &str) -> bool {
 fn draw_rel(
     r: &C4Relation,
     pos: &HashMap<String, (f64, f64, f64, f64)>,
-    layout: &crate::sugiyama::Layout,
-    alias_to_id: &HashMap<String, NodeId>,
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
@@ -595,41 +587,13 @@ fn draw_rel(
         return;
     };
 
-    // Prefer sugiyama's routed waypoints if available; fall back to a straight line.
-    let pts: Vec<(f64, f64)> = match (alias_to_id.get(&r.from), alias_to_id.get(&r.to)) {
-        (Some(&u), Some(&v)) => layout.edge_points.get(&(u, v)).cloned().unwrap_or_default(),
-        _ => Vec::new(),
-    };
-
     let (sx, sy) = (ax + aw / 2.0, ay + ah / 2.0);
     let (tx, ty) = (bx + bw / 2.0, by + bh / 2.0);
 
-    let routed: Vec<(f64, f64)> = if pts.len() >= 2 {
-        // Sugiyama returns waypoints in local layout coordinates; translate back to canvas space.
-        // Since we centred each node on its layout position, sugiyama waypoints are *already*
-        // in the same coordinate space as our pos values once the canvas origin offset is applied.
-        // The first/last waypoints are the source/dest centres in layout coords -> we replace them
-        // with our actual canvas centres before clipping.
-        let mut v: Vec<(f64, f64)> = Vec::with_capacity(pts.len());
-        v.push((sx, sy));
-        let mid = &pts[1..pts.len() - 1];
-        for (mx, my) in mid {
-            v.push(origin_translated(*mx, *my, sx, sy, tx, ty, &pts));
-        }
-        v.push((tx, ty));
-        v
-    } else {
-        vec![(sx, sy), (tx, ty)]
-    };
-
-    let p_first = clip_rect_to_edge(routed[1], (sx, sy), aw, ah);
-    let p_last = clip_rect_to_edge(routed[routed.len() - 2], (tx, ty), bw, bh);
-    let mut clipped = Vec::with_capacity(routed.len());
-    clipped.push(p_first);
-    for p in &routed[1..routed.len() - 1] {
-        clipped.push(*p);
-    }
-    clipped.push(p_last);
+    // Point-to-point line, clipped to each node's rectangle.
+    let p_first = clip_rect_to_edge((tx, ty), (sx, sy), aw, ah);
+    let p_last = clip_rect_to_edge((sx, sy), (tx, ty), bw, bh);
+    let clipped = vec![p_first, p_last];
 
     let markers = if r.bidirectional {
         "marker-start=\"url(#c4-arrow)\" marker-end=\"url(#c4-arrow)\""
@@ -673,41 +637,6 @@ fn draw_rel(
             &truncate(label, 36),
         );
     }
-    let _ = BTreeMap::<String, ()>::new();
-}
-
-#[allow(clippy::too_many_arguments)]
-fn origin_translated(
-    mx: f64,
-    my: f64,
-    sx: f64,
-    sy: f64,
-    tx: f64,
-    ty: f64,
-    pts: &[(f64, f64)],
-) -> (f64, f64) {
-    // Sugiyama produces waypoints in its own coordinate frame; the first and last
-    // waypoints are the source and destination centres in that frame. Our actual
-    // canvas centres for the same nodes are (sx,sy) and (tx,ty). For interior
-    // waypoints we apply an affine transform mapping (pts[0], pts[last]) -> ((sx,sy), (tx,ty))
-    // when the layout offsets differ from our placement (e.g. boundary padding).
-    let s_layout = pts[0];
-    let t_layout = pts[pts.len() - 1];
-    let lx = t_layout.0 - s_layout.0;
-    let ly = t_layout.1 - s_layout.1;
-    let cx = tx - sx;
-    let cy = ty - sy;
-    let denom_x = lx.abs() + 1e-9;
-    let denom_y = ly.abs() + 1e-9;
-    if lx.abs() < 1e-6 && ly.abs() < 1e-6 {
-        return (mx, my);
-    }
-    let scale_x = if lx.abs() > 1e-6 { cx / lx } else { 1.0 };
-    let scale_y = if ly.abs() > 1e-6 { cy / ly } else { 1.0 };
-    let rx = sx + (mx - s_layout.0) * scale_x;
-    let ry = sy + (my - s_layout.1) * scale_y;
-    let _ = (denom_x, denom_y);
-    (rx, ry)
 }
 
 /// Quadratic Bézier from the first to the last point, bent through the routed
@@ -882,18 +811,7 @@ mod tests {
     }
 
     fn container(alias: &str, label: &str, members: Vec<C4Element>) -> C4Element {
-        C4Element {
-            kind: C4ElementKind::Node,
-            alias: alias.into(),
-            label: label.into(),
-            descr: None,
-            technology: None,
-            external: false,
-            boundary_alias: None,
-            boundary_label: None,
-            boundary_kind: Some(C4BoundaryKind::Deployment),
-            members,
-        }
+        boundary(alias, label, C4BoundaryKind::Deployment, members)
     }
 
     /// Regression for #5: with a title present, the topmost boundary header must
@@ -913,12 +831,12 @@ mod tests {
         };
         let svg = render(&d, &Theme::default());
 
-        // Every boundary rect uses the dashed stroke; find its `y` and check it
-        // clears the subtitle baseline plus a small margin.
+        // Boundary rects carry the `rx="2.5"` corner (elements use rx="6"). Find
+        // each and check its `y` clears the subtitle baseline.
         let subtitle_baseline = PAD + 38.0;
         let mut checked = false;
         for chunk in svg.split("<rect").skip(1) {
-            if !chunk.contains("stroke-dasharray=\"6 4\"") {
+            if !chunk.contains("rx=\"2.5\"") {
                 continue;
             }
             let y = extract_attr(chunk, "y=\"").expect("boundary rect has y");
@@ -1061,5 +979,86 @@ mod tests {
         assert!(!svg.contains("fill-opacity=\"0.5\""));
         // techn rendered italic as [HTTPS].
         assert!(svg.contains(">[HTTPS]<"));
+    }
+
+    fn overlaps(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
+        a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3
+    }
+
+    #[test]
+    fn sibling_boundaries_do_not_overlap() {
+        // Four Deployment_Node boundaries (as in the CyberScore repro), each
+        // holding a couple of shapes. None of the frames may overlap.
+        let elements = vec![
+            boundary(
+                "app17",
+                "app17",
+                C4BoundaryKind::Deployment,
+                vec![person("a1", "A1"), person("a2", "A2")],
+            ),
+            boundary(
+                "app06",
+                "app06",
+                C4BoundaryKind::Deployment,
+                vec![person("b1", "B1"), person("b2", "B2")],
+            ),
+            boundary(
+                "app14",
+                "app14",
+                C4BoundaryKind::Deployment,
+                vec![person("c1", "C1")],
+            ),
+            boundary(
+                "app16",
+                "app16",
+                C4BoundaryKind::Deployment,
+                vec![person("d1", "D1")],
+            ),
+        ];
+
+        let (nodes, _, _) = flow_layout(&elements);
+        let mut pos = HashMap::new();
+        let mut boundaries = Vec::new();
+        let mut leaves = Vec::new();
+        place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
+
+        assert_eq!(boundaries.len(), 4);
+        for (i, a) in boundaries.iter().enumerate() {
+            for b in &boundaries[i + 1..] {
+                let ra = (a.x, a.y, a.w, a.h);
+                let rb = (b.x, b.y, b.w, b.h);
+                assert!(
+                    !overlaps(ra, rb),
+                    "boundary frames overlap: {ra:?} vs {rb:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn boundary_contains_its_members() {
+        let elements = vec![boundary(
+            "app",
+            "app",
+            C4BoundaryKind::Deployment,
+            vec![person("x", "X"), person("y", "Y")],
+        )];
+        let (nodes, _, _) = flow_layout(&elements);
+        let mut pos = HashMap::new();
+        let mut boundaries = Vec::new();
+        let mut leaves = Vec::new();
+        place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
+
+        let b = &boundaries[0];
+        for (_, x, y, w, h) in &leaves {
+            assert!(
+                *x >= b.x && *x + *w <= b.x + b.w,
+                "member escapes boundary x"
+            );
+            assert!(
+                *y >= b.y && *y + *h <= b.y + b.h,
+                "member escapes boundary y"
+            );
+        }
     }
 }
