@@ -927,6 +927,14 @@ pub struct RequirementDiagram {
     pub requirements: Vec<Requirement>,
     pub elements: Vec<ReqElement>,
     pub relations: Vec<ReqRelation>,
+    /// v11 `direction TB/BT/LR/RL`; drives the layout transpose.
+    pub direction: FlowDirection,
+    /// `classDef <name> …` style definitions, referenced by `class`.
+    pub class_defs: HashMap<String, Style>,
+    /// `class <a>,<b> <name>` assignments, keyed by requirement/element name.
+    pub node_classes: HashMap<String, Vec<String>>,
+    /// `style <id> …` inline styles, keyed by requirement/element name.
+    pub node_styles: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
