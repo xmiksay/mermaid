@@ -10,6 +10,9 @@
 //!   * `autonumber` (sets a per-diagram flag).
 //!   * `activate <id>` / `deactivate <id>`, plus the `->>+`/`-->>-` arrow
 //!     activation shorthand.
+//!   * `create [participant|actor] <id> [as <alias>]` / `destroy <id>` —
+//!     participant lifecycle (positional items, spawned/terminated inline).
+//!   * `link <id>: …` / `links <id>: {…}` actor menus (consumed, not rendered).
 //!   * Notes: `Note over A[,B]: text`, `Note right of A: text`, `Note left of A: text`.
 //!   * Blocks (each followed by item lines, terminated by `end`):
 //!     `alt label` ... `else label` ... `end`,
@@ -92,7 +95,53 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
     while let Some(frame) = block_stack.pop() {
         attach_pending(&mut diag, frame);
     }
+    reorder_destroys(&mut diag.items);
     Ok(diag)
+}
+
+/// `destroy X` marks a participant for destruction, but upstream keeps its
+/// lifeline alive through the message that immediately follows and references
+/// it (the classic `destroy Carl` / `Alice-xCarl` pattern). Move each
+/// `Destroy` past the next message involving its target so the terminating
+/// cross lands after that message rather than before it.
+fn reorder_destroys(items: &mut Vec<SequenceItem>) {
+    for it in items.iter_mut() {
+        match it {
+            SequenceItem::Alt(bs) | SequenceItem::Par(bs) | SequenceItem::Critical(bs) => {
+                for b in bs {
+                    reorder_destroys(&mut b.items);
+                }
+            }
+            SequenceItem::Loop(b) | SequenceItem::Opt(b) | SequenceItem::Break(b) => {
+                reorder_destroys(&mut b.items);
+            }
+            SequenceItem::Rect(r) => reorder_destroys(&mut r.items),
+            _ => {}
+        }
+    }
+    let mut i = 0;
+    while i < items.len() {
+        let id = match &items[i] {
+            SequenceItem::Destroy(id) => id.clone(),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let off = items[i + 1..]
+            .iter()
+            .position(|it| matches!(it, SequenceItem::Message(m) if m.from == id || m.to == id));
+        match off {
+            Some(off) => {
+                let d = items.remove(i);
+                // After removal the matching message sits at `i + off`; place
+                // the Destroy right after it and skip past both.
+                items.insert(i + off + 1, d);
+                i += off + 2;
+            }
+            None => i += 1,
+        }
+    }
 }
 
 enum BlockFrame {
@@ -413,6 +462,30 @@ fn parse_line_to_items(
         return Ok(Vec::new());
     }
 
+    if let Some(rest) = line.strip_prefix("create ") {
+        let (kind, decl) = match (
+            rest.trim().strip_prefix("participant "),
+            rest.trim().strip_prefix("actor "),
+        ) {
+            (Some(r), _) => (ParticipantKind::Participant, r),
+            (_, Some(r)) => (ParticipantKind::Actor, r),
+            _ => (ParticipantKind::Participant, rest.trim()),
+        };
+        let p = parse_participant(decl, kind, line_no)?;
+        let id = p.id.clone();
+        diag.participants.push(p);
+        return Ok(vec![SequenceItem::Create(id)]);
+    }
+    if let Some(rest) = line.strip_prefix("destroy ") {
+        return Ok(vec![SequenceItem::Destroy(rest.trim().to_string())]);
+    }
+
+    // Actor menus (`link A: Label @ url`, `links A: {json}`) are consumed but
+    // not rendered — accepting the syntax keeps them from being hard errors.
+    if is_actor_menu(line) {
+        return Ok(Vec::new());
+    }
+
     if let Some(rest) = line.strip_prefix("activate ") {
         return Ok(vec![SequenceItem::Activate(rest.trim().to_string())]);
     }
@@ -490,6 +563,22 @@ fn parse_note(line: &str) -> Option<SequenceNote> {
         participants,
         text,
     })
+}
+
+/// `link <id>: <label> @ <url>` and `links <id>: {json}` declare actor popup
+/// menus. Recognize the shape (a `link`/`links` keyword, an id, then a colon)
+/// so the line is consumed rather than mistaken for a message.
+fn is_actor_menu(line: &str) -> bool {
+    let rest = line
+        .strip_prefix("links ")
+        .or_else(|| line.strip_prefix("link "));
+    match rest {
+        Some(rest) => rest.split_once(':').is_some_and(|(id, _)| {
+            let id = id.trim();
+            !id.is_empty() && !id.contains(char::is_whitespace)
+        }),
+        None => false,
+    }
 }
 
 /// Split a `box <color> <label>` header into an optional leading color and the
@@ -938,6 +1027,83 @@ mod tests {
         let b = first_box(&d);
         assert_eq!(b.color.as_deref(), Some("rgb(200, 200, 255)"));
         assert_eq!(b.label, "Team");
+    }
+
+    #[test]
+    fn create_registers_participant_and_emits_item() {
+        let d = parse(
+            "sequenceDiagram\nAlice->>Bob: Hello\ncreate participant Carl\nAlice->>Carl: Hi Carl\n",
+        )
+        .unwrap();
+        // Carl is registered as a real participant (a column).
+        assert!(d.participants.iter().any(|p| p.id == "Carl"));
+        // A positional Create item sits before the creating message.
+        let create_pos = d
+            .items
+            .iter()
+            .position(|i| matches!(i, SequenceItem::Create(id) if id == "Carl"))
+            .expect("no Create item");
+        let msg_pos = d
+            .items
+            .iter()
+            .position(|i| matches!(i, SequenceItem::Message(m) if m.to == "Carl"))
+            .unwrap();
+        assert!(create_pos < msg_pos);
+    }
+
+    #[test]
+    fn create_actor_kind() {
+        let d = parse("sequenceDiagram\ncreate actor D as Donald\nA->>D: hi\n").unwrap();
+        let carl = d.participants.iter().find(|p| p.id == "D").unwrap();
+        assert_eq!(carl.kind, ParticipantKind::Actor);
+        assert_eq!(carl.display, "Donald");
+    }
+
+    #[test]
+    fn destroy_moves_past_following_message() {
+        // `destroy Carl` then `Alice-xCarl` — the Destroy must land *after* the
+        // terminating message, matching upstream.
+        let d = parse(
+            "sequenceDiagram\ncreate participant Carl\nAlice->>Carl: Hi\ndestroy Carl\nAlice-xCarl: bye\n",
+        )
+        .unwrap();
+        let destroy_pos = d
+            .items
+            .iter()
+            .position(|i| matches!(i, SequenceItem::Destroy(id) if id == "Carl"))
+            .unwrap();
+        let last_msg_pos = d
+            .items
+            .iter()
+            .rposition(|i| matches!(i, SequenceItem::Message(m) if m.text == "bye"))
+            .unwrap();
+        assert!(
+            destroy_pos > last_msg_pos,
+            "destroy should follow its message"
+        );
+    }
+
+    #[test]
+    fn destroy_without_following_message_stays_put() {
+        let d = parse("sequenceDiagram\nA->>B: hi\ndestroy B\n").unwrap();
+        assert!(matches!(d.items.last(), Some(SequenceItem::Destroy(id)) if id == "B"));
+    }
+
+    #[test]
+    fn actor_menu_lines_are_consumed() {
+        // `link`/`links` actor menus must not be hard parse errors.
+        let d = parse(
+            "sequenceDiagram\nA->>B: hi\nlink A: Dashboard @ https://example.com\nlinks B: {\"Repo\": \"https://ex/repo\"}\n",
+        )
+        .unwrap();
+        // Only the single message survives; the menu lines are dropped.
+        assert_eq!(
+            d.items
+                .iter()
+                .filter(|i| matches!(i, SequenceItem::Message(_)))
+                .count(),
+            1
+        );
     }
 
     #[test]

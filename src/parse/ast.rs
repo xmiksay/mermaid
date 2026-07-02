@@ -128,6 +128,13 @@ pub enum SequenceItem {
     /// numbering positionally. `Some` turns it on (resetting the counter to
     /// `start`), `None` turns it off for subsequent messages.
     AutoNumber(Option<AutoNumberConfig>),
+    /// `create [participant|actor] X` — the named participant's lifeline (and
+    /// box) is spawned at this point instead of the top actor row. The
+    /// participant itself is registered in [`SequenceDiagram::participants`].
+    Create(String),
+    /// `destroy X` — the named participant's lifeline terminates here with a
+    /// cross glyph, and no bottom actor box is drawn.
+    Destroy(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

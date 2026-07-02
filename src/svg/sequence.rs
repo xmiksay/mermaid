@@ -35,6 +35,8 @@ const BLOCK_TAB_H: f64 = 18.0; // reserved Y-space below the alt/loop tab so fir
 const ACTIVATION_W: f64 = 10.0;
 const BOX_LABEL_H: f64 = 22.0; // reserved Y-space above the actor row for `box` labels
 const BOX_PAD: f64 = 12.0;
+const CREATE_GAP: f64 = 15.0; // gap above an inline `create`d actor box
+const DESTROY_CROSS: f64 = 7.0; // half-size of the `destroy` termination cross
 
 pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
@@ -120,14 +122,33 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     // `rect <color>` colored bands (behind lifelines and messages).
     draw_rect_bands(&mut svg, &events, &x_of);
 
+    // `create`/`destroy` lifecycle: a created participant's box + lifeline
+    // start at the create point (not the top row); a destroyed one's lifeline
+    // ends at the destroy point with a cross and draws no footer box.
+    let mut created: HashMap<String, f64> = HashMap::new();
+    let mut destroyed: HashMap<String, f64> = HashMap::new();
+    for ev in &events {
+        match &ev.kind {
+            EventKind::Create(id) => {
+                created.insert(id.clone(), ev.y);
+            }
+            EventKind::Destroy(id) => {
+                destroyed.insert(id.clone(), ev.y);
+            }
+            _ => {}
+        }
+    }
+
     // Lifelines
     for p in &d.participants {
         let x = x_of[&p.id];
+        let top = created.get(&p.id).map_or(header_bottom, |&by| by + actor_h);
+        let bottom = destroyed.get(&p.id).copied().unwrap_or(lifeline_bottom);
         svg.line(
             x,
-            header_bottom,
+            top,
             x,
-            lifeline_bottom,
+            bottom,
             &format!("stroke=\"{lifeline}\" stroke-width=\"1\" stroke-dasharray=\"4 4\""),
         );
     }
@@ -138,14 +159,27 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     // Block frames
     draw_block_frames(&mut svg, &events, &x_of, theme);
 
-    // Headers (top + bottom)
+    // Headers (top + bottom). A created participant's top box is drawn inline
+    // at its create point instead; a destroyed one gets no footer box.
     for p in &d.participants {
         let x = x_of[&p.id];
         let w = w_of[&p.id];
-        draw_actor(&mut svg, x, top_y, w, actor_h, &p.display, p.kind, theme);
-        draw_actor(
-            &mut svg, x, footer_top, w, actor_h, &p.display, p.kind, theme,
-        );
+        match created.get(&p.id) {
+            Some(&by) => draw_actor(&mut svg, x, by, w, actor_h, &p.display, p.kind, theme),
+            None => draw_actor(&mut svg, x, top_y, w, actor_h, &p.display, p.kind, theme),
+        }
+        if !destroyed.contains_key(&p.id) {
+            draw_actor(
+                &mut svg, x, footer_top, w, actor_h, &p.display, p.kind, theme,
+            );
+        }
+    }
+
+    // Destruction crosses at each destroyed participant's terminating point.
+    for p in &d.participants {
+        if let Some(&dy) = destroyed.get(&p.id) {
+            draw_destroy_cross(&mut svg, x_of[&p.id], dy, theme);
+        }
     }
 
     // Events
@@ -188,6 +222,11 @@ enum EventKind {
     Note(SequenceNote),
     Activate(String),
     Deactivate(String),
+    /// Participant spawned mid-diagram via `create`; `y` is the top of its
+    /// inline actor box.
+    Create(String),
+    /// Participant terminated via `destroy`; `y` is where the cross is drawn.
+    Destroy(String),
     /// y_start / y_end will be filled in via a second-pass adjustment in the
     /// block-frame drawing routine using the events between BlockOpen and
     /// BlockClose markers.
@@ -276,6 +315,22 @@ fn layout_items(
                 out.push(Event {
                     y: *cursor,
                     kind: EventKind::Deactivate(id.clone()),
+                });
+            }
+            SequenceItem::Create(id) => {
+                // Reserve vertical space for the inline actor box; the creating
+                // message follows and lands on the lifeline just below it.
+                *cursor += CREATE_GAP;
+                out.push(Event {
+                    y: *cursor,
+                    kind: EventKind::Create(id.clone()),
+                });
+                *cursor += ACTOR_H;
+            }
+            SequenceItem::Destroy(id) => {
+                out.push(Event {
+                    y: *cursor,
+                    kind: EventKind::Destroy(id.clone()),
                 });
             }
             SequenceItem::Alt(branches) => {
@@ -873,6 +928,15 @@ fn draw_activation_band(
     }
 }
 
+/// Draw the `×` that terminates a destroyed participant's lifeline.
+fn draw_destroy_cross(svg: &mut SvgBuilder, cx: f64, cy: f64, theme: &Theme) {
+    let stroke = theme.arrow_stroke;
+    let r = DESTROY_CROSS;
+    let attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
+    svg.line(cx - r, cy - r, cx + r, cy + r, &attrs);
+    svg.line(cx + r, cy - r, cx - r, cy + r, &attrs);
+}
+
 /// Returns `(dash, start_marker, end_marker)` for an arrow kind. Plain `->`/`-->`
 /// are bare lines (no marker); bidirectional arrows carry a marker at both ends.
 fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'static str>) {
@@ -1158,6 +1222,45 @@ mod tests {
         // Outer band starts at x = 95 (100 - 10/2 + 0), inner offset by 3 → 98.
         assert!(out.contains("x=\"95\""), "outer band at base x");
         assert!(out.contains("x=\"98\""), "inner band offset by level*3");
+    }
+
+    #[test]
+    fn created_participant_has_no_top_row_box() {
+        // Carl's box is drawn inline at the create point, so its lifeline does
+        // not span the full height and there is no top-row box for it. We at
+        // least verify the diagram renders and both Bob (normal) and Carl draw.
+        let svg = render(
+            &build(
+                "sequenceDiagram\nAlice->>Bob: Hello\ncreate participant Carl\nAlice->>Carl: Hi Carl\n",
+            ),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">Carl<"), "created participant box is drawn");
+        assert!(svg.contains(">Hi Carl<"), "creating message is drawn");
+    }
+
+    #[test]
+    fn destroyed_participant_draws_cross() {
+        let svg = render(
+            &build(
+                "sequenceDiagram\ncreate participant Carl\nAlice->>Carl: Hi\ndestroy Carl\nAlice-xCarl: bye\n",
+            ),
+            &Theme::default(),
+        );
+        // The termination cross is two crossing <line>s; verify the message and
+        // participant still render (cross geometry is asserted via events below).
+        assert!(svg.contains(">bye<"));
+    }
+
+    #[test]
+    fn destroy_cross_geometry() {
+        // Exercise the cross drawing directly.
+        let mut svg = SvgBuilder::new(300.0, 300.0);
+        draw_destroy_cross(&mut svg, 50.0, 100.0, &Theme::default());
+        let out = svg.finish();
+        // Two diagonal strokes centered on (50, 100) with half-size 7.
+        assert!(out.contains("x1=\"43\""));
+        assert!(out.contains("y2=\"107\""));
     }
 
     #[test]

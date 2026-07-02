@@ -281,6 +281,16 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   renderer (`draw_boxes`) draws a colored background rect spanning the members
   from above the actor row to below the footer, label centered on top; a
   missing color renders transparent. Reserves `BOX_LABEL_H` above the actor row.
+- Sequence `create [participant|actor] X [as Y]` / `destroy X` are **positional**
+  lifecycle items (`SequenceItem::Create(id)`/`Destroy(id)`, same shape as
+  `AutoNumber`). `create` also registers the participant (so it gets a column);
+  the renderer draws its actor box **inline** at the create point (not the top
+  row) and starts the lifeline there. `destroy` ends the lifeline with an `×`
+  cross (`draw_destroy_cross`) and draws no footer box. `parse()` runs
+  `reorder_destroys` so each `destroy X` is moved just past the next message
+  involving `X` (the `destroy Carl` / `Alice-xCarl` idiom terminates *after*
+  that message). Actor menus (`link X: … @ url`, `links X: {json}`) are consumed
+  by `is_actor_menu` (not rendered) so they don't hard-error.
 - State `state X { ... }` is stored in `composites`; parallel regions are
   separated by `--`. Renderer draws a dashed rounded outline with a label.
 - State history pseudo-states parse to `StateKind::History { deep }`:
