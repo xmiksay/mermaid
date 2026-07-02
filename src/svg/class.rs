@@ -368,7 +368,7 @@ fn draw_relation(
     }
     clipped.push(last);
 
-    let (dash, marker_end, marker_start) = style_for(rel.kind);
+    let (dash, marker_end, marker_start) = style_for(rel.kind, rel.reversed);
     let dash_attr = if dash.is_empty() {
         String::new()
     } else {
@@ -438,17 +438,31 @@ fn draw_card(svg: &mut SvgBuilder, end: (f64, f64), toward: (f64, f64), text: &s
     );
 }
 
-fn style_for(k: ClassRelationKind) -> (&'static str, Option<&'static str>, Option<&'static str>) {
+/// Returns `(dash, marker_end, marker_start)`. Each relation kind carries a
+/// single decorated marker (triangle/diamond/arrow); composition/aggregation
+/// draw only the diamond — no arrowhead at the far end, matching upstream. The
+/// marker sits at the `from` end (`marker-start`) for reversed tokens, else at
+/// the `to` end (`marker-end`). The markers' `orient="auto-start-reverse"`
+/// makes them point into their node at whichever end they land.
+fn style_for(
+    k: ClassRelationKind,
+    reversed: bool,
+) -> (&'static str, Option<&'static str>, Option<&'static str>) {
     use ClassRelationKind::*;
-    match k {
-        Inheritance => ("", Some("cls-triangle"), None),
-        Realization => ("4 3", Some("cls-triangle"), None),
-        Composition => ("", Some("cls-arrow"), Some("cls-diamond-filled")),
-        Aggregation => ("", Some("cls-arrow"), Some("cls-diamond-open")),
-        Association => ("", Some("cls-arrow"), None),
-        Dependency => ("4 3", Some("cls-arrow"), None),
-        Link => ("", None, None),
-        LinkDashed => ("4 3", None, None),
+    let (dash, marker) = match k {
+        Inheritance => ("", Some("cls-triangle")),
+        Realization => ("4 3", Some("cls-triangle")),
+        Composition => ("", Some("cls-diamond-filled")),
+        Aggregation => ("", Some("cls-diamond-open")),
+        Association => ("", Some("cls-arrow")),
+        Dependency => ("4 3", Some("cls-arrow")),
+        Link => ("", None),
+        LinkDashed => ("4 3", None),
+    };
+    if reversed {
+        (dash, None, marker)
+    } else {
+        (dash, marker, None)
     }
 }
 
@@ -504,7 +518,7 @@ fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
 
 fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
     let flow_edge_stroke = theme.flow_edge_stroke;
-    // Triangle (hollow) for inheritance/realization — marker-end at parent
+    // Triangle (hollow) for inheritance/realization — drawn at the parent end
     let triangle = format!(
         "<marker id=\"cls-triangle\" viewBox=\"0 0 12 12\" refX=\"11\" refY=\"6\" \
          markerWidth=\"14\" markerHeight=\"14\" orient=\"auto-start-reverse\">\
@@ -578,6 +592,38 @@ mod tests {
         let d = build("classDiagram\nCar *-- Wheel\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("cls-diamond-filled"));
+        // No spurious arrowhead at the far (non-diamond) end. The marker is
+        // still defined in <defs>; it must not be referenced on the edge.
+        assert!(!svg.contains("url(#cls-arrow)"));
+    }
+
+    #[test]
+    fn reversed_inheritance_marks_the_from_end() {
+        // `Animal <|-- Dog`: triangle belongs at Animal (the `from`/parent),
+        // drawn via marker-start, not marker-end.
+        let d = build("classDiagram\nAnimal <|-- Dog\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-start=\"url(#cls-triangle)\""));
+        assert!(!svg.contains("marker-end=\"url(#cls-triangle)\""));
+    }
+
+    #[test]
+    fn forward_inheritance_marks_the_to_end() {
+        // `Dog --|> Animal`: triangle at Animal (the `to`/parent) via marker-end.
+        let d = build("classDiagram\nDog --|> Animal\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-end=\"url(#cls-triangle)\""));
+        assert!(!svg.contains("marker-start=\"url(#cls-triangle)\""));
+    }
+
+    #[test]
+    fn forward_composition_puts_diamond_at_to_end() {
+        // `A --* B`: filled diamond belongs at B (the `to`/whole) via marker-end.
+        let d = build("classDiagram\nA --* B\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-end=\"url(#cls-diamond-filled)\""));
+        assert!(!svg.contains("marker-start"));
+        assert!(!svg.contains("url(#cls-arrow)"));
     }
 
     #[test]

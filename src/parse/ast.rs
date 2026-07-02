@@ -457,6 +457,11 @@ pub struct ClassRelation {
     pub from_card: Option<String>,
     /// Multiplicity on the `to` end, e.g. `"*"` in `A "1" --> "*" B`.
     pub to_card: Option<String>,
+    /// True when the relation token's decorated end (triangle/diamond/circle/
+    /// arrow) sits on the `from` class rather than `to` — e.g. `<|--`, `*--`,
+    /// `o--`, `<--`, `<..`. The renderer then draws the marker at the `from`
+    /// end. Layout order (`from` → `to`) is preserved either way.
+    pub reversed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
