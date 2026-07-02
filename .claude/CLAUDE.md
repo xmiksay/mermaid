@@ -227,6 +227,11 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   missing color renders transparent. Reserves `BOX_LABEL_H` above the actor row.
 - State `state X { ... }` is stored in `composites`; parallel regions are
   separated by `--`. Renderer draws a dashed rounded outline with a label.
+- State history pseudo-states parse to `StateKind::History { deep }`:
+  `<<history>>` and `[H]` are shallow (`deep: false`), `[H*]` is deep. The
+  bracket forms are handled in `canonicalize` like `[*]` (unique `__hist_N`
+  id per occurrence); the stereotype form in `parse_state_decl`. The renderer
+  draws a small circle with `H`/`H*` inside.
 - State `note right of X: text` (one-liner) and `note left of X\n…\nend note`
   (multi-line) both land in `notes`.
 - Class `namespace X { class A; class B }` is stored in `namespaces`; the

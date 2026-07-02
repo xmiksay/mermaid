@@ -203,7 +203,9 @@ const CHOICE_H: f64 = 40.0;
 
 fn state_size(s: &State) -> (f64, f64) {
     match s.kind {
-        StateKind::Start | StateKind::End => (PSEUDO_R * 2.0, PSEUDO_R * 2.0),
+        StateKind::Start | StateKind::End | StateKind::History { .. } => {
+            (PSEUDO_R * 2.0, PSEUDO_R * 2.0)
+        }
         StateKind::Choice => (CHOICE_W, CHOICE_H),
         StateKind::Fork | StateKind::Join => (80.0, 12.0),
         StateKind::Normal => {
@@ -261,6 +263,21 @@ fn draw_state(
                 w,
                 h,
                 "fill=\"#333\" stroke=\"none\"",
+            );
+        }
+        StateKind::History { deep } => {
+            svg.circle(
+                cx,
+                cy,
+                PSEUDO_R,
+                &rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5"),
+            );
+            let label = if deep { "H*" } else { "H" };
+            svg.text(
+                cx,
+                cy + 4.0,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+                label,
             );
         }
         StateKind::Normal => {
@@ -344,7 +361,9 @@ fn clip_to_state(
     kind: StateKind,
 ) -> (f64, f64) {
     match kind {
-        StateKind::Start | StateKind::End => clip_circle(from, center, PSEUDO_R),
+        StateKind::Start | StateKind::End | StateKind::History { .. } => {
+            clip_circle(from, center, PSEUDO_R)
+        }
         StateKind::Choice => clip_rhombus(from, center, (CHOICE_W, CHOICE_H)),
         _ => clip_rect(from, center, size),
     }
@@ -463,6 +482,14 @@ mod tests {
         let d = build("stateDiagram-v2\n[*] --> A\nstyle A fill:#abc\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("fill=\"#abc\""));
+    }
+
+    #[test]
+    fn history_states_rendered() {
+        let d = build("stateDiagram-v2\nstate A {\n[*] --> B\nB --> [H]\n[H*] --> C\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">H<"));
+        assert!(svg.contains(">H*<"));
     }
 
     #[test]

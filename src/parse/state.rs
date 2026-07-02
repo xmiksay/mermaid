@@ -3,9 +3,10 @@
 //! Supports:
 //!   * `stateDiagram` and `stateDiagram-v2` headers.
 //!   * `[*]` start/end pseudo-states (each occurrence gets a unique id).
+//!   * `[H]`/`[H*]` history pseudo-states (shallow/deep, unique id each).
 //!   * Transitions `A --> B[: label]`.
 //!   * `state X` and `state X : description` declarations.
-//!   * Stereotypes via `state X <<choice/fork/join>>`.
+//!   * Stereotypes via `state X <<choice/fork/join/history>>`.
 //!   * `direction TB|TD|BT|LR|RL`.
 //!   * Composite states `state X { ... }` (potentially nested), with
 //!     parallel regions separated by `--`.
@@ -27,6 +28,7 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
     let mut composite_stack: Vec<CompositeFrame> = Vec::new();
     let mut start_n = 0usize;
     let mut end_n = 0usize;
+    let mut hist_n = 0usize;
     let mut existing: HashMap<String, usize> = HashMap::new();
     let mut pending_note: Option<(String, NotePosition, Vec<String>)> = None;
 
@@ -153,8 +155,14 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
         }
 
         if line.contains("-->") {
-            let (from_id, to_id) =
-                parse_transition(line, &mut diag, &mut existing, &mut start_n, &mut end_n)?;
+            let (from_id, to_id) = parse_transition(
+                line,
+                &mut diag,
+                &mut existing,
+                &mut start_n,
+                &mut end_n,
+                &mut hist_n,
+            )?;
             // Composite tracking: each new normal state declared in the line
             // belongs to the active region.
             if let Some(top) = composite_stack.last_mut() {
@@ -317,6 +325,7 @@ fn parse_state_decl(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<
             "choice" => StateKind::Choice,
             "fork" => StateKind::Fork,
             "join" => StateKind::Join,
+            "history" => StateKind::History { deep: false },
             _ => StateKind::Normal,
         };
         (id, k)
@@ -335,6 +344,7 @@ fn parse_transition(
     existing: &mut HashMap<String, usize>,
     start_n: &mut usize,
     end_n: &mut usize,
+    hist_n: &mut usize,
 ) -> Result<(String, String), ParseError> {
     let arrow = "-->";
     let pos = line.find(arrow).unwrap();
@@ -344,8 +354,8 @@ fn parse_transition(
         Some((a, b)) => (a.trim(), Some(b.trim().to_string())),
         None => (after.as_str(), None),
     };
-    let from_id = canonicalize(&from_raw, true, diag, existing, start_n, end_n);
-    let to_id = canonicalize(to_raw, false, diag, existing, start_n, end_n);
+    let from_id = canonicalize(&from_raw, true, diag, existing, start_n, end_n, hist_n);
+    let to_id = canonicalize(to_raw, false, diag, existing, start_n, end_n, hist_n);
     if let Some(cls) = from_class {
         apply_state_class(diag, existing, &from_id, &cls);
     }
@@ -367,6 +377,7 @@ fn canonicalize(
     existing: &mut HashMap<String, usize>,
     start_n: &mut usize,
     end_n: &mut usize,
+    hist_n: &mut usize,
 ) -> String {
     if raw == "[*]" {
         if is_source {
@@ -392,6 +403,18 @@ fn canonicalize(
             });
             id
         }
+    } else if raw == "[H]" || raw == "[H*]" {
+        let deep = raw == "[H*]";
+        *hist_n += 1;
+        let id = format!("__hist_{hist_n}");
+        diag.states.push(State {
+            id: id.clone(),
+            label: String::new(),
+            kind: StateKind::History { deep },
+            classes: Vec::new(),
+            style: Style::new(),
+        });
+        id
     } else {
         ensure_state(diag, existing, raw, "", StateKind::Normal);
         raw.to_string()
@@ -488,6 +511,22 @@ mod tests {
         .unwrap();
         let kinds: Vec<_> = d.states.iter().map(|s| (s.id.clone(), s.kind)).collect();
         assert!(kinds.contains(&("fork_1".into(), StateKind::Fork)));
+    }
+
+    #[test]
+    fn history_stereotype() {
+        let d = parse("stateDiagram-v2\nstate h <<history>>\n").unwrap();
+        assert_eq!(state(&d, "h").kind, StateKind::History { deep: false });
+    }
+
+    #[test]
+    fn history_bracket_forms() {
+        let d =
+            parse("stateDiagram-v2\nstate A {\n[*] --> B\nB --> [H]\n[H*] --> C\nC --> [*]\n}\n")
+                .unwrap();
+        let kinds: Vec<_> = d.states.iter().map(|s| s.kind).collect();
+        assert!(kinds.contains(&StateKind::History { deep: false }));
+        assert!(kinds.contains(&StateKind::History { deep: true }));
     }
 
     #[test]
