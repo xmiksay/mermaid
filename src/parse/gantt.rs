@@ -135,18 +135,21 @@ fn parse_task(
     }
 
     let mut status = TaskStatus::Normal;
+    let mut crit = false;
     let mut milestone = false;
     let mut id: Option<String> = None;
     let mut consumed = 0;
 
-    // Leading tags (optional, any combination): `active`/`done`/`crit` set the
-    // status, `milestone` is orthogonal. Upstream allows e.g. `crit, milestone`.
+    // Leading tags (optional, any combination): `active`/`done` set the status;
+    // `crit` and `milestone` are orthogonal flags. Upstream combines them, e.g.
+    // `done, crit` keeps the done fill with a crit border rather than letting
+    // the last tag win.
     while consumed < parts.len() {
         match parts[consumed] {
             "milestone" => milestone = true,
             "active" => status = TaskStatus::Active,
             "done" => status = TaskStatus::Done,
-            "crit" => status = TaskStatus::Crit,
+            "crit" => crit = true,
             _ => break,
         }
         consumed += 1;
@@ -194,6 +197,7 @@ fn parse_task(
         start,
         end,
         status,
+        crit,
         milestone,
     })
 }
@@ -280,7 +284,8 @@ mod tests {
             _ => panic!("expected after id"),
         }
         let build = &d.sections[1].tasks[0];
-        assert_eq!(build.status, TaskStatus::Crit);
+        assert!(build.crit);
+        assert_eq!(build.status, TaskStatus::Normal);
         assert_eq!(build.end, TaskEnd::Duration(7.0));
     }
 
@@ -335,8 +340,19 @@ mod tests {
         assert_eq!(m1.status, TaskStatus::Normal);
         let m2 = &d.sections[0].tasks[1];
         assert!(m2.milestone);
-        assert_eq!(m2.status, TaskStatus::Crit);
+        assert!(m2.crit);
+        assert_eq!(m2.status, TaskStatus::Normal);
         assert_eq!(m2.id.as_deref(), Some("m2"));
+    }
+
+    #[test]
+    fn done_and_crit_combine() {
+        // Upstream keeps the done status *and* the crit flag rather than
+        // letting the last tag win.
+        let d = parse("gantt\nsection S\nT : done, crit, 2026-01-01, 2d\n").unwrap();
+        let t = &d.sections[0].tasks[0];
+        assert_eq!(t.status, TaskStatus::Done);
+        assert!(t.crit);
     }
 
     #[test]

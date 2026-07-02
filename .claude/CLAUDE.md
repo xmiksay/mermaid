@@ -327,13 +327,26 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   live in `src/svg/interact.rs` (used by both the flowchart and class renderers).
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`).
-- Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
-  the renderer draws the today marker as a vertical red line.
+- Gantt dates are **exact civil day-counts from the Unix epoch**
+  (`src/svg/gantt_date.rs`: `days_from_civil`/`civil_from_days`/`weekday`, the
+  Hinnant algorithms) — no more `365.25`-day drift. `parse_date` honors the
+  `dateFormat` field order (`DD-MM-YYYY` etc.), `format_date` renders axis
+  ticks with the `axisFormat` d3/`strftime` subset (`%Y %m %d %b %a …`, default
+  ISO `%Y-%m-%d`).
+- Gantt `excludes` (weekends / weekday names / specific dates) is honored by
+  the renderer via `Excludes` (`src/svg/gantt_date.rs`): each non-working day
+  gets a light shading band behind the bars, and duration-based tasks are
+  **stretched** over excluded days (`Excludes::stretched_end`, matching
+  upstream's `getMaxEndTime`). Explicit end-date / `until` tasks are not
+  stretched. `todayMarker YYYY-MM-DD` still draws a vertical red line.
 - Gantt task tags are consumed as a leading run in `parse_task`: `active`/
-  `done`/`crit` set `TaskStatus`, `milestone` sets the orthogonal
-  `GanttTask.milestone` flag (any combination, e.g. `crit, milestone`). A
-  milestone renders as a diamond (rotated square `<path>`) centered on the
-  start date with the label beside it — duration is ignored.
+  `done` set `TaskStatus`, while `crit` and `milestone` are **orthogonal
+  flags** (`GanttTask.crit`/`.milestone`) — upstream combines them, so
+  `done, crit` keeps the done fill with a crit (red) border instead of the last
+  tag winning. `colors_for(status, crit)` picks the fill from the status and a
+  red border for `crit` (crit-only also takes the red fill). A milestone
+  renders as a diamond (rotated square `<path>`) centered on the start date with
+  the label beside it — duration is ignored.
 - Gantt task end is a `TaskEnd` enum (not a bare `duration_days`): `Duration`
   (`Nd`/`Nw`/`Nh`/`Nm`), `Date` (an explicit end date — the renderer computes
   the length from the resolved start), or `UntilId` (`until <taskId>` — ends

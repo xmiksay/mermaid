@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use crate::parse::{GanttDiagram, TaskEnd, TaskStart, TaskStatus};
 
 use super::builder::{fnum, SvgBuilder};
+use super::gantt_date::{format_date, parse_date, Excludes};
 use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
@@ -89,15 +90,36 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             x + 2.0,
             axis_y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"11\""),
-            &format_day(tick, start_day, d.date_format.as_deref()),
+            &format_date((start_day + tick).round() as i64, d.axis_format.as_deref()),
         );
         tick += tick_step;
     }
 
+    // Excluded-day shading (weekends etc.): a light band per non-working day
+    // behind the bars, matching upstream's `exclude-range` rects.
+    let excludes = Excludes::parse(&d.excludes, d.date_format.as_deref());
+    if excludes.active() {
+        let day_w = body_w / total_days;
+        let first = start_day.floor() as i64;
+        let last = (start_day + total_days).ceil() as i64;
+        for day in first..last {
+            if excludes.is_excluded(day) {
+                let x = body_x + ((day as f64 - start_day) / total_days) * body_w;
+                svg.rect(
+                    x,
+                    axis_y + AXIS_H,
+                    day_w,
+                    body_h,
+                    "fill=\"#000\" fill-opacity=\"0.04\"",
+                );
+            }
+        }
+    }
+
     // Today marker
     if let Some(today_raw) = &d.today_marker {
-        if let Some(today_day) = ymd_or_none(today_raw) {
-            let rel = today_day - start_day;
+        if let Some(today_day) = parse_date(today_raw, d.date_format.as_deref()) {
+            let rel = today_day as f64 - start_day;
             if rel >= 0.0 && rel <= total_days {
                 let x = body_x + (rel / total_days) * body_w;
                 svg.line(
@@ -140,7 +162,8 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 &task.name,
             );
             let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
-            let (fill, stroke) = colors_for(task.status);
+            let (fill, stroke) = colors_for(task.status, task.crit);
+            let sw = if task.crit { 2 } else { 1 };
             if task.milestone {
                 // Diamond centered on the start date; duration is ignored.
                 let cy = y + BAR_H / 2.0;
@@ -157,7 +180,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                         fnum(x - rad),
                         fnum(cy),
                     ),
-                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\""),
+                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\""),
                 );
                 svg.text(
                     x + rad + 4.0,
@@ -173,7 +196,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                     y + 2.0,
                     w.max(2.0),
                     BAR_H - 4.0,
-                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\" rx=\"3\""),
+                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" rx=\"3\""),
                 );
             }
             y += BAR_H + ROW_GAP;
@@ -190,57 +213,19 @@ struct Resolved {
 }
 
 fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
-    // Flat order, accumulate a cursor for `AfterPrevious`.
+    // Flat order, accumulate `last_end` for `AfterPrevious`. Dates are exact
+    // day counts from the Unix epoch (see `gantt_date`); `excludes` stretches
+    // duration-based tasks over non-working days like upstream does.
+    let df = d.date_format.as_deref();
+    let excludes = Excludes::parse(&d.excludes, df);
     let mut out: Vec<Resolved> = Vec::new();
     let mut id_to_start_end: HashMap<String, (f64, f64)> = HashMap::new();
-    let mut cursor = 0.0_f64;
     let mut last_end = 0.0_f64;
-
-    // First pass: resolve sequentially, treating dates as opaque keys.
-    // Real Mermaid parses YYYY-MM-DD dates; we use ordinal days from the
-    // earliest known date.
-    let mut date_keys: Vec<String> = Vec::new();
-    for section in &d.sections {
-        for task in &section.tasks {
-            if let TaskStart::Date(s) = &task.start {
-                if !date_keys.contains(s) {
-                    date_keys.push(s.clone());
-                }
-            }
-        }
-    }
-    let date_index: HashMap<String, f64> = date_keys
-        .iter()
-        .enumerate()
-        .map(|(i, k)| (k.clone(), i as f64 * 0.0))
-        .collect();
-    let _ = date_index;
-
-    // Convert known YYYY-MM-DD via simple parsing; non-parseable dates become
-    // 0 (so the chart still renders sensibly).
-    fn ymd_to_day(s: &str) -> Option<f64> {
-        let parts: Vec<&str> = s.split('-').collect();
-        if parts.len() != 3 {
-            return None;
-        }
-        let y: i32 = parts[0].parse().ok()?;
-        let m: i32 = parts[1].parse().ok()?;
-        let dd: i32 = parts[2].parse().ok()?;
-        // Days from year 0 — only stability matters, not absolute correctness.
-        Some((y as f64) * 365.25 + month_offset(m) + (dd as f64))
-    }
-    fn month_offset(m: i32) -> f64 {
-        // Cumulative days at start of month (non-leap).
-        const TBL: [f64; 12] = [
-            0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.,
-        ];
-        TBL[(m.clamp(1, 12) - 1) as usize]
-    }
 
     for section in &d.sections {
         for task in &section.tasks {
             let start = match &task.start {
-                TaskStart::Date(s) => ymd_to_day(s).unwrap_or(cursor),
+                TaskStart::Date(s) => parse_date(s, df).map(|v| v as f64).unwrap_or(last_end),
                 TaskStart::AfterId(id) => {
                     id_to_start_end.get(id).map(|(_, e)| *e).unwrap_or(last_end)
                 }
@@ -250,8 +235,8 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
             // there directly. Both fall back to a nominal length when the
             // reference is a forward/unknown ref (matching `after`'s fallback).
             let dur = match &task.end {
-                TaskEnd::Duration(d) => *d,
-                TaskEnd::Date(s) => ymd_to_day(s).map(|e| e - start).unwrap_or(1.0),
+                TaskEnd::Duration(days) => stretched_duration(start, *days, &excludes),
+                TaskEnd::Date(s) => parse_date(s, df).map(|e| e as f64 - start).unwrap_or(1.0),
                 TaskEnd::UntilId(id) => id_to_start_end
                     .get(id)
                     .map(|(s, _)| *s - start)
@@ -262,7 +247,6 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
             if let Some(id) = &task.id {
                 id_to_start_end.insert(id.clone(), (start, end));
             }
-            cursor = end;
             last_end = end;
             out.push(Resolved {
                 start_day: start,
@@ -273,18 +257,16 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
     out
 }
 
-fn ymd_or_none(s: &str) -> Option<f64> {
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 3 {
-        return None;
+/// Length in calendar days for a `days`-working-day duration: when excludes is
+/// active the whole-day part is stretched over non-working days, keeping any
+/// sub-day (hours/minutes) remainder as-is.
+fn stretched_duration(start: f64, days: f64, excludes: &Excludes) -> f64 {
+    if !excludes.active() || days < 1.0 {
+        return days;
     }
-    let y: i32 = parts[0].parse().ok()?;
-    let m: i32 = parts[1].parse().ok()?;
-    let dd: i32 = parts[2].parse().ok()?;
-    const TBL: [f64; 12] = [
-        0., 31., 59., 90., 120., 151., 181., 212., 243., 273., 304., 334.,
-    ];
-    Some((y as f64) * 365.25 + TBL[(m.clamp(1, 12) - 1) as usize] + (dd as f64))
+    let whole = days.floor() as i64;
+    let end = excludes.stretched_end(start.round() as i64, whole);
+    (end as f64 - start) + (days - whole as f64)
 }
 
 fn pick_tick_step(total_days: f64) -> f64 {
@@ -299,35 +281,21 @@ fn pick_tick_step(total_days: f64) -> f64 {
     }
 }
 
-fn format_day(day_offset: f64, start_day: f64, date_format: Option<&str>) -> String {
-    // If start_day looks like a real ordinal (positive and large), convert back.
-    if start_day > 365.0 {
-        let abs = start_day + day_offset;
-        // Reverse the (approximate) ymd encoding so we print something readable.
-        // This is intentionally rough; switching to chrono would be cleaner.
-        let y = (abs / 365.25).floor() as i32;
-        let leftover = abs - (y as f64) * 365.25;
-        let mut m = 1;
-        let mut cum = 0.0_f64;
-        const TBL: [f64; 12] = [31., 28., 31., 30., 31., 30., 31., 31., 30., 31., 30., 31.];
-        while m < 12 && cum + TBL[(m - 1) as usize] <= leftover {
-            cum += TBL[(m - 1) as usize];
-            m += 1;
-        }
-        let dd = (leftover - cum).max(0.0).round() as i32 + 1;
-        let _ = date_format;
-        return format!("{y:04}-{m:02}-{dd:02}");
-    }
-    format!("d{}", day_offset as i32)
-}
-
-fn colors_for(status: TaskStatus) -> (&'static str, &'static str) {
-    match status {
+fn colors_for(status: TaskStatus, crit: bool) -> (&'static str, &'static str) {
+    let (mut fill, mut stroke) = match status {
         TaskStatus::Normal => ("#A8C5E1", "#5470C6"),
         TaskStatus::Active => ("#FAC858", "#C99A3D"),
         TaskStatus::Done => ("#B8D8B8", "#73A573"),
-        TaskStatus::Crit => ("#F19E9E", "#C0524F"),
+    };
+    if crit {
+        // `crit` adds a red border; a crit-only task also takes the red fill,
+        // while `done, crit` / `active, crit` keep their status fill.
+        if status == TaskStatus::Normal {
+            fill = "#F19E9E";
+        }
+        stroke = "#C0524F";
     }
+    (fill, stroke)
 }
 
 #[cfg(test)]
@@ -396,5 +364,39 @@ mod tests {
         let d = build("gantt\nsection S\nUrgent : crit, 2026-01-01, 1d\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("#F19E9E") || svg.contains("#C0524F"));
+    }
+
+    #[test]
+    fn done_crit_keeps_done_fill_with_red_border() {
+        let d = build("gantt\nsection S\nT : done, crit, 2026-01-01, 2d\n");
+        let svg = render(&d, &Theme::default());
+        // Done fill + crit border, not the crit red fill.
+        assert!(svg.contains("#B8D8B8"));
+        assert!(svg.contains("#C0524F"));
+    }
+
+    #[test]
+    fn excludes_weekends_shade_and_stretch() {
+        // 2026-01-01 is a Thursday; a 5-working-day task crosses the weekend,
+        // so with `excludes weekends` the bar spans 7 calendar days.
+        let d = build(
+            "gantt\ndateFormat YYYY-MM-DD\nexcludes weekends\nsection S\nT : 2026-01-01, 5d\n",
+        );
+        let resolved = resolve_tasks(&d);
+        assert!((resolved[0].duration - 7.0).abs() < 1e-6);
+        let svg = render(&d, &Theme::default());
+        // Weekend shading band present.
+        assert!(svg.contains("fill-opacity=\"0.04\""));
+    }
+
+    #[test]
+    fn axis_format_controls_tick_labels() {
+        let d = build(
+            "gantt\ndateFormat YYYY-MM-DD\naxisFormat %m/%d\nsection S\nT : 2026-01-01, 3d\n",
+        );
+        let svg = render(&d, &Theme::default());
+        // A `%m/%d` axis label like `01/01`, and no ISO `2026-01-01` tick.
+        assert!(svg.contains(">01/01<"));
+        assert!(!svg.contains(">2026-01-01<"));
     }
 }
