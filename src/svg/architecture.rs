@@ -1,11 +1,12 @@
 //! architecture-beta renderer. Services are grouped into boxes; layout within
-//! each group is driven by sugiyama using the intra-group edges. Inter-group
-//! edges are drawn as straight clipped lines after groups are positioned.
+//! each group is driven by sugiyama using the intra-group edges. Edges are
+//! drawn after groups are positioned, attaching to the sides named in the edge
+//! (`db:L -- R:server`); an `id{group}` endpoint resolves to a group box.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 
-use crate::parse::ArchitectureDiagram;
+use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
@@ -70,6 +71,8 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     let mut placed_services: Vec<Placed> = Vec::new();
     let mut placed_groups: Vec<(f64, f64, f64, f64, String)> = Vec::new();
     let mut centers: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
+    // Group boxes are valid edge endpoints too (`id{group}` markers).
+    let mut group_boxes: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     let mut routes: HashMap<(String, String), Vec<(f64, f64)>> = HashMap::new();
     let mut group_y = PAD;
     let mut max_x: f64 = PAD;
@@ -197,6 +200,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
                 bh,
                 gdef.label.clone().unwrap_or_else(|| gdef.id.clone()),
             ));
+            group_boxes.insert(gdef.id.clone(), (bx, by, bw, bh));
         }
 
         group_y = by + bh + GROUP_GAP;
@@ -228,7 +232,9 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     }
 
     for e in &d.edges {
-        let (Some(a), Some(b)) = (centers.get(&e.from), centers.get(&e.to)) else {
+        // An endpoint may be a service/junction (`centers`) or a group box.
+        let resolve = |id: &String| centers.get(id).or_else(|| group_boxes.get(id));
+        let (Some(a), Some(b)) = (resolve(&e.from), resolve(&e.to)) else {
             continue;
         };
         let acx = a.0 + a.2 / 2.0;
@@ -253,12 +259,10 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             vec![(acx, acy), (bcx, bcy)]
         };
 
-        // Clip endpoints to the rect boundaries pointing toward the next waypoint.
-        let first = clip_rect((acx, acy), a.2, a.3, pts[1]);
+        // Attach endpoints to the sides named in the edge (`db:L -- R:server`).
         let last_idx = pts.len() - 1;
-        let last = clip_rect((bcx, bcy), b.2, b.3, pts[last_idx - 1]);
-        pts[0] = first;
-        pts[last_idx] = last;
+        pts[0] = port_point((acx, acy), a.2, a.3, e.from_side);
+        pts[last_idx] = port_point((bcx, bcy), b.2, b.3, e.to_side);
 
         let dashed = if e.group {
             " stroke-dasharray=\"5 3\""
@@ -301,8 +305,6 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
                 );
             }
         }
-        let _ = e.from_side;
-        let _ = e.to_side;
     }
 
     for p in &placed_services {
@@ -347,26 +349,17 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-fn clip_rect(center: (f64, f64), w: f64, h: f64, toward: (f64, f64)) -> (f64, f64) {
-    let dx = toward.0 - center.0;
-    let dy = toward.1 - center.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return center;
-    }
+/// Midpoint of the named side of a rect — where an edge port attaches.
+fn port_point(center: (f64, f64), w: f64, h: f64, side: ArchSide) -> (f64, f64) {
+    let (cx, cy) = center;
     let hw = w / 2.0;
     let hh = h / 2.0;
-    let tx = if dx.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hw / dx.abs()
-    };
-    let ty = if dy.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hh / dy.abs()
-    };
-    let t = tx.min(ty);
-    (center.0 + dx * t, center.1 + dy * t)
+    match side {
+        ArchSide::Top => (cx, cy - hh),
+        ArchSide::Bottom => (cx, cy + hh),
+        ArchSide::Left => (cx - hw, cy),
+        _ => (cx + hw, cy),
+    }
 }
 
 fn polyline_path(pts: &[(f64, f64)]) -> String {
@@ -489,5 +482,29 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">DB<"));
         assert!(svg.contains(">API<"));
+    }
+
+    #[test]
+    fn group_edge_draws_path() {
+        // Regression for #62: an `id{group}` edge between two group boxes must
+        // resolve its endpoints and draw a (dashed) connector, not vanish.
+        let src = "\
+architecture-beta
+    group left(cloud)[Left]
+    group right(cloud)[Right]
+    service a(server)[A] in left
+    service b(server)[B] in right
+    left{group}:R -- L:right{group}
+";
+        let d = match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Architecture(d) => d,
+            _ => panic!("expected architecture diagram"),
+        };
+        assert!(d.edges[0].group);
+        let svg = render(&d, &Theme::default());
+        assert!(
+            svg.contains("stroke-dasharray=\"5 3\""),
+            "group edge path missing"
+        );
     }
 }
