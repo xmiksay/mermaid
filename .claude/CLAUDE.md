@@ -426,3 +426,18 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `config.kanban.ticketBaseUrl` is set (captured in `preamble.rs` →
   `DiagramMeta.ticket_base_url`, copied onto `KanbanDiagram` in
   `parse_with_meta`; `#TICKET#` in the URL is replaced by the id).
+- block-beta styling & edges (`src/parse/block.rs` / `src/svg/block.rs`):
+  `classDef <name> <props>` fills `BlockDiagram.class_defs`; `class a,b <name>`
+  and the inline `id:::name` shorthand fill `Block.classes`; `style <id> <props>`
+  fills `Block.style`. `class`/`style` are **deferred** (a `Ctx` collects them,
+  `apply_assignments` walks the item tree afterwards so an id declared *after*
+  the assignment still matches). The renderer resolves them through the shared
+  `resolve_style`/`ResolvedStyle` (`src/svg/style.rs`). Block arrows
+  `id<["label"]>(dir)` parse to `BlockShape::Arrow(BlockArrow{right,left,up,down})`
+  (`(x)`→left+right, `(y)`→up+down) and render as a shafted/double-headed path.
+  Edge labels `a -- "text" --> b` are captured off the tail side in `parse_edge`
+  (the label no longer swallows the arrow). Edges resolve endpoints against a
+  `Geom` map that indexes **groups by id too** (so `ID --> D` where `ID` is a
+  `block:ID … end` group works) and clip to the node boundary (`clip`) so
+  arrowheads land on the edge, not the center. `block:id:span` keeps the span on
+  `BlockGroup.span` (min group width).
