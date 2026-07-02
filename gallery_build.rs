@@ -30,28 +30,16 @@ const SAMPLES: &[(&str, &str, &str)] = &[
     ("ZenUML", "zenuml", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/zenuml.mmd"))),
 ];
 
-/// The exact Markdown embedded into the crate root docs by `src/lib.rs`.
+/// The exact Markdown of one `assets/gallery/<stem>.md` section.
 /// rustdoc strips inline `<svg>`, so each diagram is a base64 data-URI `<img>`.
-fn build_gallery() -> String {
-    use std::fmt::Write as _;
-    let mut md = String::from(
-        "# Gallery\n\n\
-         Reference output for every supported diagram type, rendered by this \
-         crate from the sources in \
-         [`samples/`](https://github.com/xmiksay/mermaid/tree/master/samples).\n\n",
-    );
-    for (title, _stem, src) in SAMPLES {
-        let svg = mermaid_svg::render(src).unwrap_or_else(|e| panic!("render {title}: {e}"));
-        let data = gallery_base64(svg.as_bytes());
-        writeln!(
-            md,
-            "## {title}\n\n\
-             <img alt=\"{title} diagram\" style=\"max-width:100%;height:auto\" \
-             src=\"data:image/svg+xml;base64,{data}\" />\n",
-        )
-        .unwrap();
-    }
-    md
+fn gallery_section(title: &str, src: &str) -> String {
+    let svg = mermaid_svg::render(src).unwrap_or_else(|e| panic!("render {title}: {e}"));
+    let data = gallery_base64(svg.as_bytes());
+    format!(
+        "## {title}\n\n\
+         <img alt=\"{title} diagram\" style=\"max-width:100%;height:auto\" \
+         src=\"data:image/svg+xml;base64,{data}\" />\n"
+    )
 }
 
 fn gallery_base64(data: &[u8]) -> String {

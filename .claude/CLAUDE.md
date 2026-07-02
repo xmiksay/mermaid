@@ -37,8 +37,9 @@ examples/render_user.rs        small one-shot example
 examples/gen-doc-diagrams.rs   regenerates assets/gallery.md (the rustdoc gallery)
 tests/integration.rs           end-to-end tests; writes samples to target/test-samples/
 samples/                       one `.mmd` per diagram kind, shared by benches + gallery
-assets/gallery.md              rendered gallery, embedded into rustdoc via src/lib.rs
-gallery_build.rs               shared `SAMPLES` list + build helper, `include!`'d into
+assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry,
+                               embedded into rustdoc via src/lib.rs
+gallery_build.rs               shared `SAMPLES` list + section helper, `include!`'d into
                                examples/gen-doc-diagrams.rs and tests/integration.rs
 ```
 
@@ -49,11 +50,22 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 
 `gallery_build.rs` is not a module — it is `include!`'d verbatim into both
 `examples/gen-doc-diagrams.rs` and `tests/integration.rs`, so its `SAMPLES`
-list (one `(stem, source)` per diagram kind) and render helper are shared.
-`cargo run --example gen-doc-diagrams` regenerates `assets/gallery.md`, which
-`src/lib.rs` embeds into the crate rustdoc with
-`#![doc = include_str!("../assets/gallery.md")]`. The `doc_gallery_up_to_date`
-integration test fails if the committed gallery drifts from the samples.
+list (one `(stem, source)` per diagram kind) and `gallery_section()` helper are
+shared. `cargo run --example gen-doc-diagrams` regenerates one
+`assets/gallery/<stem>.md` per `SAMPLES` entry (23 files), rewriting only the
+files whose content changed and printing each rewrite — so `git status` after a
+regen shows exactly which diagrams a change affected. `src/lib.rs` embeds them
+into the crate rustdoc with one `#![doc = include_str!("../assets/gallery/<stem>.md")]`
+per stem in `SAMPLES` order (`#![doc]` attributes concatenate in order). The
+`doc_gallery_up_to_date` integration test names the stale stem if any committed
+file drifts from the samples.
+
+The split (one file per diagram, `assets/gallery/*.md`) keeps parallel
+renderer PRs from conflicting on a shared base64 blob: a PR touching one
+diagram regenerates exactly one gallery file. `.gitattributes` marks
+`assets/gallery/*.md linguist-generated=true` so the blobs stay collapsed in
+GitHub diffs. Changing `SAMPLES` itself (add/remove/reorder a stem) fans out to
+the `lib.rs` include lines, so treat it as a serial-window change.
 
 ## Done
 
