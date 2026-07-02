@@ -1,187 +1,207 @@
 //! User-journey renderer.
 //!
-//! Layout: tasks across the x-axis, score (0-5) on the y-axis, line+points
-//! per actor-set. Sections appear as labeled bands above the chart.
-
-use std::fmt::Write as _;
+//! Faithful to upstream Mermaid's composition (not a line chart): a colored
+//! **section band** groups the tasks beneath it; each task is a rounded
+//! **task box** carrying a score-driven **face glyph** above it (smiley for
+//! score ≥ 4, neutral for 3, sad for ≤ 2) and small **actor dots** straddling
+//! its top edge. A vertical **actor legend** sits in the top-left gutter.
 
 use crate::parse::JourneyDiagram;
 
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
-const PAD: f64 = 30.0;
-const TITLE_GAP: f64 = 32.0;
-const SECTION_BAND: f64 = 26.0;
-const TASK_WIDTH: f64 = 110.0;
-const CHART_HEIGHT: f64 = 220.0;
-const AXIS_PAD_LEFT: f64 = 30.0;
-const LEGEND_GAP: f64 = 26.0;
+const MARGIN: f64 = 20.0;
+const TITLE_H: f64 = 40.0;
+/// Left gutter reserved for the title and the actor legend; tasks start here.
+const LEFT_MARGIN: f64 = 160.0;
+const TASK_W: f64 = 150.0;
+const TASK_H: f64 = 45.0;
+const TASK_GAP: f64 = 20.0;
+const SECTION_BAND_H: f64 = 24.0;
+const FACE_R: f64 = 14.0;
+const LEGEND_ROW: f64 = 24.0;
 
 pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     let fg_muted = theme.fg_muted;
 
+    let actors = collect_actors(d);
+    let title_h = if d.title.is_some() { TITLE_H } else { 0.0 };
     let total_tasks: usize = d.sections.iter().map(|s| s.tasks.len()).sum();
-    let chart_w = (total_tasks.max(1) as f64) * TASK_WIDTH;
-    let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
 
-    let actors: Vec<String> = collect_actors(d);
-    let legend_h = if actors.is_empty() { 0.0 } else { LEGEND_GAP };
+    let content_top = MARGIN + title_h;
+    let band_y = content_top;
+    let face_cy = band_y + SECTION_BAND_H + 12.0 + FACE_R;
+    let task_y = face_cy + FACE_R + 14.0;
+    let task_bottom = task_y + TASK_H;
 
-    let width = PAD * 2.0 + AXIS_PAD_LEFT + chart_w;
-    let height = PAD * 2.0 + title_h + SECTION_BAND + CHART_HEIGHT + legend_h + 30.0;
+    let tasks_span = if total_tasks == 0 {
+        0.0
+    } else {
+        total_tasks as f64 * TASK_W + (total_tasks as f64 - 1.0) * TASK_GAP
+    };
+    let width = LEFT_MARGIN + tasks_span + MARGIN;
+    let legend_bottom = content_top + actors.len() as f64 * LEGEND_ROW;
+    let height = task_bottom.max(legend_bottom) + MARGIN;
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
     if let Some(t) = &d.title {
         svg.text(
-            width / 2.0,
-            PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            LEFT_MARGIN,
+            MARGIN + 20.0,
+            &format!("fill=\"{fg}\" font-size=\"20\" font-weight=\"bold\""),
             t,
         );
     }
 
-    let section_y = PAD + title_h;
-    let chart_top = section_y + SECTION_BAND;
-    let chart_bottom = chart_top + CHART_HEIGHT;
-    let chart_left = PAD + AXIS_PAD_LEFT;
+    // Actor legend in the top-left gutter.
+    for (ai, actor) in actors.iter().enumerate() {
+        let cy = content_top + 8.0 + ai as f64 * LEGEND_ROW;
+        let color = theme.pie_color(ai);
+        svg.circle(
+            MARGIN + 8.0,
+            cy,
+            7.0,
+            &format!("fill=\"{color}\" stroke=\"{fg}\" stroke-width=\"1\""),
+        );
+        svg.text(
+            MARGIN + 22.0,
+            cy + 4.0,
+            &format!("fill=\"{fg_muted}\" font-size=\"12\""),
+            actor,
+        );
+    }
 
-    // Section bands across the top.
-    let mut x = chart_left;
+    // Section bands, task boxes, faces and actor dots.
+    let mut cursor = LEFT_MARGIN;
     for (si, sec) in d.sections.iter().enumerate() {
-        let w = sec.tasks.len() as f64 * TASK_WIDTH;
-        if w > 0.0 {
-            let color = theme.pie_color(si);
+        if sec.tasks.is_empty() {
+            continue;
+        }
+        let color = theme.pie_color(si);
+        let band_x0 = cursor;
+
+        for t in &sec.tasks {
+            let tx = cursor;
+            let center = tx + TASK_W / 2.0;
+
             svg.rect(
-                x,
-                section_y,
-                w,
-                SECTION_BAND - 4.0,
+                tx,
+                task_y,
+                TASK_W,
+                TASK_H,
                 &format!(
-                    "fill=\"{color}\" fill-opacity=\"0.25\" stroke=\"{color}\" stroke-width=\"1\""
+                    "rx=\"4\" ry=\"4\" fill=\"{color}\" fill-opacity=\"0.25\" \
+                     stroke=\"{color}\" stroke-width=\"1\""
                 ),
             );
-            if !sec.name.is_empty() {
-                svg.text(
-                    x + w / 2.0,
-                    section_y + SECTION_BAND / 2.0 + 2.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
-                    &sec.name,
-                );
-            }
-        }
-        x += w;
-    }
-
-    // Score grid (0..=5).
-    for s in 0..=5 {
-        let y = chart_bottom - (s as f64 / 5.0) * CHART_HEIGHT;
-        svg.line(
-            chart_left,
-            y,
-            chart_left + chart_w,
-            y,
-            &format!("stroke=\"{fg_muted}\" stroke-width=\"1\" stroke-dasharray=\"2 3\""),
-        );
-        svg.text(
-            chart_left - 6.0,
-            y + 4.0,
-            &format!("text-anchor=\"end\" fill=\"{fg_muted}\" font-size=\"11\""),
-            &s.to_string(),
-        );
-    }
-
-    // Per-actor lines and points.
-    let task_xs: Vec<(f64, &super::super::parse::ast::JourneyTask)> = {
-        let mut out = Vec::new();
-        let mut cursor = chart_left + TASK_WIDTH / 2.0;
-        for sec in &d.sections {
-            for t in &sec.tasks {
-                out.push((cursor, t));
-                cursor += TASK_WIDTH;
-            }
-        }
-        out
-    };
-
-    // Task name labels under chart.
-    for (cx, t) in &task_xs {
-        svg.text(
-            *cx,
-            chart_bottom + 16.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-            &t.name,
-        );
-    }
-
-    // Plot per actor.
-    for (ai, actor) in actors.iter().enumerate() {
-        let color = theme.pie_color((ai + 3) % 10);
-        let mut path = String::new();
-        let mut first = true;
-        let mut prev: Option<(f64, f64)> = None;
-        for (cx, t) in &task_xs {
-            if !t.actors.iter().any(|a| a == actor) && (!actor.is_empty() || !t.actors.is_empty()) {
-                if let Some(p) = prev {
-                    // Draw running segment up to here, then break.
-                    let _ = p; // path break: start new subpath
-                }
-                first = true;
-                prev = None;
-                continue;
-            }
-            let cy = chart_bottom - (t.score as f64).clamp(0.0, 5.0) / 5.0 * CHART_HEIGHT;
-            if first {
-                let _ = write!(path, "M{} {}", fnum(*cx), fnum(cy));
-                first = false;
-            } else {
-                let _ = write!(path, "L{} {}", fnum(*cx), fnum(cy));
-            }
-            prev = Some((*cx, cy));
-            svg.circle(
-                *cx,
-                cy,
-                5.0,
-                &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"1.5\""),
-            );
-        }
-        if !path.is_empty() {
-            svg.path(
-                &path,
-                &format!("fill=\"none\" stroke=\"{color}\" stroke-width=\"2\""),
-            );
-        }
-    }
-
-    // Legend.
-    if !actors.is_empty() {
-        let ly = chart_bottom + 36.0;
-        let mut lx = chart_left;
-        for (ai, actor) in actors.iter().enumerate() {
-            let color = theme.pie_color((ai + 3) % 10);
-            svg.circle(lx + 6.0, ly, 5.0, &format!("fill=\"{color}\""));
             svg.text(
-                lx + 16.0,
-                ly + 4.0,
-                &format!("fill=\"{fg}\" font-size=\"12\""),
-                if actor.is_empty() { "(none)" } else { actor },
+                center,
+                task_y + TASK_H / 2.0 + 4.0,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\""),
+                &t.name,
             );
-            lx += 30.0 + (actor.chars().count() as f64) * 7.5;
+
+            draw_face(&mut svg, center, face_cy, t.score, theme);
+
+            // Actor dots straddle the top edge of the task box.
+            let mut dx = tx + 14.0;
+            for a in &t.actors {
+                if let Some(idx) = actors.iter().position(|x| x == a) {
+                    let ac = theme.pie_color(idx);
+                    svg.circle(
+                        dx,
+                        task_y,
+                        6.0,
+                        &format!("fill=\"{ac}\" stroke=\"{fg}\" stroke-width=\"1\""),
+                    );
+                    dx += 13.0;
+                }
+            }
+
+            cursor += TASK_W + TASK_GAP;
+        }
+
+        let band_w = (cursor - TASK_GAP) - band_x0;
+        svg.rect(
+            band_x0,
+            band_y,
+            band_w,
+            SECTION_BAND_H,
+            &format!("rx=\"3\" ry=\"3\" fill=\"{color}\" stroke=\"{color}\""),
+        );
+        if !sec.name.is_empty() {
+            svg.text(
+                band_x0 + band_w / 2.0,
+                band_y + SECTION_BAND_H / 2.0 + 4.0,
+                "text-anchor=\"middle\" fill=\"#fff\" font-size=\"13\" font-weight=\"bold\"",
+                &sec.name,
+            );
         }
     }
 
     svg.finish()
 }
 
+/// Draw a score-driven face glyph: eyes plus a mouth that smiles (score ≥ 4),
+/// stays flat (score = 3), or frowns (score ≤ 2).
+fn draw_face(svg: &mut SvgBuilder, cx: f64, cy: f64, score: i32, theme: &Theme) {
+    let stroke = theme.fg_muted;
+    let fill = theme.bg;
+
+    svg.circle(
+        cx,
+        cy,
+        FACE_R,
+        &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
+    );
+    svg.circle(cx - 5.0, cy - 4.0, 1.6, &format!("fill=\"{stroke}\""));
+    svg.circle(cx + 5.0, cy - 4.0, 1.6, &format!("fill=\"{stroke}\""));
+
+    let mouth = if score >= 4 {
+        // Smile: control point below the endpoints.
+        format!(
+            "M{} {} Q{} {} {} {}",
+            fnum(cx - 6.0),
+            fnum(cy + 3.0),
+            fnum(cx),
+            fnum(cy + 9.0),
+            fnum(cx + 6.0),
+            fnum(cy + 3.0),
+        )
+    } else if score <= 2 {
+        // Frown: control point above the endpoints.
+        format!(
+            "M{} {} Q{} {} {} {}",
+            fnum(cx - 6.0),
+            fnum(cy + 8.0),
+            fnum(cx),
+            fnum(cy + 2.0),
+            fnum(cx + 6.0),
+            fnum(cy + 8.0),
+        )
+    } else {
+        format!(
+            "M{} {} L{} {}",
+            fnum(cx - 6.0),
+            fnum(cy + 6.0),
+            fnum(cx + 6.0),
+            fnum(cy + 6.0),
+        )
+    };
+    svg.path(
+        &mouth,
+        &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\" stroke-linecap=\"round\""),
+    );
+}
+
+/// Unique actor names in first-seen order; assigns each a stable legend color.
 fn collect_actors(d: &JourneyDiagram) -> Vec<String> {
-    let mut seen = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
     for sec in &d.sections {
         for t in &sec.tasks {
-            if t.actors.is_empty() && !seen.iter().any(|x: &String| x.is_empty()) {
-                seen.push(String::new());
-            }
             for a in &t.actors {
                 if !seen.contains(a) {
                     seen.push(a.clone());
@@ -197,23 +217,72 @@ mod tests {
     use super::*;
     use crate::parse::{JourneySection, JourneyTask};
 
-    #[test]
-    fn produces_svg() {
-        let d = JourneyDiagram {
+    fn sample() -> JourneyDiagram {
+        JourneyDiagram {
             title: Some("Day".into()),
             sections: vec![JourneySection {
                 name: "Morning".into(),
-                tasks: vec![JourneyTask {
-                    name: "Wake".into(),
-                    score: 3,
-                    actors: vec!["Me".into()],
-                }],
+                tasks: vec![
+                    JourneyTask {
+                        name: "Wake".into(),
+                        score: 5,
+                        actors: vec!["Me".into()],
+                    },
+                    JourneyTask {
+                        name: "Grump".into(),
+                        score: 1,
+                        actors: vec!["Me".into(), "Cat".into()],
+                    },
+                ],
             }],
-        };
-        let svg = render(&d, &Theme::default());
+        }
+    }
+
+    #[test]
+    fn produces_svg_with_title_task_and_section() {
+        let svg = render(&sample(), &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Day<"));
         assert!(svg.contains(">Wake<"));
         assert!(svg.contains(">Morning<"));
+    }
+
+    #[test]
+    fn draws_task_boxes_not_a_line_chart() {
+        let svg = render(&sample(), &Theme::default());
+        // Task boxes are rounded rects; no polyline path fill="none" chart lines.
+        assert!(svg.contains("<rect"));
+        assert!(svg.contains("rx=\"4\""));
+        // Faces are present as circles with a mouth path.
+        assert!(svg.contains("Q"), "expected a curved mouth path");
+    }
+
+    #[test]
+    fn score_drives_mouth_shape() {
+        // Smile (score 5) and frown (score 1) both use quadratic mouths; a
+        // neutral score uses a straight line instead.
+        let neutral = JourneyDiagram {
+            title: None,
+            sections: vec![JourneySection {
+                name: String::new(),
+                tasks: vec![JourneyTask {
+                    name: "Meh".into(),
+                    score: 3,
+                    actors: vec![],
+                }],
+            }],
+        };
+        let svg = render(&neutral, &Theme::default());
+        // Neutral mouth is an "L" line segment, not a "Q" curve.
+        assert!(svg.contains("L"));
+    }
+
+    #[test]
+    fn legend_lists_unique_actors() {
+        let svg = render(&sample(), &Theme::default());
+        assert!(svg.contains(">Me<"));
+        assert!(svg.contains(">Cat<"));
+        let actors = collect_actors(&sample());
+        assert_eq!(actors, vec!["Me".to_string(), "Cat".to_string()]);
     }
 }
