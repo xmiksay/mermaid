@@ -127,6 +127,12 @@ fn parse_boundary_open(
         (C4BoundaryKind::Container, r)
     } else if let Some(r) = line.strip_prefix("Deployment_Node") {
         (C4BoundaryKind::Deployment, r)
+    } else if let Some(r) = line.strip_prefix("Node_L") {
+        (C4BoundaryKind::Deployment, r)
+    } else if let Some(r) = line.strip_prefix("Node_R") {
+        (C4BoundaryKind::Deployment, r)
+    } else if let Some(r) = line.strip_prefix("Node") {
+        (C4BoundaryKind::Deployment, r)
     } else if let Some(r) = line.strip_prefix("Boundary") {
         (C4BoundaryKind::Generic, r)
     } else {
@@ -531,5 +537,33 @@ mod tests {
             Some(C4BoundaryKind::System)
         ));
         assert_eq!(d.elements[0].members.len(), 1);
+    }
+
+    #[test]
+    fn parses_deployment_node_aliases() {
+        let src = "C4Deployment\n\
+            Node(dc, \"Datacenter\", \"region\") {\n\
+              Node_L(l, \"Left\") {\n\
+                Container(a, \"App\")\n\
+              }\n\
+              Node_R(r, \"Right\") {\n\
+                Container(b, \"Db\")\n\
+              }\n\
+            }\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.elements.len(), 1);
+        let dc = &d.elements[0];
+        assert!(matches!(dc.boundary_kind, Some(C4BoundaryKind::Deployment)));
+        assert_eq!(dc.alias, "dc");
+        assert_eq!(dc.label, "Datacenter");
+        assert_eq!(dc.members.len(), 2);
+        assert!(dc
+            .members
+            .iter()
+            .all(|m| matches!(m.boundary_kind, Some(C4BoundaryKind::Deployment))));
+        assert_eq!(dc.members[0].alias, "l");
+        assert_eq!(dc.members[0].members.len(), 1);
+        assert_eq!(dc.members[1].alias, "r");
+        assert_eq!(dc.members[1].members.len(), 1);
     }
 }

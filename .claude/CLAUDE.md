@@ -397,6 +397,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `$c4ShapeInRow`/`$c4BoundaryInRow` override the row-flow wrap counts
   (`flow_layout`'s `shape_in_row`/`boundary_in_row`). `C4Relation.direction`
   (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout.
+  C4Deployment's `Node(...)`/`Node_L(...)`/`Node_R(...)` boundary openers alias
+  `Deployment_Node` in `parse_boundary_open` (checked `Node_L`/`Node_R` before
+  the bare `Node` prefix), so their children nest instead of leaking to top
+  level.
 - requirementDiagram (`src/parse/requirement.rs`) accepts both relation
   directions — forward `src - kind -> dst` and reverse `dst <- kind - src`
   (endpoints swapped so `from`→`to` order, hence layout, is preserved). Kind
