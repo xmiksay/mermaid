@@ -13,7 +13,7 @@
 //!     `--`          link
 //!     `..`          dashed link
 //!     `..>`         dependency
-//!     With optional `: label`.
+//!     With optional role multiplicities (`A "1" --> "*" B`) and `: label`.
 
 use std::collections::HashMap;
 
@@ -153,14 +153,18 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if let Some((tok_pos, tok, kind)) = find_relation(line) {
-            let (from, from_class) = extract_inline_class(line[..tok_pos].trim());
-            let (after, to_class) = extract_inline_class(line[tok_pos + tok.len()..].trim());
-            let (to_part, label) = match after.split_once(':') {
+            // Left end: `Class[:::style] ["card"]`.
+            let (left, from_class) = extract_inline_class(line[..tok_pos].trim());
+            let (from, from_card) = split_trailing_card(&left);
+            // Right end: `["card"] Class[:::style] [: label]`. Strip the leading
+            // multiplicity and any `:::style` before splitting the `: label`,
+            // so neither collides with the `:` separator.
+            let (right, to_card) = split_leading_card(line[tok_pos + tok.len()..].trim());
+            let (right, to_class) = extract_inline_class(right.trim());
+            let (to_clean, label) = match right.split_once(':') {
                 Some((a, b)) => (a.trim().to_string(), Some(b.trim().to_string())),
-                None => (after.trim().to_string(), None),
+                None => (right.trim().to_string(), None),
             };
-            // Strip role multiplicities like "1..n" surrounded by quotes — keep label only.
-            let to_clean = to_part.trim().trim_matches('"').to_string();
             get_class(&mut diag, &mut by_name, &from);
             get_class(&mut diag, &mut by_name, &to_clean);
             if let Some(c) = from_class {
@@ -180,6 +184,8 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
                 to: to_clean,
                 kind: normalize_direction(tok, kind),
                 label,
+                from_card,
+                to_card,
             });
             continue;
         }
@@ -330,10 +336,58 @@ fn parse_member(s: &str) -> ClassMember {
     }
 }
 
+/// Find the first byte position of `needle` in `haystack` that lies outside of
+/// any `"…"` quoted region. Cardinalities like `"1..*"` embed relation tokens
+/// (`..`), so token scanning must ignore quoted text.
+fn find_unquoted(haystack: &str, needle: &str) -> Option<usize> {
+    let bytes = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    let mut in_quote = false;
+    let mut i = 0;
+    while i + nb.len() <= bytes.len() {
+        if bytes[i] == b'"' {
+            in_quote = !in_quote;
+            i += 1;
+            continue;
+        }
+        if !in_quote && &bytes[i..i + nb.len()] == nb {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Strip a trailing `"card"` multiplicity, e.g. `Customer "1"` → (`Customer`, `1`).
+fn split_trailing_card(s: &str) -> (String, Option<String>) {
+    let s = s.trim();
+    if let Some(inner) = s.strip_suffix('"') {
+        if let Some(open) = inner.rfind('"') {
+            let card = inner[open + 1..].to_string();
+            let rest = inner[..open].trim_end().to_string();
+            return (rest, (!card.is_empty()).then_some(card));
+        }
+    }
+    (s.to_string(), None)
+}
+
+/// Strip a leading `"card"` multiplicity, e.g. `"*" Order` → (`Order`, `*`).
+fn split_leading_card(s: &str) -> (String, Option<String>) {
+    let s = s.trim();
+    if let Some(inner) = s.strip_prefix('"') {
+        if let Some(close) = inner.find('"') {
+            let card = inner[..close].to_string();
+            let rest = inner[close + 1..].trim_start().to_string();
+            return (rest, (!card.is_empty()).then_some(card));
+        }
+    }
+    (s.to_string(), None)
+}
+
 fn find_relation(line: &str) -> Option<(usize, &'static str, ClassRelationKind)> {
     let mut best: Option<(usize, &'static str, ClassRelationKind)> = None;
     for (tok, kind) in RELATIONS {
-        if let Some(pos) = line.find(tok) {
+        if let Some(pos) = find_unquoted(line, tok) {
             let candidate = (pos, *tok, *kind);
             best = match best {
                 Some((bp, bt, _)) if bp < pos => Some((bp, bt, best.unwrap().2)),
@@ -414,6 +468,44 @@ mod tests {
         assert_eq!(d.relations[0].kind, ClassRelationKind::Inheritance);
         assert_eq!(d.relations[1].kind, ClassRelationKind::Composition);
         assert_eq!(d.relations[2].kind, ClassRelationKind::Realization);
+    }
+
+    #[test]
+    fn cardinality_labels() {
+        let d = parse("classDiagram\nCustomer \"1\" --> \"*\" Order\n").unwrap();
+        assert_eq!(d.classes.len(), 2);
+        assert_eq!(d.classes[0].name, "Customer");
+        assert_eq!(d.classes[1].name, "Order");
+        let r = &d.relations[0];
+        assert_eq!(r.from, "Customer");
+        assert_eq!(r.to, "Order");
+        assert_eq!(r.from_card.as_deref(), Some("1"));
+        assert_eq!(r.to_card.as_deref(), Some("*"));
+        assert_eq!(r.kind, ClassRelationKind::Association);
+    }
+
+    #[test]
+    fn cardinality_with_range_and_label() {
+        let d = parse("classDiagram\nStudent \"1..*\" o-- \"0..1\" Course : enrolls\n").unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.from, "Student");
+        assert_eq!(r.to, "Course");
+        assert_eq!(r.from_card.as_deref(), Some("1..*"));
+        assert_eq!(r.to_card.as_deref(), Some("0..1"));
+        assert_eq!(r.label.as_deref(), Some("enrolls"));
+        assert_eq!(r.kind, ClassRelationKind::Aggregation);
+    }
+
+    #[test]
+    fn single_side_cardinality() {
+        let d = parse("classDiagram\nA \"1\" --> B\nC --> \"*\" D\n").unwrap();
+        assert_eq!(d.relations[0].from_card.as_deref(), Some("1"));
+        assert_eq!(d.relations[0].to_card, None);
+        assert_eq!(d.relations[0].to, "B");
+        assert_eq!(d.relations[1].from_card, None);
+        assert_eq!(d.relations[1].to_card.as_deref(), Some("*"));
+        assert_eq!(d.relations[1].from, "C");
+        assert_eq!(d.relations[1].to, "D");
     }
 
     #[test]

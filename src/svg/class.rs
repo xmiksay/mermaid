@@ -343,6 +343,13 @@ fn draw_relation(
         ),
     );
 
+    if let Some(card) = &rel.from_card {
+        draw_card(svg, clipped[0], clipped[1], card, theme);
+    }
+    if let Some(card) = &rel.to_card {
+        draw_card(svg, clipped[n - 1], clipped[n - 2], card, theme);
+    }
+
     if let Some(label) = &rel.label {
         let mid = midpoint(&clipped);
         let chars = label.chars().count() as f64;
@@ -362,6 +369,26 @@ fn draw_relation(
             label,
         );
     }
+}
+
+/// Draw a small multiplicity label near an edge endpoint. `end` is the point on
+/// the node boundary; `toward` is the next waypoint, giving the edge direction.
+fn draw_card(svg: &mut SvgBuilder, end: (f64, f64), toward: (f64, f64), text: &str, theme: &Theme) {
+    let fg = theme.fg;
+    let dx = toward.0 - end.0;
+    let dy = toward.1 - end.1;
+    let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+    let (ux, uy) = (dx / len, dy / len);
+    // Nudge along the edge away from the box, then perpendicular to clear the line.
+    let (px, py) = (-uy, ux);
+    let x = end.0 + ux * 14.0 + px * 9.0;
+    let y = end.1 + uy * 14.0 + py * 9.0;
+    svg.text(
+        x,
+        y + 4.0,
+        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+        text,
+    );
 }
 
 fn style_for(k: ClassRelationKind) -> (&'static str, Option<&'static str>, Option<&'static str>) {
@@ -485,6 +512,18 @@ mod tests {
         assert!(svg.contains(">Animal<"));
         assert!(svg.contains(">Dog<"));
         assert!(svg.contains("cls-triangle"));
+    }
+
+    #[test]
+    fn cardinality_labels_render_without_corrupting_names() {
+        let d = build("classDiagram\nCustomer \"1\" --> \"*\" Order\n");
+        let svg = render(&d, &Theme::default());
+        // Class names stay clean, and multiplicities appear as their own labels.
+        assert!(svg.contains(">Customer<"));
+        assert!(svg.contains(">Order<"));
+        assert!(!svg.contains("Customer &quot;"));
+        assert!(svg.contains(">1<"));
+        assert!(svg.contains(">*<"));
     }
 
     #[test]

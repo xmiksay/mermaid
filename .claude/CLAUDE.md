@@ -156,6 +156,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   renderer draws a dashed rect around the members.
 - Class `direction` (TD/BT/LR/RL) drives the transpose the same way the
   flowchart does.
+- Class relation multiplicities (`A "1" --> "*" B`) parse into
+  `ClassRelation.from_card`/`to_card`; the renderer draws them as small labels
+  near each edge end. Token scanning is quote-aware so cards like `"1..*"`
+  (which embed the `..` token) don't split the line.
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`).
 - Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
