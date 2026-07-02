@@ -278,6 +278,16 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `GanttTask.milestone` flag (any combination, e.g. `crit, milestone`). A
   milestone renders as a diamond (rotated square `<path>`) centered on the
   start date with the label beside it — duration is ignored.
+- Gantt task end is a `TaskEnd` enum (not a bare `duration_days`): `Duration`
+  (`Nd`/`Nw`/`Nh`/`Nm`), `Date` (an explicit end date — the renderer computes
+  the length from the resolved start), or `UntilId` (`until <taskId>` — ends
+  where the named task *starts*, resolved against `id_to_start_end`). `parse_end`
+  in `src/parse/gantt.rs` classifies the trailing time token; a task with a
+  single time token (`X : 24d` / `X : until id`) implies `TaskStart::AfterPrevious`.
+  `until`/end-date resolution happens in `resolve_tasks` (`src/svg/gantt.rs`),
+  so forward/unknown refs fall back to a 1-day length like `after` does.
+  Config keywords `tickInterval …`, `inclusiveEndDates`, `topAxis` are consumed
+  in `parse()` (informational only) so they don't fall through to the task path.
 - Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
