@@ -8,7 +8,7 @@
 
 use thiserror::Error;
 
-use crate::parse::{parse, Diagram, ParseError};
+use crate::parse::{parse_with_meta, Diagram, ParseError};
 
 pub use self::theme::Theme;
 
@@ -17,12 +17,14 @@ mod block;
 mod builder;
 mod c4;
 mod class;
+mod decorate;
 mod er;
 mod flowchart;
 mod gantt;
 mod gitgraph;
 mod journey;
 mod kanban;
+mod label;
 mod mindmap;
 mod packet;
 mod pie;
@@ -51,8 +53,16 @@ pub fn render(input: &str) -> Result<String, RenderError> {
 }
 
 pub fn render_with(input: &str, theme: &Theme) -> Result<String, RenderError> {
-    let d = parse(input)?;
-    render_diagram_with(&d, theme)
+    let (d, meta) = parse_with_meta(input)?;
+    // A theme named in the source preamble (frontmatter `config.theme` or an
+    // `%%{init}%%` directive) takes precedence over the caller's theme.
+    let effective = meta
+        .theme
+        .as_deref()
+        .and_then(Theme::by_name)
+        .unwrap_or(*theme);
+    let body = render_body(&d, &effective);
+    Ok(decorate::apply(body, &d, Some(&meta)))
 }
 
 pub fn render_diagram(d: &Diagram) -> Result<String, RenderError> {
@@ -60,7 +70,12 @@ pub fn render_diagram(d: &Diagram) -> Result<String, RenderError> {
 }
 
 pub fn render_diagram_with(d: &Diagram, theme: &Theme) -> Result<String, RenderError> {
-    Ok(match d {
+    let body = render_body(d, theme);
+    Ok(decorate::apply(body, d, None))
+}
+
+fn render_body(d: &Diagram, theme: &Theme) -> String {
+    match d {
         Diagram::Pie(p) => pie::render(p, theme),
         Diagram::Sequence(s) => sequence::render(s, theme),
         Diagram::Flowchart(f) => flowchart::render(f, theme),
@@ -83,5 +98,5 @@ pub fn render_diagram_with(d: &Diagram, theme: &Theme) -> Result<String, RenderE
         Diagram::Architecture(a) => architecture::render(a, theme),
         Diagram::Kanban(k) => kanban::render(k, theme),
         Diagram::Treemap(t) => treemap::render(t, theme),
-    })
+    }
 }

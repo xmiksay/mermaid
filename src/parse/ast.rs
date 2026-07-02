@@ -6,6 +6,24 @@ use std::collections::HashMap;
 /// kept in source order. Resolved to SVG attributes at render time.
 pub type Style = Vec<(String, String)>;
 
+/// Shared, diagram-agnostic metadata extracted from the source *preamble*
+/// (YAML frontmatter, `%%{init}%%` directives, and `accTitle`/`accDescr`
+/// statements) before dispatching to a per-diagram parser.
+///
+/// `title` is also copied onto the concrete diagram's own `title` field when it
+/// has one; the accessibility fields and `theme` only live here.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DiagramMeta {
+    /// `title:` from YAML frontmatter (diagram title).
+    pub title: Option<String>,
+    /// `accTitle:` — an accessible short title emitted as `<title>`.
+    pub acc_title: Option<String>,
+    /// `accDescr:` (single line or `accDescr { … }` block) — emitted as `<desc>`.
+    pub acc_descr: Option<String>,
+    /// Theme name from `%%{init: {theme: …}}%%` or frontmatter `config.theme`.
+    pub theme: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Diagram {
     Pie(PieDiagram),
@@ -153,6 +171,8 @@ pub enum ArrowKind {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FlowchartDiagram {
+    /// Diagram title from YAML frontmatter (`--- title: … ---`).
+    pub title: Option<String>,
     pub direction: FlowDirection,
     pub nodes: Vec<FlowNode>,
     pub edges: Vec<FlowEdge>,

@@ -131,3 +131,45 @@ fn real_world_pie() {
     let total: f64 = p.entries.iter().map(|e| e.value).sum();
     assert!((total - 100.0).abs() < 1e-6);
 }
+
+#[test]
+fn frontmatter_no_longer_errors_and_sets_title() {
+    // A YAML frontmatter block used to be a hard parse error.
+    let src = "---\ntitle: Release Plan\nconfig:\n  theme: forest\n---\nflowchart TD\nA --> B\n";
+    let Diagram::Flowchart(d) = parse(src).unwrap() else {
+        panic!("expected flowchart");
+    };
+    assert_eq!(d.title.as_deref(), Some("Release Plan"));
+
+    // The frontmatter `config.theme` drives the rendered theme (forest bg).
+    let svg = render(src).unwrap();
+    assert!(svg.contains(">Release Plan</text>"));
+}
+
+#[test]
+fn acc_title_and_descr_emit_title_desc_and_aria() {
+    let src = "flowchart TD\naccTitle: Accessible Title\naccDescr: A short description\nA --> B\n";
+    let svg = render(src).unwrap();
+    assert!(svg.contains("role=\"graphics-document document\""));
+    assert!(svg.contains("aria-roledescription=\"flowchart-v2\""));
+    assert!(svg.contains("<title id=\"chart-title-mermaid\">Accessible Title</title>"));
+    assert!(svg.contains("<desc id=\"chart-desc-mermaid\">A short description</desc>"));
+    assert!(svg.contains("aria-labelledby=\"chart-title-mermaid\""));
+}
+
+#[test]
+fn output_is_responsive() {
+    let svg = render("flowchart TD\nA --> B\n").unwrap();
+    assert!(svg.contains("width=\"100%\""));
+    assert!(svg.contains("style=\"max-width:"));
+    assert!(svg.contains("viewBox=\"0 0 "));
+}
+
+#[test]
+fn init_directive_selects_theme() {
+    let src = "%%{init: {'theme': 'dark'}}%%\npie\n\"A\" : 1\n";
+    // Renders without treating the directive as a diagram statement.
+    let svg = render(src).unwrap();
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.contains("aria-roledescription=\"pie\""));
+}
