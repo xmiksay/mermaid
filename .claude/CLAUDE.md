@@ -242,6 +242,14 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
   `src/parse/flowchart.rs` and rendered in `src/svg/flowchart.rs`.
+- Flowchart v11 attribute syntax `id@{ shape: …, label: … }` is handled in
+  `parse_at_node` (`src/parse/flowchart.rs`): the `@{…}` block right after a
+  node id is split into `key: value` pairs (quote-aware comma/colon split), the
+  `shape` name mapped onto a `NodeShape` by `shape_from_name` (aliases like
+  `rounded`/`diam`/`cyl`/`lean-r`/`trap-b`/`dbl-circ`/`subproc`; unknown or
+  visual-only names such as `bolt`/`hourglass`/`notch-rect` fall back to Rect),
+  and `label`/`title` set the node text. `icon`/`img` forms are dropped but
+  their `label` is preserved so content is never lost.
 - Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
