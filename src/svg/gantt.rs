@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::parse::{GanttDiagram, TaskStart, TaskStatus};
 
-use super::builder::SvgBuilder;
+use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
@@ -139,17 +139,43 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 &format!("fill=\"{fg}\" font-size=\"12\""),
                 &task.name,
             );
-            // Bar
             let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
-            let w = (r.duration / total_days) * body_w;
             let (fill, stroke) = colors_for(task.status);
-            svg.rect(
-                x,
-                y + 2.0,
-                w.max(2.0),
-                BAR_H - 4.0,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\" rx=\"3\""),
-            );
+            if task.milestone {
+                // Diamond centered on the start date; duration is ignored.
+                let cy = y + BAR_H / 2.0;
+                let rad = (BAR_H - 4.0) / 2.0;
+                svg.path(
+                    &format!(
+                        "M {} {} L {} {} L {} {} L {} {} Z",
+                        fnum(x),
+                        fnum(cy - rad),
+                        fnum(x + rad),
+                        fnum(cy),
+                        fnum(x),
+                        fnum(cy + rad),
+                        fnum(x - rad),
+                        fnum(cy),
+                    ),
+                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\""),
+                );
+                svg.text(
+                    x + rad + 4.0,
+                    cy + 4.0,
+                    &format!("fill=\"{fg}\" font-size=\"11\""),
+                    &task.name,
+                );
+            } else {
+                // Bar
+                let w = (r.duration / total_days) * body_w;
+                svg.rect(
+                    x,
+                    y + 2.0,
+                    w.max(2.0),
+                    BAR_H - 4.0,
+                    &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\" rx=\"3\""),
+                );
+            }
             y += BAR_H + ROW_GAP;
             flat_idx += 1;
         }
@@ -323,6 +349,15 @@ mod tests {
         let d = build("gantt\nsection S\nA : a, 2026-01-01, 5d\nB : after a, 3d\n");
         let resolved = resolve_tasks(&d);
         assert!(resolved[1].start_day >= resolved[0].start_day + resolved[0].duration - 1e-6);
+    }
+
+    #[test]
+    fn milestone_renders_diamond_not_bar() {
+        let d = build("gantt\nsection S\nKickoff : milestone, 2026-01-01, 0d\n");
+        let svg = render(&d, &Theme::default());
+        // Diamond is drawn as a <path> with a Z-closed rhombus, no bar <rect>.
+        assert!(svg.contains("<path"));
+        assert!(svg.contains(">Kickoff<"));
     }
 
     #[test]

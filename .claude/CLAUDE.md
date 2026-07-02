@@ -246,6 +246,11 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   attribute (`string name "the customer name"`).
 - Gantt `excludes` (weekends) and `todayMarker YYYY-MM-DD` are in the AST;
   the renderer draws the today marker as a vertical red line.
+- Gantt task tags are consumed as a leading run in `parse_task`: `active`/
+  `done`/`crit` set `TaskStatus`, `milestone` sets the orthogonal
+  `GanttTask.milestone` flag (any combination, e.g. `crit, milestone`). A
+  milestone renders as a diamond (rotated square `<path>`) centered on the
+  start date with the label beside it — duration is ignored.
 - Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
