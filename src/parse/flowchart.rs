@@ -36,9 +36,16 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
     let mut subgraph_stack: Vec<usize> = Vec::new();
     let mut subgraph_auto_id = 0usize;
 
-    for (idx, raw) in input.lines().enumerate() {
-        let line_no = idx + 1;
-        let line = strip_comment(raw).trim();
+    // A `;` terminates a statement anywhere a newline would (upstream grammar),
+    // so flatten each source line into its `;`-separated statements. This lets
+    // `graph TD;` and `graph LR; A-->B` parse (header + statements on one line).
+    let statements = input.lines().enumerate().flat_map(|(idx, raw)| {
+        split_semicolons(strip_comment(raw))
+            .into_iter()
+            .map(move |s| (idx + 1, s.trim()))
+    });
+
+    for (line_no, line) in statements {
         if line.is_empty() {
             continue;
         }
@@ -124,6 +131,36 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
         }
     }
     Ok(diag)
+}
+
+/// Split a comment-stripped line into statements at top-level `;`. A semicolon
+/// only separates when it is not inside a quoted string, a shape bracket, or an
+/// edge-label `|…|` run, so `#59;` entity codes and labels like `["a;b"]` stay
+/// intact.
+fn split_semicolons(line: &str) -> Vec<&str> {
+    if !line.contains(';') {
+        return vec![line];
+    }
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let mut in_quote = false;
+    let mut in_pipe = false;
+    let mut start = 0;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' if !in_pipe => in_quote = !in_quote,
+            '|' if !in_quote => in_pipe = !in_pipe,
+            '[' | '(' | '{' if !in_quote && !in_pipe => depth += 1,
+            ']' | ')' | '}' if !in_quote && !in_pipe => depth -= 1,
+            ';' if !in_quote && !in_pipe && depth <= 0 => {
+                out.push(&line[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&line[start..]);
+    out
 }
 
 fn parse_header(line: &str, diag: &mut FlowchartDiagram, line_no: usize) -> Result<(), ParseError> {
@@ -1443,5 +1480,41 @@ mod tests {
             d.edge_styles[&0],
             vec![("stroke".to_string(), "#abc".to_string())]
         );
+    }
+
+    #[test]
+    fn semicolon_after_header() {
+        let d = parse("graph TD;\nA-->B\n").unwrap();
+        assert_eq!(d.direction, FlowDirection::TopDown);
+        assert_eq!(d.edges.len(), 1);
+    }
+
+    #[test]
+    fn semicolon_terminated_statement() {
+        let d = parse("graph TD\nA-->B;\nB-->C;\n").unwrap();
+        assert_eq!(d.nodes.len(), 3);
+        assert_eq!(d.edges.len(), 2);
+    }
+
+    #[test]
+    fn statements_on_header_line() {
+        let d = parse("graph LR; A-->B; B-->C\n").unwrap();
+        assert_eq!(d.direction, FlowDirection::LeftRight);
+        assert_eq!(d.nodes.len(), 3);
+        assert_eq!(d.edges.len(), 2);
+    }
+
+    #[test]
+    fn semicolon_inside_label_is_kept() {
+        let d = parse("graph TD;\nA[\"a;b\"]-->B;\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(node(&d, "A").text, "a;b");
+    }
+
+    #[test]
+    fn semicolon_in_pipe_label_is_kept() {
+        let d = parse("graph TD;\nA-->|a;b|B;\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edges[0].label.as_deref(), Some("a;b"));
     }
 }
