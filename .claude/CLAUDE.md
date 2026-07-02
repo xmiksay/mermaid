@@ -150,6 +150,16 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 - `A & B --> C & D` produces 4 edges (cross product) — multi-source/target.
 - Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
   nesting. The renderer draws a dashed bounding rect around the group.
+  - `direction X` inside a subgraph body fills `Subgraph.direction`. The
+    renderer works in screen space and, for a cluster whose flow axis differs
+    from the diagram's, transposes just that cluster's members (and their
+    internal edges) about the cluster centre (`apply_local_directions`) — a TD
+    chain inside a `direction LR` subgraph becomes a horizontal row.
+  - An edge endpoint naming a subgraph id refers to the cluster, not a node.
+    The parser drops any node materialized for a subgraph id (forward ref or
+    edge target); the renderer routes such an edge as a straight connector
+    clipped to the cluster bounding box (`endpoint_clip` → `EndClip` with a
+    `None` shape → rectangle clip).
 - Flowchart `click <id>` sets `FlowNode.click` (`ClickAction::Href` for
   `"url"`/`href` forms, `ClickAction::Callback` for a bare name/`call fn()`).
   The renderer wraps hyperlink nodes in `<a href>` and callback nodes in a

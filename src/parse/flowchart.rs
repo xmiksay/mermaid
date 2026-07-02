@@ -17,7 +17,7 @@
 //!   * `click <id> …` binds a hyperlink or JS callback to a node.
 //!   * Skipped quietly: `style`, `classDef`, `class`, `linkStyle`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::ast::{
     ClickAction, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram,
@@ -84,7 +84,14 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             }
             continue;
         }
-        if line.starts_with("direction ") {
+        if let Some(rest) = line.strip_prefix("direction ") {
+            // A `direction X` inside a subgraph body overrides the flow
+            // direction for that cluster's members; ignored at top level.
+            if let Some(&parent) = subgraph_stack.last() {
+                if let Some(dir) = parse_direction(rest.trim()) {
+                    diag.subgraphs[parent].direction = Some(dir);
+                }
+            }
             continue;
         }
 
@@ -100,6 +107,18 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
 
     if !header_seen {
         return Err(ParseError::Empty);
+    }
+
+    // An edge endpoint naming a subgraph refers to the cluster, not a node.
+    // Drop any node materialized for such an id (whether from a forward
+    // reference before the `subgraph` line or an edge to it); the edge keeps
+    // its string endpoint and the renderer routes it to the cluster box.
+    let sub_ids: HashSet<String> = diag.subgraphs.iter().map(|s| s.id.clone()).collect();
+    if !sub_ids.is_empty() {
+        diag.nodes.retain(|n| !sub_ids.contains(&n.id));
+        for s in &mut diag.subgraphs {
+            s.node_ids.retain(|id| !sub_ids.contains(id));
+        }
     }
     Ok(diag)
 }
@@ -998,6 +1017,35 @@ mod tests {
         assert!(s1.node_ids.contains(&"B".to_string()) || s1.node_ids.contains(&"C".to_string()));
         assert!(s2.node_ids.contains(&"D".to_string()) || s2.node_ids.contains(&"C".to_string()));
         assert!(s1.child_subgraph_ids.contains(&"S2".to_string()));
+    }
+
+    #[test]
+    fn subgraph_direction_parsed() {
+        let d = parse("flowchart TD\nsubgraph S\ndirection LR\nA --> B\nend\n").unwrap();
+        let s = d.subgraphs.iter().find(|s| s.id == "S").unwrap();
+        assert_eq!(s.direction, Some(FlowDirection::LeftRight));
+        // Top-level `direction` (outside any subgraph) stays a no-op.
+        let d2 = parse("flowchart TD\ndirection LR\nA --> B\n").unwrap();
+        assert_eq!(d2.direction, FlowDirection::TopDown);
+    }
+
+    #[test]
+    fn edge_to_subgraph_id_no_phantom_node() {
+        let d = parse("flowchart TD\nsubgraph SG\nA --> B\nend\nC --> SG\n").unwrap();
+        // No node materialized for the subgraph id; the edge keeps its endpoint.
+        assert!(!d.nodes.iter().any(|n| n.id == "SG"));
+        assert!(d.edges.iter().any(|e| e.from == "C" && e.to == "SG"));
+        for id in ["A", "B", "C"] {
+            assert!(d.nodes.iter().any(|n| n.id == id), "missing node {id}");
+        }
+    }
+
+    #[test]
+    fn edge_to_subgraph_id_forward_ref_no_phantom() {
+        // The edge references the subgraph before its `subgraph` line appears.
+        let d = parse("flowchart TD\nC --> SG\nsubgraph SG\nA --> B\nend\n").unwrap();
+        assert!(!d.nodes.iter().any(|n| n.id == "SG"));
+        assert!(d.edges.iter().any(|e| e.to == "SG"));
     }
 
     #[test]
