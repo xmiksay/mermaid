@@ -15,6 +15,7 @@ src/
 │   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError, ast re-export
 │   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
+│   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing
 │   └── {pie,sequence,flowchart,state,class,er,gantt,
 │        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
 │        gitgraph,requirement,c4,block,architecture,kanban,treemap,zenuml}.rs
@@ -23,7 +24,8 @@ src/
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
 │   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
-│   ├── theme.rs     Theme struct + default/dark/forest/neutral
+│   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*
+│   ├── style.rs     resolves classDef/style/linkStyle into inline fill/stroke
 │   └── {pie,sequence,flowchart,state,class,er,gantt,
 │        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
 │        gitgraph,requirement,c4,block,architecture,kanban,treemap}.rs
@@ -31,12 +33,27 @@ src/
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
 │   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
-examples/render_user.rs   small one-shot example
-tests/integration.rs      end-to-end tests; writes samples to target/test-samples/
+examples/render_user.rs        small one-shot example
+examples/gen-doc-diagrams.rs   regenerates assets/gallery.md (the rustdoc gallery)
+tests/integration.rs           end-to-end tests; writes samples to target/test-samples/
+samples/                       one `.mmd` per diagram kind, shared by benches + gallery
+assets/gallery.md              rendered gallery, embedded into rustdoc via src/lib.rs
+gallery_build.rs               shared `SAMPLES` list + build helper, `include!`'d into
+                               examples/gen-doc-diagrams.rs and tests/integration.rs
 ```
 
 Cargo manifest: single `[package]`. Crate is published to crates.io as
 `mermaid-svg`.
+
+## Gallery pipeline
+
+`gallery_build.rs` is not a module — it is `include!`'d verbatim into both
+`examples/gen-doc-diagrams.rs` and `tests/integration.rs`, so its `SAMPLES`
+list (one `(stem, source)` per diagram kind) and render helper are shared.
+`cargo run --example gen-doc-diagrams` regenerates `assets/gallery.md`, which
+`src/lib.rs` embeds into the crate rustdoc with
+`#![doc = include_str!("../assets/gallery.md")]`. The `doc_gallery_up_to_date`
+integration test fails if the committed gallery drifts from the samples.
 
 ## Done
 
@@ -57,14 +74,15 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (178 tests)
+cargo test               # unit + integration + doctest (307 tests)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
 ```
 
-Bench layout: `benches/render.rs` drives criterion; one `.mmd` per diagram
-type lives in `benches/samples/`. Two groups: `parse/<kind>` (parse only)
+Bench layout: `benches/render.rs` drives criterion; it `include_str!`s the same
+top-level `samples/` `.mmd` files (one per diagram kind) used by the gallery.
+Two groups: `parse/<kind>` (parse only)
 and `render/<kind>` (parse + render to SVG). Sized inputs use realistic
 non-trivial examples (typically 10-30 lines).
 
