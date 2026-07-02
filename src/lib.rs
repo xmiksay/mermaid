@@ -10,9 +10,35 @@
 //! assert!(svg.starts_with("<svg"));
 //! ```
 //!
-//! A rendered gallery of every supported diagram type follows below
+//! # Gallery
+//!
+//! Reference output for every supported diagram type, rendered by this crate
+//! from the sources in
+//! [`samples/`](https://github.com/xmiksay/mermaid/tree/master/samples)
 //! (regenerate with `cargo run --example gen-doc-diagrams`).
-#![doc = include_str!("../assets/gallery.md")]
+#![doc = include_str!("../assets/gallery/pie.md")]
+#![doc = include_str!("../assets/gallery/sequence.md")]
+#![doc = include_str!("../assets/gallery/flowchart.md")]
+#![doc = include_str!("../assets/gallery/state.md")]
+#![doc = include_str!("../assets/gallery/class.md")]
+#![doc = include_str!("../assets/gallery/er.md")]
+#![doc = include_str!("../assets/gallery/gantt.md")]
+#![doc = include_str!("../assets/gallery/journey.md")]
+#![doc = include_str!("../assets/gallery/timeline.md")]
+#![doc = include_str!("../assets/gallery/sankey.md")]
+#![doc = include_str!("../assets/gallery/quadrant.md")]
+#![doc = include_str!("../assets/gallery/xychart.md")]
+#![doc = include_str!("../assets/gallery/radar.md")]
+#![doc = include_str!("../assets/gallery/packet.md")]
+#![doc = include_str!("../assets/gallery/mindmap.md")]
+#![doc = include_str!("../assets/gallery/gitgraph.md")]
+#![doc = include_str!("../assets/gallery/requirement.md")]
+#![doc = include_str!("../assets/gallery/c4.md")]
+#![doc = include_str!("../assets/gallery/block.md")]
+#![doc = include_str!("../assets/gallery/architecture.md")]
+#![doc = include_str!("../assets/gallery/kanban.md")]
+#![doc = include_str!("../assets/gallery/treemap.md")]
+#![doc = include_str!("../assets/gallery/zenuml.md")]
 
 mod parse;
 mod sugiyama;

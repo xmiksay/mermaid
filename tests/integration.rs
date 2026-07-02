@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use mermaid_svg::ast::{ArrowKind, ParticipantKind, SequenceItem};
 use mermaid_svg::{parse, render, Diagram, ParseError};
 
-// Provides `SAMPLES` (title, stem, source) and `build_gallery()`, shared with
+// Provides `SAMPLES` (title, stem, source) and `gallery_section()`, shared with
 // the `gen-doc-diagrams` example.
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/gallery_build.rs"));
 
@@ -29,15 +29,21 @@ fn every_sample_renders() {
     }
 }
 
-/// The committed doc gallery must match a fresh render of the samples.
+/// Each committed per-diagram gallery file must match a fresh render of its
+/// sample.
 #[test]
 fn doc_gallery_up_to_date() {
-    let current = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/gallery.md"));
-    assert_eq!(
-        build_gallery(),
-        current,
-        "assets/gallery.md is stale; regenerate with `cargo run --example gen-doc-diagrams`"
-    );
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/gallery");
+    for (title, stem, src) in SAMPLES {
+        let path = dir.join(format!("{stem}.md"));
+        let current = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read assets/gallery/{stem}.md: {e}"));
+        assert_eq!(
+            gallery_section(title, src),
+            current,
+            "assets/gallery/{stem}.md is stale; regenerate with `cargo run --example gen-doc-diagrams`"
+        );
+    }
 }
 
 #[test]
