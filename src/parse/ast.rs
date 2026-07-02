@@ -769,8 +769,27 @@ pub struct RadarDiagram {
     pub title: Option<String>,
     pub axes: Vec<RadarAxis>,
     pub curves: Vec<RadarCurve>,
+    /// Optional explicit min value; defaults to 0.
+    pub min: Option<f64>,
     /// Optional explicit max value; defaults to max observed.
     pub max: Option<f64>,
+    /// Number of graticule rings; defaults to 5.
+    pub ticks: Option<u32>,
+    /// Graticule shape (concentric circles vs polygon rings).
+    pub graticule: RadarGraticule,
+    /// Whether to draw the curve legend; `None` defaults to true.
+    pub show_legend: Option<bool>,
+}
+
+/// Shape of the radar graticule (background grid rings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum RadarGraticule {
+    /// Concentric circles (upstream default).
+    #[default]
+    Circle,
+    /// Polygon rings following the axis vertices.
+    Polygon,
 }
 
 #[derive(Debug, Clone, PartialEq)]

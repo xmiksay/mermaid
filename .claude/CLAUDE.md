@@ -379,3 +379,13 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   (`src/svg/gitgraph.rs`) sorts lanes by explicit `order` (falling back to
   insertion order) and, for `BT`, flips the commit axis (`cols - 1 - col`) so
   newer commits sit higher.
+- radar-beta (`src/parse/radar.rs`): multiple `axis` lines **accumulate**
+  (`d.axes.extend`, not assign). Option keywords `min`/`max`/`ticks`/
+  `graticule circle|polygon`/`showLegend [bool]` are consumed instead of
+  hard-erroring. A curve body is either a positional list (`{85, 90}`) or
+  `key: value` pairs (`{ Power: 85, Speed: 90 }`, detected by a `:`), the
+  latter matched to axes by id then label — order-independent, missing axes
+  default to 0. The renderer (`src/svg/radar.rs`) draws `ticks` graticule rings
+  as concentric **circles** by default (`graticule polygon` for the old polygon
+  rings) and scales curves over `[min, max]` so `min` acts as a scale offset;
+  `showLegend false` suppresses the legend.

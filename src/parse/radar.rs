@@ -7,11 +7,21 @@
 //!     title "Skills"
 //!     axis A["Power"], B["Speed"], C["Endurance"]
 //!     curve a["Athlete A"]{85, 90, 80}
-//!     curve b["Athlete B"]{75, 85, 95}
+//!     curve b["Athlete B"]{ Power: 75, Endurance: 95, Speed: 85 }
+//!     min 0
 //!     max 100
+//!     ticks 5
+//!     graticule circle
+//!     showLegend true
 //! ```
+//!
+//! `axis` statements accumulate (several `axis` lines append rather than
+//! overwrite). Curve bodies are either a positional value list or `key: value`
+//! pairs matched to axes by id/label (order-independent).
 
-use super::ast::{RadarAxis, RadarCurve, RadarDiagram};
+use std::collections::HashMap;
+
+use super::ast::{RadarAxis, RadarCurve, RadarDiagram, RadarGraticule};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
@@ -39,14 +49,32 @@ pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
         if let Some(rest) = line.strip_prefix("title") {
             d.title = Some(unquote(rest.trim()).to_string());
         } else if let Some(rest) = line.strip_prefix("axis") {
-            d.axes = parse_axis_list(rest, line_no)?;
+            d.axes.extend(parse_axis_list(rest, line_no)?);
         } else if let Some(rest) = line.strip_prefix("curve") {
-            d.curves.push(parse_curve(rest, line_no)?);
+            let curve = parse_curve(rest, &d.axes, line_no)?;
+            d.curves.push(curve);
+        } else if let Some(rest) = line.strip_prefix("showLegend") {
+            d.show_legend = Some(parse_bool(rest.trim()));
+        } else if let Some(rest) = line.strip_prefix("min") {
+            d.min = Some(parse_num(rest.trim(), "min", line_no)?);
         } else if let Some(rest) = line.strip_prefix("max") {
-            d.max = Some(rest.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid max: '{}'", rest.trim()),
+            d.max = Some(parse_num(rest.trim(), "max", line_no)?);
+        } else if let Some(rest) = line.strip_prefix("ticks") {
+            d.ticks = Some(rest.trim().parse().map_err(|_| ParseError::Syntax {
+                message: format!("invalid ticks: '{}'", rest.trim()),
                 line: line_no,
             })?);
+        } else if let Some(rest) = line.strip_prefix("graticule") {
+            d.graticule = match rest.trim() {
+                "polygon" => RadarGraticule::Polygon,
+                "circle" | "" => RadarGraticule::Circle,
+                other => {
+                    return Err(ParseError::Syntax {
+                        message: format!("invalid graticule: '{other}'"),
+                        line: line_no,
+                    })
+                }
+            };
         } else {
             return Err(ParseError::Syntax {
                 message: format!("unknown radar line: '{line}'"),
@@ -84,9 +112,9 @@ fn parse_axis_list(s: &str, line_no: usize) -> Result<Vec<RadarAxis>, ParseError
     Ok(out)
 }
 
-fn parse_curve(s: &str, line_no: usize) -> Result<RadarCurve, ParseError> {
+fn parse_curve(s: &str, axes: &[RadarAxis], line_no: usize) -> Result<RadarCurve, ParseError> {
     let s = s.trim();
-    // form: id["label"]{v1, v2, ...} or id{v1, v2, ...}
+    // form: id["label"]{v1, v2, ...} or id{v1, v2, ...} or id{ name: v, ... }
     let brace = s.find('{').ok_or_else(|| ParseError::Syntax {
         message: format!("expected '{{values}}' in curve '{s}'"),
         line: line_no,
@@ -104,12 +132,69 @@ fn parse_curve(s: &str, line_no: usize) -> Result<RadarCurve, ParseError> {
     } else {
         (head.trim().to_string(), head.trim().to_string())
     };
-    let values: Result<Vec<f64>, _> = body.split(',').map(|v| v.trim().parse::<f64>()).collect();
-    let values = values.map_err(|_| ParseError::Syntax {
-        message: format!("invalid value list: '{body}'"),
-        line: line_no,
-    })?;
+    let values = parse_curve_values(body, axes, line_no)?;
     Ok(RadarCurve { id, label, values })
+}
+
+/// Parse a curve body — either a positional value list (`85, 90, 80`) or
+/// `key: value` pairs (`Power: 85, Speed: 90`) matched to axes by id or label.
+fn parse_curve_values(
+    body: &str,
+    axes: &[RadarAxis],
+    line_no: usize,
+) -> Result<Vec<f64>, ParseError> {
+    let is_keyed = body.contains(':');
+    if !is_keyed {
+        return body
+            .split(',')
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.parse::<f64>().map_err(|_| ParseError::Syntax {
+                    message: format!("invalid value list: '{body}'"),
+                    line: line_no,
+                })
+            })
+            .collect();
+    }
+
+    let mut map: HashMap<String, f64> = HashMap::new();
+    for pair in body.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let (name, val) = pair.split_once(':').ok_or_else(|| ParseError::Syntax {
+            message: format!("expected 'name: value' in curve entry '{pair}'"),
+            line: line_no,
+        })?;
+        let name = unquote(name.trim()).to_string();
+        let val = val.trim().parse::<f64>().map_err(|_| ParseError::Syntax {
+            message: format!("invalid curve value: '{}'", val.trim()),
+            line: line_no,
+        })?;
+        map.insert(name, val);
+    }
+    Ok(axes
+        .iter()
+        .map(|ax| {
+            map.get(&ax.id)
+                .or_else(|| map.get(&ax.label))
+                .copied()
+                .unwrap_or(0.0)
+        })
+        .collect())
+}
+
+fn parse_num(s: &str, what: &str, line_no: usize) -> Result<f64, ParseError> {
+    s.parse().map_err(|_| ParseError::Syntax {
+        message: format!("invalid {what}: '{s}'"),
+        line: line_no,
+    })
+}
+
+fn parse_bool(s: &str) -> bool {
+    !matches!(s, "false" | "0" | "no")
 }
 
 fn split_top(s: &str, delim: char) -> Vec<String> {
@@ -163,5 +248,44 @@ mod tests {
     fn with_max() {
         let d = parse("radar-beta\naxis A, B\ncurve a{1, 2}\nmax 10\n").unwrap();
         assert_eq!(d.max, Some(10.0));
+    }
+
+    #[test]
+    fn multiple_axis_lines_accumulate() {
+        let d = parse("radar-beta\naxis A[\"Power\"]\naxis B[\"Speed\"]\ncurve a{1, 2}\n").unwrap();
+        assert_eq!(d.axes.len(), 2);
+        assert_eq!(d.axes[0].label, "Power");
+        assert_eq!(d.axes[1].label, "Speed");
+    }
+
+    #[test]
+    fn options_do_not_hard_error() {
+        let d = parse(
+            "radar-beta\naxis A, B\ncurve a{1, 2}\nmin 0\nmax 100\nticks 4\ngraticule polygon\nshowLegend false\n",
+        )
+        .unwrap();
+        assert_eq!(d.min, Some(0.0));
+        assert_eq!(d.max, Some(100.0));
+        assert_eq!(d.ticks, Some(4));
+        assert_eq!(d.graticule, RadarGraticule::Polygon);
+        assert_eq!(d.show_legend, Some(false));
+    }
+
+    #[test]
+    fn keyed_curve_matches_axes_by_name() {
+        // Order-independent, matched to axis ids; missing axis defaults to 0.
+        let d = parse(
+            "radar-beta\naxis a[\"Power\"], b[\"Speed\"], c[\"Endurance\"]\ncurve x{ c: 30, a: 20 }\n",
+        )
+        .unwrap();
+        assert_eq!(d.curves[0].values, vec![20.0, 0.0, 30.0]);
+    }
+
+    #[test]
+    fn keyed_curve_matches_axis_label() {
+        let d =
+            parse("radar-beta\naxis a[\"Power\"], b[\"Speed\"]\ncurve x{ Speed: 5, Power: 9 }\n")
+                .unwrap();
+        assert_eq!(d.curves[0].values, vec![9.0, 5.0]);
     }
 }
