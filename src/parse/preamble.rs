@@ -97,6 +97,8 @@ fn strip_frontmatter(lines: &[&str], meta: &mut DiagramMeta) -> usize {
         } else if in_config && indented {
             if let Some(v) = strip_prefix_ci(trimmed, "theme:") {
                 meta.theme = Some(unquote(v.trim()).to_string());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "ticketBaseUrl:") {
+                meta.ticket_base_url = Some(unquote(v.trim()).to_string());
             }
         } else {
             in_config = false;

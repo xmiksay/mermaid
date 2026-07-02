@@ -1,14 +1,17 @@
+---
+config:
+  kanban:
+    ticketBaseUrl: 'https://mermaidchart.atlassian.net/browse/#TICKET#'
+---
 kanban
-  Todo
-    [Task A]@{ assigned: 'Alice', priority: 'High' }
-    [Task B]
-    [Task C]
-  Doing
-    [Task D]@{ assigned: 'Bob', priority: 'Medium' }
-    [Task E]
-  Review
-    [Task F]@{ assigned: 'Carol' }
-  Done
-    [Task G]
-    [Task H]
-    [Task I]
+  todo[Todo]
+    id1[Create Documentation]
+    id2[Write Blog Post]@{ assigned: 'Alice', priority: 'High', ticket: MC-2037 }
+  doing[In Progress]
+    id3[Ship Kanban Renderer]@{ assigned: 'Bob', priority: 'Very High', ticket: MC-2040 }
+    id4[Review PRs]
+  review[Review]
+    id5[Design Pass]@{ assigned: 'Carol', priority: 'Low' }
+  done[Done]
+    id6[Set Up CI]
+    id7[Initial Layout]@{ priority: 'Very Low' }
