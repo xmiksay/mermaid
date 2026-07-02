@@ -119,6 +119,19 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
                 ),
             );
         }
+
+        // Upstream draws the integer percentage on each slice, at 0.75·radius
+        // along the slice's mid-angle (`labelArc` centroid, `textPosition` 0.75).
+        let mid = angle + sweep / 2.0;
+        let lr = RADIUS * 0.75;
+        let pct = (frac * 100.0).round();
+        svg.text(
+            cx + lr * mid.cos(),
+            cy + lr * mid.sin(),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\""),
+            &format!("{}%", fnum(pct)),
+        );
+
         angle = end;
     }
 
@@ -150,23 +163,15 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-fn legend_text(e: &crate::parse::PieEntry, total: f64, show_data: bool) -> String {
+/// Legend entry text. Upstream keeps legend entries to the bare label; the
+/// value is appended only under `showData` (`label [value]`). Percentages live
+/// on the slices, not the legend.
+fn legend_text(e: &crate::parse::PieEntry, _total: f64, show_data: bool) -> String {
     if show_data {
-        let pct = e.value.max(0.0) / total * 100.0;
-        format!(
-            "{} ({} | {}%)",
-            e.label,
-            fnum(e.value),
-            fnum(round_pct(pct))
-        )
+        format!("{} [{}]", e.label, fnum(e.value))
     } else {
-        let pct = e.value.max(0.0) / total * 100.0;
-        format!("{} ({}%)", e.label, fnum(round_pct(pct)))
+        e.label.clone()
     }
-}
-
-fn round_pct(v: f64) -> f64 {
-    (v * 10.0).round() / 10.0
 }
 
 fn label_len(s: &str) -> usize {
@@ -239,6 +244,27 @@ mod tests {
     }
 
     #[test]
+    fn percentage_on_slices_not_legend() {
+        // Upstream draws the percentage on each slice; legend stays bare labels.
+        let svg = render(
+            &pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]),
+            &Theme::default(),
+        );
+        assert!(svg.contains("60%"), "slice percentage rendered");
+        assert!(svg.contains("40%"));
+        assert!(svg.contains(">Chrome</text>"), "legend label bare");
+        assert!(!svg.contains("Chrome (60%)"), "no percentage in legend");
+    }
+
+    #[test]
+    fn show_data_appends_value_to_legend() {
+        let mut p = pie(vec![("Chrome", 60.0), ("Firefox", 40.0)]);
+        p.show_data = true;
+        let svg = render(&p, &Theme::default());
+        assert!(svg.contains("Chrome [60]"), "value shown with showData");
+    }
+
+    #[test]
     fn handles_full_circle() {
         // Single segment = 100%: must split into two arcs internally.
         let svg = render(&pie(vec![("All", 1.0)]), &Theme::default());
@@ -255,9 +281,9 @@ mod tests {
             &Theme::default(),
         );
         assert_eq!(svg.matches("<path").count(), 2, "tiny slice dropped");
-        assert!(svg.contains("A ("));
-        assert!(svg.contains("B ("));
-        assert!(!svg.contains("C ("), "tiny slice absent from legend");
+        assert!(svg.contains(">A</text>"));
+        assert!(svg.contains(">B</text>"));
+        assert!(!svg.contains(">C</text>"), "tiny slice absent from legend");
     }
 
     #[test]
