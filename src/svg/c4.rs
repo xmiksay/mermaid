@@ -1,12 +1,15 @@
 //! C4 diagram renderer.
 //!
 //! Layout: sugiyama layered placement driven by relations (matches upstream
-//! mermaid's dagre-based behaviour). Boundaries are drawn as a dashed outline
-//! around the bounding box of their members after layout.
+//! mermaid's dagre-based behaviour). Boundaries are drawn as an outline around
+//! the bounding box of their members after layout: dashed `7.0,7.0` for most
+//! kinds, but solid for `Deployment_Node` (matching upstream's `nodeType`
+//! special-case). Stroke is `#444444`, width 1.
 //!
-//! Relations are solid polylines following the routed waypoints from sugiyama,
-//! with an arrow head on the destination side (and on the source side for
-//! `BiRel`). Labels sit at the polyline midpoint over a translucent background.
+//! Relations are solid `#444444` quadratic Bézier curves through the routed
+//! sugiyama midpoint, with an arrow head on the destination side (and on the
+//! source side for `BiRel`). Labels sit at the curve midpoint with no
+//! background; `[techn]` renders italic below the label.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -24,6 +27,9 @@ const BOX_H: f64 = 130.0;
 
 const BOUNDARY_HDR: f64 = 28.0;
 const BOUNDARY_PAD: f64 = 20.0;
+
+/// Boundary outlines and relation lines both use upstream's `#444444`.
+const C4_LINE: &str = "#444444";
 
 pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let fg = theme.fg;
@@ -97,7 +103,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let height = (max_y + PAD).max(220.0);
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
-    let arrow_color = theme.flow_edge_stroke;
+    let arrow_color = C4_LINE;
     svg.defs_raw(&format!(
         "<marker id=\"c4-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
          markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\">\
@@ -252,15 +258,20 @@ fn shape_size(_kind: C4ElementKind) -> (f64, f64) {
 fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
     let fg = theme.fg;
     let fg_muted = theme.fg_muted;
-    let stroke = theme.flow_node_stroke;
+    // Upstream draws a `Deployment_Node` (any boundary with a `nodeType`) with a
+    // solid border and every other boundary kind dashed `7.0,7.0`.
+    let dash = if matches!(b.kind, C4BoundaryKind::Deployment) {
+        String::new()
+    } else {
+        " stroke-dasharray=\"7 7\"".to_string()
+    };
     svg.rect(
         b.x,
         b.y,
         b.w,
         b.h,
         &format!(
-            "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\" \
-             stroke-dasharray=\"6 4\" rx=\"6\""
+            "fill=\"none\" stroke=\"{C4_LINE}\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\"{dash}"
         ),
     );
     let kind = match b.kind {
@@ -270,16 +281,20 @@ fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
         C4BoundaryKind::Deployment => "Deployment Node",
         C4BoundaryKind::Generic => "Boundary",
     };
+    let label_size = theme.font_size + 2.0;
     svg.text(
         b.x + 14.0,
         b.y + 18.0,
-        &format!("fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""),
+        &format!(
+            "fill=\"{fg}\" font-size=\"{}\" font-weight=\"bold\"",
+            fnum(label_size)
+        ),
         &b.label,
     );
     svg.text(
-        b.x + b.w - 14.0,
-        b.y + 18.0,
-        &format!("text-anchor=\"end\" fill=\"{fg_muted}\" font-size=\"10\" font-style=\"italic\""),
+        b.x + 14.0,
+        b.y + 18.0 + label_size,
+        &format!("fill=\"{fg_muted}\" font-size=\"10\" font-style=\"italic\""),
         &format!("[{kind}]"),
     );
 }
@@ -557,8 +572,6 @@ fn draw_rel(
 ) {
     let fg = theme.fg;
     let fg_muted = theme.fg_muted;
-    let stroke = theme.flow_edge_stroke;
-    let label_bg = theme.flow_label_bg;
 
     let Some(&(ax, ay, aw, ah)) = pos.get(&r.from) else {
         return;
@@ -609,10 +622,11 @@ fn draw_rel(
         "marker-end=\"url(#c4-arrow)\""
     };
 
-    let path = polyline_path(&clipped);
+    // Upstream draws relations as a quadratic Bézier through the routed midpoint.
+    let path = quad_path(&clipped);
     svg.path(
         &path,
-        &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.4\" {markers}"),
+        &format!("fill=\"none\" stroke=\"{C4_LINE}\" stroke-width=\"1\" {markers}"),
     );
 
     let label = &r.label;
@@ -620,16 +634,7 @@ fn draw_rel(
     if label.is_empty() && tech.is_none() {
         return;
     }
-    let lw = label_width(label, tech).min(220.0);
-    let lh = if tech.is_some() { 30.0 } else { 18.0 };
     let (mx, my) = polyline_midpoint(&clipped);
-    svg.rect(
-        mx - lw / 2.0,
-        my - lh / 2.0,
-        lw,
-        lh,
-        &format!("fill=\"{label_bg}\" fill-opacity=\"0.5\" stroke=\"none\" rx=\"3\""),
-    );
     if let Some(t) = tech {
         svg.text(
             mx,
@@ -690,14 +695,25 @@ fn origin_translated(
     (rx, ry)
 }
 
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    for (i, (x, y)) in pts.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
-    }
-    s
+/// Quadratic Bézier from the first to the last point, bent through the routed
+/// midpoint as its control point (matching upstream's `M … Q …` rel curves).
+/// A straight two-point path collapses to a plain line.
+fn quad_path(pts: &[(f64, f64)]) -> String {
+    let start = pts[0];
+    let end = pts[pts.len() - 1];
+    let (mx, my) = polyline_midpoint(pts);
+    // Lift the control point so the curve actually passes through the midpoint at t=0.5.
+    let cx = 2.0 * mx - (start.0 + end.0) / 2.0;
+    let cy = 2.0 * my - (start.1 + end.1) / 2.0;
+    format!(
+        "M{} {} Q{} {} {} {}",
+        fnum(start.0),
+        fnum(start.1),
+        fnum(cx),
+        fnum(cy),
+        fnum(end.0),
+        fnum(end.1),
+    )
 }
 
 fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
@@ -748,13 +764,6 @@ fn clip_rect_to_edge(from: (f64, f64), center: (f64, f64), w: f64, h: f64) -> (f
     };
     let t = tx_lim.min(ty_lim);
     (center.0 + dx * t, center.1 + dy * t)
-}
-
-fn label_width(label: &str, tech: Option<&str>) -> f64 {
-    let len_label = label.chars().count();
-    let len_tech = tech.map(|t| t.chars().count() + 2).unwrap_or(0);
-    let max_chars = len_label.max(len_tech) as f64;
-    (max_chars * 5.8 + 16.0).max(60.0)
 }
 
 fn wrap_text(s: &str, max_chars: usize, max_lines: usize) -> Vec<String> {
@@ -820,6 +829,26 @@ mod tests {
             boundary_label: None,
             boundary_kind: None,
             members: vec![],
+        }
+    }
+
+    fn boundary(
+        alias: &str,
+        label: &str,
+        kind: C4BoundaryKind,
+        members: Vec<C4Element>,
+    ) -> C4Element {
+        C4Element {
+            kind: C4ElementKind::System,
+            alias: alias.into(),
+            label: label.into(),
+            descr: None,
+            technology: None,
+            external: false,
+            boundary_alias: None,
+            boundary_label: None,
+            boundary_kind: Some(kind),
+            members,
         }
     }
 
@@ -896,5 +925,69 @@ mod tests {
         let svg = render(&d, &Theme::default());
         // The connector path must not be dashed (only the boundary outline is).
         assert!(!svg.contains("stroke-dasharray=\"5 4\""));
+    }
+
+    #[test]
+    fn deployment_node_boundary_is_solid() {
+        let d = C4Diagram {
+            kind: C4Kind::Deployment,
+            title: None,
+            elements: vec![boundary(
+                "dn",
+                "Server",
+                C4BoundaryKind::Deployment,
+                vec![person("a", "A"), person("b", "B")],
+            )],
+            relations: vec![],
+        };
+        let svg = render(&d, &Theme::default());
+        // Solid border: #444444, width 1, no dasharray on the boundary rect.
+        assert!(svg.contains("stroke=\"#444444\" stroke-width=\"1\" rx=\"2.5\""));
+        assert!(!svg.contains("stroke-dasharray"));
+        assert!(svg.contains(">[Deployment Node]<"));
+    }
+
+    #[test]
+    fn generic_boundary_is_dashed_7_7() {
+        let d = C4Diagram {
+            kind: C4Kind::Context,
+            title: None,
+            elements: vec![boundary(
+                "b",
+                "Group",
+                C4BoundaryKind::System,
+                vec![person("a", "A"), person("b", "B")],
+            )],
+            relations: vec![],
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(
+            "stroke=\"#444444\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\" stroke-dasharray=\"7 7\""
+        ));
+    }
+
+    #[test]
+    fn rel_is_curved_and_unbacked() {
+        let d = C4Diagram {
+            kind: C4Kind::Context,
+            title: None,
+            elements: vec![person("a", "A"), person("b", "B")],
+            relations: vec![C4Relation {
+                from: "a".into(),
+                to: "b".into(),
+                label: "uses".into(),
+                technology: Some("HTTPS".into()),
+                direction: C4RelDirection::Default,
+                bidirectional: false,
+            }],
+        };
+        let svg = render(&d, &Theme::default());
+        // Quadratic Bézier, #444444, width 1.
+        assert!(svg.contains(" Q"));
+        assert!(svg.contains("stroke=\"#444444\" stroke-width=\"1\""));
+        // No translucent label background rect.
+        assert!(!svg.contains("fill-opacity=\"0.5\""));
+        // techn rendered italic as [HTTPS].
+        assert!(svg.contains(">[HTTPS]<"));
     }
 }
