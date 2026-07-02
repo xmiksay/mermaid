@@ -31,6 +31,9 @@ pub struct DiagramMeta {
     pub acc_descr: Option<String>,
     /// Theme name from `%%{init: {theme: …}}%%` or frontmatter `config.theme`.
     pub theme: Option<String>,
+    /// `config.kanban.ticketBaseUrl` from frontmatter — copied onto a
+    /// [`KanbanDiagram`] to build per-card ticket links.
+    pub ticket_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1205,6 +1208,9 @@ pub enum ArchSide {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct KanbanDiagram {
     pub columns: Vec<KanbanColumn>,
+    /// `kanban.ticketBaseUrl` from frontmatter config. `#TICKET#` in it is
+    /// replaced by each task's `ticket` id to build the card link.
+    pub ticket_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1220,6 +1226,7 @@ pub struct KanbanTask {
     pub text: String,
     pub assigned: Option<String>,
     pub priority: Option<String>,
+    pub ticket: Option<String>,
 }
 
 // ---- treemap ---------------------------------------------------------------
