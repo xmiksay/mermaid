@@ -30,6 +30,15 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let fg_muted = theme.fg_muted;
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
 
+    // Boundary headers extend BOUNDARY_HDR + BOUNDARY_PAD above their topmost
+    // member. Reserve that overhang above the content origin so the topmost
+    // boundary clears the title (and the canvas top when there is no title).
+    let boundary_overhang = if has_any_boundary(&d.elements) {
+        BOUNDARY_HDR + BOUNDARY_PAD
+    } else {
+        0.0
+    };
+
     let flat = flatten(&d.elements, None);
     let alias_to_id: HashMap<String, NodeId> = flat
         .iter()
@@ -61,7 +70,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let layout = layout_with(&g, &cfg).unwrap_or_default();
 
     let origin_x = PAD;
-    let origin_y = PAD + title_h;
+    let origin_y = PAD + title_h + boundary_overhang;
 
     let mut pos: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     for (i, f) in flat.iter().enumerate() {
@@ -147,6 +156,12 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
 
 struct FlatElement {
     el: C4Element,
+}
+
+fn has_any_boundary(elements: &[C4Element]) -> bool {
+    elements
+        .iter()
+        .any(|el| el.boundary_kind.is_some() || has_any_boundary(&el.members))
 }
 
 fn flatten(elements: &[C4Element], _parent: Option<String>) -> Vec<FlatElement> {
@@ -835,6 +850,63 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">User<"));
         assert!(svg.contains(">Sys<"));
+    }
+
+    fn container(alias: &str, label: &str, members: Vec<C4Element>) -> C4Element {
+        C4Element {
+            kind: C4ElementKind::Node,
+            alias: alias.into(),
+            label: label.into(),
+            descr: None,
+            technology: None,
+            external: false,
+            boundary_alias: None,
+            boundary_label: None,
+            boundary_kind: Some(C4BoundaryKind::Deployment),
+            members,
+        }
+    }
+
+    /// Regression for #5: with a title present, the topmost boundary header must
+    /// not overlap the title/subtitle text. The subtitle baseline is at PAD+38;
+    /// the boundary rect top must sit below it.
+    #[test]
+    fn boundary_clears_title() {
+        let d = C4Diagram {
+            kind: C4Kind::Deployment,
+            title: Some("Deployment".into()),
+            elements: vec![container(
+                "app06",
+                "app06",
+                vec![person("uportal", "portal")],
+            )],
+            relations: vec![],
+        };
+        let svg = render(&d, &Theme::default());
+
+        // Every boundary rect uses the dashed stroke; find its `y` and check it
+        // clears the subtitle baseline plus a small margin.
+        let subtitle_baseline = PAD + 38.0;
+        let mut checked = false;
+        for chunk in svg.split("<rect").skip(1) {
+            if !chunk.contains("stroke-dasharray=\"6 4\"") {
+                continue;
+            }
+            let y = extract_attr(chunk, "y=\"").expect("boundary rect has y");
+            assert!(
+                y > subtitle_baseline,
+                "boundary top {y} overlaps title (subtitle baseline {subtitle_baseline})"
+            );
+            checked = true;
+        }
+        assert!(checked, "expected at least one boundary rect");
+    }
+
+    fn extract_attr(s: &str, key: &str) -> Option<f64> {
+        let start = s.find(key)? + key.len();
+        let rest = &s[start..];
+        let end = rest.find('"')?;
+        rest[..end].parse().ok()
     }
 
     #[test]
