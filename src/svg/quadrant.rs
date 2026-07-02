@@ -137,12 +137,34 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     for (i, p) in d.points.iter().enumerate() {
         let px = chart_left + p.x.clamp(0.0, 1.0) * SIZE;
         let py = chart_top + (1.0 - p.y.clamp(0.0, 1.0)) * SIZE;
-        let color = theme.pie_color(i + 4);
+
+        // Resolve styling: class defaults first, then per-point overrides.
+        let class = p.class_name.as_deref().and_then(|name| d.classes.get(name));
+        let radius = p
+            .radius
+            .or_else(|| class.and_then(|c| c.radius))
+            .unwrap_or(6.0);
+        let fill = p
+            .color
+            .clone()
+            .or_else(|| class.and_then(|c| c.color.clone()))
+            .unwrap_or_else(|| theme.pie_color(i + 4).to_string());
+        let stroke = p
+            .stroke_color
+            .clone()
+            .or_else(|| class.and_then(|c| c.stroke_color.clone()))
+            .unwrap_or_else(|| "#fff".to_string());
+        let stroke_width = p
+            .stroke_width
+            .clone()
+            .or_else(|| class.and_then(|c| c.stroke_width.clone()))
+            .unwrap_or_else(|| "1.5".to_string());
+
         svg.circle(
             px,
             py,
-            6.0,
-            &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"1.5\""),
+            radius,
+            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\""),
         );
         svg.text(
             px + 9.0,
@@ -176,12 +198,40 @@ mod tests {
                 label: "A".into(),
                 x: 0.3,
                 y: 0.6,
+                radius: None,
+                color: None,
+                stroke_color: None,
+                stroke_width: None,
+                class_name: None,
             }],
+            classes: Default::default(),
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Chart<"));
         assert!(svg.contains(">A<"));
         assert!(svg.contains(">Q1<"));
+    }
+
+    #[test]
+    fn honors_radius_and_color() {
+        let d = QuadrantDiagram {
+            points: vec![QuadrantPoint {
+                label: "A".into(),
+                x: 0.3,
+                y: 0.6,
+                radius: Some(12.0),
+                color: Some("#ff0000".into()),
+                stroke_color: Some("#00ff00".into()),
+                stroke_width: Some("3px".into()),
+                class_name: None,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("r=\"12\""));
+        assert!(svg.contains("fill=\"#ff0000\""));
+        assert!(svg.contains("stroke=\"#00ff00\""));
+        assert!(svg.contains("stroke-width=\"3px\""));
     }
 }

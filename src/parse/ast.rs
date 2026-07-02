@@ -623,6 +623,8 @@ pub struct QuadrantDiagram {
     pub q3: Option<String>,
     pub q4: Option<String>,
     pub points: Vec<QuadrantPoint>,
+    /// `classDef <name> …` style definitions, referenced by `:::name`.
+    pub classes: HashMap<String, QuadrantStyle>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -630,6 +632,22 @@ pub struct QuadrantPoint {
     pub label: String,
     pub x: f64,
     pub y: f64,
+    /// Third array value `[x, y, r]` or inline `radius:` — the bubble radius.
+    pub radius: Option<f64>,
+    pub color: Option<String>,
+    pub stroke_color: Option<String>,
+    pub stroke_width: Option<String>,
+    /// `:::name` reference into `QuadrantDiagram::classes`.
+    pub class_name: Option<String>,
+}
+
+/// Per-point styling shared by inline attributes and `classDef` definitions.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuadrantStyle {
+    pub radius: Option<f64>,
+    pub color: Option<String>,
+    pub stroke_color: Option<String>,
+    pub stroke_width: Option<String>,
 }
 
 // ---- xychart ---------------------------------------------------------------
