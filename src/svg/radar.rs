@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use crate::parse::RadarDiagram;
+use crate::parse::{RadarDiagram, RadarGraticule};
 
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
@@ -45,36 +45,43 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
         return svg.finish();
     }
 
+    let min = d.min.unwrap_or(0.0);
     let max = d.max.unwrap_or_else(|| {
         d.curves
             .iter()
             .flat_map(|c| c.values.iter().copied())
-            .fold(0.0_f64, f64::max)
-            .max(1.0)
+            .fold(min, f64::max)
     });
+    // Guard against a zero/negative span so the scale stays finite.
+    let span = (max - min).max(1.0);
 
     let angle =
         |i: usize| -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / n as f64;
 
-    // Gridlines (5 rings).
-    for ring in 1..=5 {
-        let r = RADIUS * (ring as f64 / 5.0);
-        let mut path = String::new();
-        for i in 0..n {
-            let a = angle(i);
-            let x = cx + r * a.cos();
-            let y = cy + r * a.sin();
-            if i == 0 {
-                let _ = write!(path, "M{} {}", fnum(x), fnum(y));
-            } else {
-                let _ = write!(path, "L{} {}", fnum(x), fnum(y));
+    // Gridlines: `ticks` rings, drawn as concentric circles (default) or as
+    // polygon rings following the axis vertices.
+    let ticks = d.ticks.unwrap_or(5).max(1);
+    for ring in 1..=ticks {
+        let r = RADIUS * (ring as f64 / ticks as f64);
+        let grid_attrs = format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1\"");
+        match d.graticule {
+            RadarGraticule::Circle => svg.circle(cx, cy, r, &grid_attrs),
+            RadarGraticule::Polygon => {
+                let mut path = String::new();
+                for i in 0..n {
+                    let a = angle(i);
+                    let x = cx + r * a.cos();
+                    let y = cy + r * a.sin();
+                    if i == 0 {
+                        let _ = write!(path, "M{} {}", fnum(x), fnum(y));
+                    } else {
+                        let _ = write!(path, "L{} {}", fnum(x), fnum(y));
+                    }
+                }
+                path.push('Z');
+                svg.path(&path, &grid_attrs);
             }
         }
-        path.push('Z');
-        svg.path(
-            &path,
-            &format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1\""),
-        );
     }
 
     // Spokes + labels.
@@ -107,8 +114,8 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
         let color = theme.pie_color(ci);
         let mut path = String::new();
         for i in 0..n {
-            let v = curve.values.get(i).copied().unwrap_or(0.0).max(0.0);
-            let r = RADIUS * (v / max).min(1.0);
+            let v = curve.values.get(i).copied().unwrap_or(min);
+            let r = RADIUS * ((v - min) / span).clamp(0.0, 1.0);
             let a = angle(i);
             let x = cx + r * a.cos();
             let y = cy + r * a.sin();
@@ -127,7 +134,10 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
         );
     }
 
-    // Legend.
+    // Legend (default on; `showLegend false` suppresses it).
+    if !d.show_legend.unwrap_or(true) {
+        return svg.finish();
+    }
     let lx = PAD + chart_d + 20.0;
     for (ci, curve) in d.curves.iter().enumerate() {
         let color = theme.pie_color(ci);
@@ -173,10 +183,67 @@ mod tests {
                 values: vec![3.0, 4.0, 2.0],
             }],
             max: Some(5.0),
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Power<"));
         assert!(svg.contains(">A<"));
+    }
+
+    #[test]
+    fn default_graticule_is_circles() {
+        let d = RadarDiagram {
+            axes: vec![
+                RadarAxis {
+                    id: "a".into(),
+                    label: "A".into(),
+                },
+                RadarAxis {
+                    id: "b".into(),
+                    label: "B".into(),
+                },
+                RadarAxis {
+                    id: "c".into(),
+                    label: "C".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Default graticule draws concentric circles, not polygon rings.
+        assert!(svg.contains("<circle"));
+    }
+
+    #[test]
+    fn show_legend_false_omits_swatches() {
+        let base = RadarDiagram {
+            axes: vec![
+                RadarAxis {
+                    id: "a".into(),
+                    label: "A".into(),
+                },
+                RadarAxis {
+                    id: "b".into(),
+                    label: "B".into(),
+                },
+            ],
+            curves: vec![RadarCurve {
+                id: "x".into(),
+                label: "Legendary".into(),
+                values: vec![1.0, 2.0],
+            }],
+            ..Default::default()
+        };
+        let with_legend = render(&base, &Theme::default());
+        let without = render(
+            &RadarDiagram {
+                show_legend: Some(false),
+                ..base
+            },
+            &Theme::default(),
+        );
+        assert!(with_legend.contains(">Legendary<"));
+        assert!(!without.contains(">Legendary<"));
     }
 }
