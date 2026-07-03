@@ -44,6 +44,9 @@ pub struct Theme {
     /// Border stroke of a flowchart/subgraph cluster frame.
     pub flow_cluster_stroke: Str,
     pub pie_palette: &'static [&'static str],
+    /// Optional `quadrant{1..4}Fill` overrides (`themeVariables`), indexed by
+    /// quadrant number minus one. `None` falls back to the pie palette.
+    pub quadrant_fills: [Option<Str>; 4],
     /// CSS `font-family` applied to the root `<svg>`; cascades to all text.
     pub font_family: Str,
     /// Base `font-size` (px) on the root `<svg>`; individual labels may
@@ -77,6 +80,7 @@ impl Theme {
             flow_cluster_fill: Cow::Borrowed("#ffffde"),
             flow_cluster_stroke: Cow::Borrowed("#aaaa33"),
             pie_palette: &PALETTE_DEFAULT,
+            quadrant_fills: [None, None, None, None],
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -104,6 +108,7 @@ impl Theme {
             flow_cluster_fill: Cow::Borrowed("#2A2A3C"),
             flow_cluster_stroke: Cow::Borrowed("#9A9ABF"),
             pie_palette: &PALETTE_DARK,
+            quadrant_fills: [None, None, None, None],
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -131,6 +136,7 @@ impl Theme {
             flow_cluster_fill: Cow::Borrowed("#E4F0E4"),
             flow_cluster_stroke: Cow::Borrowed("#4E8A4E"),
             pie_palette: &PALETTE_FOREST,
+            quadrant_fills: [None, None, None, None],
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -158,6 +164,7 @@ impl Theme {
             flow_cluster_fill: Cow::Borrowed("#F4F4F4"),
             flow_cluster_stroke: Cow::Borrowed("#AAAAAA"),
             pie_palette: &PALETTE_NEUTRAL,
+            quadrant_fills: [None, None, None, None],
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -176,6 +183,21 @@ impl Theme {
 
     pub fn pie_color(&self, i: usize) -> &'static str {
         self.pie_palette[i % self.pie_palette.len()]
+    }
+
+    /// Fill for quadrant `quadrant` (1-based). Returns the `quadrant{N}Fill`
+    /// `themeVariables` override if set, else the palette color at
+    /// `palette_index` (the two differ because the quadrant-to-palette mapping
+    /// is not 1:1).
+    pub fn quadrant_fill(&self, quadrant: usize, palette_index: usize) -> &str {
+        match self
+            .quadrant_fills
+            .get(quadrant - 1)
+            .and_then(Option::as_deref)
+        {
+            Some(c) => c,
+            None => self.pie_color(palette_index),
+        }
     }
 
     /// Override the root `font-family` (e.g. `"Inter, sans-serif"`).
@@ -239,6 +261,19 @@ impl Theme {
         }
         if let Some(v) = get("clusterBorder") {
             self.flow_cluster_stroke = own(v);
+        }
+        for (i, key) in [
+            "quadrant1Fill",
+            "quadrant2Fill",
+            "quadrant3Fill",
+            "quadrant4Fill",
+        ]
+        .iter()
+        .enumerate()
+        {
+            if let Some(v) = get(key) {
+                self.quadrant_fills[i] = Some(own(v));
+            }
         }
         if let Some(v) = get("fontFamily") {
             self.font_family = own(v);
@@ -307,6 +342,20 @@ mod tests {
         assert_eq!(t.arrow_stroke, "#00ff00");
         assert_eq!(t.font_family, "Courier");
         assert_eq!(t.font_size, 20.0);
+    }
+
+    #[test]
+    fn quadrant_fill_variables_override_palette() {
+        let mut t = Theme::default_theme();
+        // Unset quadrants fall back to their palette index.
+        assert_eq!(t.quadrant_fill(1, 1), t.pie_color(1));
+        let mut vars = BTreeMap::new();
+        vars.insert("quadrant1Fill".to_string(), "#ff0000".to_string());
+        vars.insert("quadrant3Fill".to_string(), "#00ff00".to_string());
+        t.apply_theme_variables(&vars);
+        assert_eq!(t.quadrant_fill(1, 1), "#ff0000");
+        assert_eq!(t.quadrant_fill(3, 2), "#00ff00");
+        assert_eq!(t.quadrant_fill(2, 0), t.pie_color(0));
     }
 
     #[test]

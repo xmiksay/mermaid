@@ -315,6 +315,15 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.pie_text_position = get("pie.textPosition").as_deref().and_then(parse_number);
     meta.pie_donut_hole = get("pie.donutHole").as_deref().and_then(parse_number);
     meta.pie_legend_position = get("pie.legendPosition");
+    meta.quadrant_chart_width = get("quadrantChart.chartWidth")
+        .as_deref()
+        .and_then(parse_dim);
+    meta.quadrant_chart_height = get("quadrantChart.chartHeight")
+        .as_deref()
+        .and_then(parse_dim);
+    meta.quadrant_point_radius = get("quadrantChart.pointRadius")
+        .as_deref()
+        .and_then(parse_dim);
 
     for (k, v) in &meta.config {
         if let Some(name) = k.strip_prefix("themeVariables.") {
@@ -533,6 +542,15 @@ mod tests {
         let (m, _) = strip(src);
         assert_eq!(m.git_graph.main_branch_name.as_deref(), Some("trunk"));
         assert_eq!(m.git_graph.show_branches, Some(false));
+    }
+
+    #[test]
+    fn quadrant_chart_config() {
+        let src = "---\nconfig:\n  quadrantChart:\n    chartWidth: 300\n    chartHeight: 320\n    pointRadius: 10\n---\nquadrantChart\nA: [0.3, 0.6]\n";
+        let (m, _) = strip(src);
+        assert_eq!(m.quadrant_chart_width, Some(300.0));
+        assert_eq!(m.quadrant_chart_height, Some(320.0));
+        assert_eq!(m.quadrant_point_radius, Some(10.0));
     }
 
     #[test]

@@ -275,7 +275,16 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `stroke-width:` attributes and a `:::class` ref (resolved against
   `QuadrantDiagram::classes`, filled from top-level `classDef <name> …` lines)
   set the rest. Inline attrs override the array radius and the class default;
-  the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
+  the renderer falls back to the config `pointRadius` (default `r=6`), the
+  palette fill, and a white 1.5px stroke. `config.quadrantChart.chartWidth`/
+  `chartHeight`/`pointRadius` (frontmatter/`%%{init}%%`) flow through the
+  preamble → `DiagramMeta.quadrant_chart_width`/`_height`/`quadrant_point_radius`
+  → copied onto `QuadrantDiagram.chart_width`/`chart_height`/`point_radius` in
+  `parse_with_meta`; the renderer sizes the plot from them (defaulting to the
+  460 square). The `quadrant{1..4}Fill` themeVariables override each quadrant's
+  background tint — `Theme.quadrant_fills` (`[Option<Str>; 4]`, filled by
+  `apply_theme_variables`) with `Theme::quadrant_fill(quadrant, palette_index)`
+  falling back to the pie palette when unset.
 - Sankey nodes render their **throughput value** after the name
   (`Name\n<prefix>42<suffix>`, upstream `showValues` — on by default; the value
   is the node's `max(in, out)` flow, wrapped by `config.sankey.prefix`/`suffix`;

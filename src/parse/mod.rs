@@ -191,6 +191,17 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let Diagram::Radar(r) = &mut diagram {
         apply_radar_config(r, &meta.config);
     }
+    if let Diagram::Quadrant(q) = &mut diagram {
+        if meta.quadrant_chart_width.is_some() {
+            q.chart_width = meta.quadrant_chart_width;
+        }
+        if meta.quadrant_chart_height.is_some() {
+            q.chart_height = meta.quadrant_chart_height;
+        }
+        if meta.quadrant_point_radius.is_some() {
+            q.point_radius = meta.quadrant_point_radius;
+        }
+    }
     Ok((diagram, meta))
 }
 

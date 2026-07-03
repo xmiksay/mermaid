@@ -103,6 +103,12 @@ pub struct QuadrantDiagram {
     pub points: Vec<QuadrantPoint>,
     /// `classDef <name> …` style definitions, referenced by `:::name`.
     pub classes: HashMap<String, QuadrantStyle>,
+    /// `config.quadrantChart.chartWidth` override for the plot square width.
+    pub chart_width: Option<f64>,
+    /// `config.quadrantChart.chartHeight` override for the plot square height.
+    pub chart_height: Option<f64>,
+    /// `config.quadrantChart.pointRadius` — default scatter-point radius.
+    pub point_radius: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

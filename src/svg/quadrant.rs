@@ -9,14 +9,21 @@ use super::theme::Theme;
 const PAD: f64 = 40.0;
 const SIZE: f64 = 460.0;
 const TITLE_GAP: f64 = 32.0;
+/// Default scatter-point radius when neither the point nor config sets one.
+const POINT_RADIUS: f64 = 6.0;
 
 pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let fg_muted = &theme.fg_muted;
 
+    // `config.quadrantChart.chartWidth`/`chartHeight` override the plot size.
+    let chart_w = d.chart_width.unwrap_or(SIZE);
+    let chart_h = d.chart_height.unwrap_or(SIZE);
+    let default_radius = d.point_radius.unwrap_or(POINT_RADIUS);
+
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
-    let width = PAD * 2.0 + SIZE + 60.0;
-    let height = PAD * 2.0 + SIZE + title_h + 30.0;
+    let width = PAD * 2.0 + chart_w + 60.0;
+    let height = PAD * 2.0 + chart_h + title_h + 30.0;
     let chart_left = PAD + 30.0;
     let chart_top = PAD + title_h;
 
@@ -31,42 +38,50 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
         );
     }
 
-    let half = SIZE / 2.0;
-    // Quadrant backgrounds + labels (q2 top-left, q1 top-right, q3 bottom-left, q4 bottom-right).
+    let half_w = chart_w / 2.0;
+    let half_h = chart_h / 2.0;
+    // Quadrant backgrounds + labels (q2 top-left, q1 top-right, q3 bottom-left,
+    // q4 bottom-right). Fill comes from the `quadrant{N}Fill` themeVariable when
+    // set, else the palette index the quadrant historically used.
     let qrects = [
-        (d.q2.as_deref(), chart_left, chart_top, theme.pie_color(0)),
+        (
+            d.q2.as_deref(),
+            chart_left,
+            chart_top,
+            theme.quadrant_fill(2, 0),
+        ),
         (
             d.q1.as_deref(),
-            chart_left + half,
+            chart_left + half_w,
             chart_top,
-            theme.pie_color(1),
+            theme.quadrant_fill(1, 1),
         ),
         (
             d.q3.as_deref(),
             chart_left,
-            chart_top + half,
-            theme.pie_color(2),
+            chart_top + half_h,
+            theme.quadrant_fill(3, 2),
         ),
         (
             d.q4.as_deref(),
-            chart_left + half,
-            chart_top + half,
-            theme.pie_color(3),
+            chart_left + half_w,
+            chart_top + half_h,
+            theme.quadrant_fill(4, 3),
         ),
     ];
     for (label, x, y, color) in qrects {
         svg.rect(
             x,
             y,
-            half,
-            half,
+            half_w,
+            half_h,
             &format!(
                 "fill=\"{color}\" fill-opacity=\"0.15\" stroke=\"{fg_muted}\" stroke-width=\"1\""
             ),
         );
         if let Some(l) = label {
             svg.text(
-                x + half / 2.0,
+                x + half_w / 2.0,
                 y + 18.0,
                 &format!(
                     "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""
@@ -80,22 +95,22 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     svg.rect(
         chart_left,
         chart_top,
-        SIZE,
-        SIZE,
+        chart_w,
+        chart_h,
         &format!("fill=\"none\" stroke=\"{fg}\" stroke-width=\"1.5\""),
     );
     svg.line(
-        chart_left + half,
+        chart_left + half_w,
         chart_top,
-        chart_left + half,
-        chart_top + SIZE,
+        chart_left + half_w,
+        chart_top + chart_h,
         &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
     );
     svg.line(
         chart_left,
-        chart_top + half,
-        chart_left + SIZE,
-        chart_top + half,
+        chart_top + half_h,
+        chart_left + chart_w,
+        chart_top + half_h,
         &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
     );
 
@@ -103,15 +118,15 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     if let Some(l) = &d.x_axis_left {
         svg.text(
             chart_left,
-            chart_top + SIZE + 22.0,
+            chart_top + chart_h + 22.0,
             &format!("text-anchor=\"start\" fill=\"{fg}\" font-size=\"12\""),
             l,
         );
     }
     if let Some(r) = &d.x_axis_right {
         svg.text(
-            chart_left + SIZE,
-            chart_top + SIZE + 22.0,
+            chart_left + chart_w,
+            chart_top + chart_h + 22.0,
             &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"12\""),
             r,
         );
@@ -119,7 +134,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     if let Some(b) = &d.y_axis_bottom {
         svg.text(
             chart_left - 8.0,
-            chart_top + SIZE - 4.0,
+            chart_top + chart_h - 4.0,
             &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"12\""),
             b,
         );
@@ -135,15 +150,15 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
 
     // Points.
     for (i, p) in d.points.iter().enumerate() {
-        let px = chart_left + p.x.clamp(0.0, 1.0) * SIZE;
-        let py = chart_top + (1.0 - p.y.clamp(0.0, 1.0)) * SIZE;
+        let px = chart_left + p.x.clamp(0.0, 1.0) * chart_w;
+        let py = chart_top + (1.0 - p.y.clamp(0.0, 1.0)) * chart_h;
 
         // Resolve styling: class defaults first, then per-point overrides.
         let class = p.class_name.as_deref().and_then(|name| d.classes.get(name));
         let radius = p
             .radius
             .or_else(|| class.and_then(|c| c.radius))
-            .unwrap_or(6.0);
+            .unwrap_or(default_radius);
         let fill = p
             .color
             .clone()
@@ -204,7 +219,7 @@ mod tests {
                 stroke_width: None,
                 class_name: None,
             }],
-            classes: Default::default(),
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -233,5 +248,43 @@ mod tests {
         assert!(svg.contains("fill=\"#ff0000\""));
         assert!(svg.contains("stroke=\"#00ff00\""));
         assert!(svg.contains("stroke-width=\"3px\""));
+    }
+
+    #[test]
+    fn honors_chart_size_and_point_radius() {
+        let d = QuadrantDiagram {
+            chart_width: Some(300.0),
+            chart_height: Some(300.0),
+            point_radius: Some(10.0),
+            points: vec![QuadrantPoint {
+                label: "A".into(),
+                x: 0.0,
+                y: 0.0,
+                radius: None,
+                color: None,
+                stroke_color: None,
+                stroke_width: None,
+                class_name: None,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // width = PAD*2 + 300 + 60 = 440, height = PAD*2 + 300 + 30 = 410.
+        assert!(svg.contains("viewBox=\"0 0 440 410\""));
+        assert!(svg.contains("r=\"10\""));
+    }
+
+    #[test]
+    fn honors_quadrant_fill_theme_variables() {
+        let mut theme = Theme::default();
+        let mut vars = std::collections::BTreeMap::new();
+        vars.insert("quadrant1Fill".to_string(), "#ff0000".to_string());
+        theme.apply_theme_variables(&vars);
+        let d = QuadrantDiagram {
+            q1: Some("Q1".into()),
+            ..Default::default()
+        };
+        let svg = render(&d, &theme);
+        assert!(svg.contains("fill=\"#ff0000\""));
     }
 }
