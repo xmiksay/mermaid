@@ -7,6 +7,18 @@ pub struct GanttDiagram {
     pub axis_format: Option<String>,
     pub excludes: Vec<String>,
     pub today_marker: Option<String>,
+    /// `weekend friday|saturday` — which two days `excludes weekends` skips.
+    /// `friday` → Fri+Sat, anything else (default) → Sat+Sun.
+    pub weekend: Option<String>,
+    /// `weekday <day>` — the day the axis week starts on; aligns the first
+    /// tick when a weekly `tickInterval` is in effect.
+    pub weekday: Option<String>,
+    /// `tickInterval Nday|Nweek|Nmonth` — axis tick spacing; overrides the
+    /// automatic step picked from the total span.
+    pub tick_interval: Option<String>,
+    /// `displayMode compact` — packs parallel tasks into shared rows. Parsed
+    /// and stored; the compact layout itself is a follow-up.
+    pub display_mode: Option<String>,
     pub sections: Vec<GanttSection>,
 }
 

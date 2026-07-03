@@ -91,7 +91,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (454 tests: 440 lib + 13 integration + 1 doctest)
+cargo test               # unit + integration + doctest (462 tests: 448 lib + 13 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -424,8 +424,17 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   single time token (`X : 24d` / `X : until id`) implies `TaskStart::AfterPrevious`.
   `until`/end-date resolution happens in `resolve_tasks` (`src/svg/gantt.rs`),
   so forward/unknown refs fall back to a 1-day length like `after` does.
-  Config keywords `tickInterval …`, `inclusiveEndDates`, `topAxis` are consumed
+  Config keywords `includes …`, `inclusiveEndDates`, `topAxis` are consumed
   in `parse()` (informational only) so they don't fall through to the task path.
+- Gantt `weekend friday|saturday`, `weekday <day>`, `tickInterval Nday|Nweek|Nmonth`
+  and `displayMode[:] compact` are parsed via `strip_kw` (space- or colon-separated)
+  into `GanttDiagram.{weekend,weekday,tick_interval,display_mode}` — previously
+  `weekend`/`displayMode` hard-errored and `weekday`/`tickInterval` were dropped.
+  Honored in `src/svg/gantt.rs`: `weekend` shifts the `excludes weekends` day pair
+  (`weekend_days_for` in `gantt_date.rs`: `friday` → Fri+Sat, else Sat+Sun),
+  `tickInterval` overrides `pick_tick_step` (`parse_tick_interval` → days), and
+  `weekday` offsets the first axis tick onto that weekday (`weekday_tick_offset`).
+  `display_mode` is stored but the compact row-packing layout is a follow-up.
 - Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in

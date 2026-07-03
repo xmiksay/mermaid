@@ -83,7 +83,7 @@ flag uses the same lookup.
 | State | `stateDiagram`, `stateDiagram-v2` | composite states with parallel regions (`--`), one-line and multi-line notes |
 | Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`), notes, standalone annotations, `Name["label"]`, `click`/`link`/`callback` |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
-| Gantt | `gantt` | sections, task end as duration/end-date/`until <id>`, duration-only tasks, `excludes` (weekends), `todayMarker` |
+| Gantt | `gantt` | sections, task end as duration/end-date/`until <id>`, duration-only tasks, `excludes` (weekends), `weekend friday`, `tickInterval`, `weekday`, `todayMarker` |
 | Journey | `journey` | sections, tasks with scores and actors |
 | Timeline | `timeline` | sections, time periods with multiple events |
 | Sankey | `sankey-beta`, `sankey` | weighted source→target flows |

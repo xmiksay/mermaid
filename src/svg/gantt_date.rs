@@ -152,21 +152,31 @@ pub(crate) fn format_date(day: i64, axis_format: Option<&str>) -> String {
     out
 }
 
+/// The two weekday numbers `excludes weekends` skips for a `weekend` config:
+/// `friday` → Fri(5)+Sat(6); anything else (the upstream default) → Sat(6)+Sun(0).
+fn weekend_days_for(weekend: Option<&str>) -> [i64; 2] {
+    match weekend.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+        Some("friday") => [5, 6],
+        _ => [6, 0],
+    }
+}
+
 /// Excluded (non-working) days: weekends, named weekdays, and specific dates.
 pub(crate) struct Excludes {
-    weekends: bool,
+    /// The weekend pair when `excludes weekends` is set, else empty.
+    weekend_days: Vec<i64>,
     weekdays: Vec<i64>,
     dates: Vec<i64>,
 }
 
 impl Excludes {
-    pub(crate) fn parse(raw: &[String], date_format: Option<&str>) -> Self {
-        let mut weekends = false;
+    pub(crate) fn parse(raw: &[String], date_format: Option<&str>, weekend: Option<&str>) -> Self {
+        let mut weekend_days = Vec::new();
         let mut weekdays = Vec::new();
         let mut dates = Vec::new();
         for tok in raw {
             match tok.trim().to_ascii_lowercase().as_str() {
-                "weekends" => weekends = true,
+                "weekends" => weekend_days = weekend_days_for(weekend).to_vec(),
                 "sunday" => weekdays.push(0),
                 "monday" => weekdays.push(1),
                 "tuesday" => weekdays.push(2),
@@ -182,21 +192,19 @@ impl Excludes {
             }
         }
         Excludes {
-            weekends,
+            weekend_days,
             weekdays,
             dates,
         }
     }
 
     pub(crate) fn active(&self) -> bool {
-        self.weekends || !self.weekdays.is_empty() || !self.dates.is_empty()
+        !self.weekend_days.is_empty() || !self.weekdays.is_empty() || !self.dates.is_empty()
     }
 
     pub(crate) fn is_excluded(&self, day: i64) -> bool {
         let wd = weekday(day);
-        (self.weekends && (wd == 0 || wd == 6))
-            || self.weekdays.contains(&wd)
-            || self.dates.contains(&day)
+        self.weekend_days.contains(&wd) || self.weekdays.contains(&wd) || self.dates.contains(&day)
     }
 
     /// End day for a `start`-day task lasting `dur_days` *working* days: each
@@ -266,7 +274,7 @@ mod tests {
 
     #[test]
     fn weekends_excluded_and_stretched() {
-        let ex = Excludes::parse(&["weekends".to_string()], None);
+        let ex = Excludes::parse(&["weekends".to_string()], None, None);
         assert!(ex.active());
         // 2026-01-03 Sat and 2026-01-04 Sun are excluded.
         assert!(ex.is_excluded(days_from_civil(2026, 1, 3)));
@@ -276,5 +284,15 @@ mod tests {
         // two calendar days later than the naive Thu+5.
         let start = days_from_civil(2026, 1, 1);
         assert_eq!(ex.stretched_end(start, 5), start + 7);
+    }
+
+    #[test]
+    fn weekend_friday_shifts_the_weekend_pair() {
+        // `weekend friday` makes Fri(2026-01-02)+Sat(2026-01-03) the weekend,
+        // leaving Sun(2026-01-04) a working day.
+        let ex = Excludes::parse(&["weekends".to_string()], None, Some("friday"));
+        assert!(ex.is_excluded(days_from_civil(2026, 1, 2)));
+        assert!(ex.is_excluded(days_from_civil(2026, 1, 3)));
+        assert!(!ex.is_excluded(days_from_civil(2026, 1, 4)));
     }
 }

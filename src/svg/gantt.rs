@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::parse::{GanttDiagram, TaskEnd, TaskStart, TaskStatus};
 
 use super::builder::{fnum, SvgBuilder};
-use super::gantt_date::{format_date, parse_date, Excludes};
+use super::gantt_date::{format_date, parse_date, weekday, Excludes};
 use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
@@ -75,8 +75,14 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         axis_y + AXIS_H - 1.0,
         "stroke=\"#999\" stroke-width=\"1\"",
     );
-    let tick_step = pick_tick_step(total_days);
-    let mut tick = 0.0;
+    // `tickInterval Nday|Nweek|Nmonth` overrides the automatic step; a
+    // `weekday` sets which weekday the first tick lands on (week alignment).
+    let tick_step = d
+        .tick_interval
+        .as_deref()
+        .and_then(parse_tick_interval)
+        .unwrap_or_else(|| pick_tick_step(total_days));
+    let mut tick = weekday_tick_offset(d.weekday.as_deref(), start_day);
     while tick <= total_days + 1e-6 {
         let x = body_x + (tick / total_days) * body_w;
         svg.line(
@@ -97,7 +103,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
 
     // Excluded-day shading (weekends etc.): a light band per non-working day
     // behind the bars, matching upstream's `exclude-range` rects.
-    let excludes = Excludes::parse(&d.excludes, d.date_format.as_deref());
+    let excludes = Excludes::parse(&d.excludes, d.date_format.as_deref(), d.weekend.as_deref());
     if excludes.active() {
         let day_w = body_w / total_days;
         let first = start_day.floor() as i64;
@@ -217,7 +223,7 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
     // day counts from the Unix epoch (see `gantt_date`); `excludes` stretches
     // duration-based tasks over non-working days like upstream does.
     let df = d.date_format.as_deref();
-    let excludes = Excludes::parse(&d.excludes, df);
+    let excludes = Excludes::parse(&d.excludes, df, d.weekend.as_deref());
     let mut out: Vec<Resolved> = Vec::new();
     let mut id_to_start_end: HashMap<String, (f64, f64)> = HashMap::new();
     let mut last_end = 0.0_f64;
@@ -267,6 +273,47 @@ fn stretched_duration(start: f64, days: f64, excludes: &Excludes) -> f64 {
     let whole = days.floor() as i64;
     let end = excludes.stretched_end(start.round() as i64, whole);
     (end as f64 - start) + (days - whole as f64)
+}
+
+/// Days per tick for a `tickInterval` value like `1day`, `2week`, `1month`
+/// (also the bare `1d`/`1w` units). Returns `None` for an unrecognized unit.
+fn parse_tick_interval(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let split = s.find(|c: char| !c.is_ascii_digit())?;
+    let n: f64 = s[..split].parse().ok()?;
+    let mult = match s[split..].trim().to_ascii_lowercase().as_str() {
+        "d" | "day" | "days" => 1.0,
+        "w" | "week" | "weeks" => 7.0,
+        "month" | "months" => 30.0,
+        _ => return None,
+    };
+    Some((n * mult).max(1.0))
+}
+
+/// Offset (in days from `start_day`) of the first axis tick so it lands on the
+/// `weekday`-named day; `0.0` when no weekday is set or it's unrecognized.
+fn weekday_tick_offset(weekday_name: Option<&str>, start_day: f64) -> f64 {
+    let Some(target) = weekday_name.and_then(weekday_number) else {
+        return 0.0;
+    };
+    let start = start_day.round() as i64;
+    (0..7)
+        .find(|o| weekday(start + o) == target)
+        .map(|o| o as f64)
+        .unwrap_or(0.0)
+}
+
+fn weekday_number(name: &str) -> Option<i64> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "sunday" => Some(0),
+        "monday" => Some(1),
+        "tuesday" => Some(2),
+        "wednesday" => Some(3),
+        "thursday" => Some(4),
+        "friday" => Some(5),
+        "saturday" => Some(6),
+        _ => None,
+    }
 }
 
 fn pick_tick_step(total_days: f64) -> f64 {
@@ -387,6 +434,50 @@ mod tests {
         let svg = render(&d, &Theme::default());
         // Weekend shading band present.
         assert!(svg.contains("fill-opacity=\"0.04\""));
+    }
+
+    #[test]
+    fn tick_interval_units() {
+        assert_eq!(parse_tick_interval("1day"), Some(1.0));
+        assert_eq!(parse_tick_interval("2week"), Some(14.0));
+        assert_eq!(parse_tick_interval("1month"), Some(30.0));
+        assert_eq!(parse_tick_interval("1w"), Some(7.0));
+        assert_eq!(parse_tick_interval("1year"), None);
+    }
+
+    #[test]
+    fn tick_interval_overrides_auto_step() {
+        // A 28-day span auto-picks a 2-day step (14 labels); `tickInterval
+        // 1week` forces a 7-day step (fewer labels).
+        let span = "gantt\ndateFormat YYYY-MM-DD\nsection S\nT : 2026-01-01, 28d\n";
+        let auto = render(&build(span), &Theme::default());
+        let weekly = render(
+            &build(&span.replace("section S", "tickInterval 1week\nsection S")),
+            &Theme::default(),
+        );
+        let count = |s: &str| s.matches("font-size=\"11\"").count();
+        assert!(count(&weekly) < count(&auto));
+    }
+
+    #[test]
+    fn weekday_offset_is_days_to_next_named_weekday() {
+        let thu = crate::svg::gantt_date::days_from_civil(2026, 1, 1) as f64;
+        assert_eq!(weekday_tick_offset(Some("monday"), thu), 4.0);
+        assert_eq!(weekday_tick_offset(Some("thursday"), thu), 0.0);
+        assert_eq!(weekday_tick_offset(None, thu), 0.0);
+    }
+
+    #[test]
+    fn weekend_friday_shades_friday_not_sunday() {
+        // A task spanning the first week of 2026 with `weekend friday`: Friday
+        // 2026-01-02 becomes a shaded non-working day.
+        let d = build(
+            "gantt\ndateFormat YYYY-MM-DD\nexcludes weekends\nweekend friday\nsection S\nT : 2026-01-01, 10d\n",
+        );
+        let ex = Excludes::parse(&d.excludes, d.date_format.as_deref(), d.weekend.as_deref());
+        use crate::svg::gantt_date::days_from_civil;
+        assert!(ex.is_excluded(days_from_civil(2026, 1, 2))); // Friday
+        assert!(!ex.is_excluded(days_from_civil(2026, 1, 4))); // Sunday now works
     }
 
     #[test]

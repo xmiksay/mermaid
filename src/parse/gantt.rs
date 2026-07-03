@@ -3,6 +3,9 @@
 //! Supports:
 //!   * Header: `gantt`.
 //!   * `title <text>`, `dateFormat <fmt>`, `axisFormat <fmt>`.
+//!   * `excludes <days>`, `weekend friday|saturday` (redefines the weekend
+//!     pair), `tickInterval Nday|Nweek|Nmonth`, `weekday <day>`,
+//!     `displayMode[:] compact` (stored; layout is a follow-up).
 //!   * `section <name>` blocks.
 //!   * Tasks: `<name> : [tags,] [id,] <start>, <end>` — the end may be a
 //!     duration (`Nd`/`Nw`/`Nh`/`Nm`), an end date, or `until <taskId>`.
@@ -66,12 +69,23 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
             diag.today_marker = Some(rest.trim().to_string());
             continue;
         }
-        if line.starts_with("includes ")
-            || line.starts_with("weekday ")
-            || line.starts_with("tickInterval ")
-            || line == "inclusiveEndDates"
-            || line == "topAxis"
-        {
+        if let Some(rest) = strip_kw(line, "weekend") {
+            diag.weekend = Some(rest.to_string());
+            continue;
+        }
+        if let Some(rest) = strip_kw(line, "weekday") {
+            diag.weekday = Some(rest.to_string());
+            continue;
+        }
+        if let Some(rest) = strip_kw(line, "tickInterval") {
+            diag.tick_interval = Some(rest.to_string());
+            continue;
+        }
+        if let Some(rest) = strip_kw(line, "displayMode") {
+            diag.display_mode = Some(rest.to_string());
+            continue;
+        }
+        if line.starts_with("includes ") || line == "inclusiveEndDates" || line == "topAxis" {
             // Accepted but currently informational only.
             continue;
         }
@@ -202,6 +216,18 @@ fn parse_task(
     })
 }
 
+/// Strip a bare directive keyword, tolerating a space and/or a `:` separator
+/// (`weekend friday`, `displayMode: compact`). Returns the trimmed argument,
+/// or `None` when the keyword isn't a standalone token (so `displayModern`
+/// doesn't match `displayMode`).
+fn strip_kw<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(kw)?;
+    match rest.chars().next() {
+        Some(c) if !(c.is_whitespace() || c == ':') => None,
+        _ => Some(rest.trim_start().trim_start_matches(':').trim()),
+    }
+}
+
 fn parse_start(start_raw: &str, last_task_id: Option<&str>) -> TaskStart {
     if let Some(after) = start_raw.strip_prefix("after ") {
         TaskStart::AfterId(after.trim().to_string())
@@ -327,6 +353,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(d.sections[0].tasks.len(), 1);
+        assert_eq!(d.tick_interval.as_deref(), Some("1week"));
+    }
+
+    #[test]
+    fn weekend_weekday_display_mode_parse() {
+        // Previously `weekend`/`displayMode` hard-errored; all four land on
+        // their fields now.
+        let d = parse(
+            "gantt\ndateFormat YYYY-MM-DD\nweekend friday\nweekday monday\ndisplayMode compact\nsection S\nA : 2014-01-01, 5d\n",
+        )
+        .unwrap();
+        assert_eq!(d.weekend.as_deref(), Some("friday"));
+        assert_eq!(d.weekday.as_deref(), Some("monday"));
+        assert_eq!(d.display_mode.as_deref(), Some("compact"));
+        assert_eq!(d.sections[0].tasks.len(), 1);
+    }
+
+    #[test]
+    fn display_mode_colon_form() {
+        // Upstream writes `displayMode: compact` with a colon.
+        let d = parse("gantt\ndisplayMode: compact\nsection S\nA : 2014-01-01, 5d\n").unwrap();
+        assert_eq!(d.display_mode.as_deref(), Some("compact"));
     }
 
     #[test]
