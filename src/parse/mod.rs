@@ -1,6 +1,6 @@
 //! Mermaid syntax parser. Produces a [`Diagram`] AST from Mermaid source.
 //!
-//! Supports pie, sequence, flowchart (`flowchart`/`graph`), state
+//! Supports pie, sequence, flowchart (`flowchart`/`graph`/`flowchart-elk`), state
 //! (`stateDiagram`/`stateDiagram-v2`), class, ER, and gantt diagrams.
 //!
 //! Implementation: hand-rolled line-oriented scanners (one per diagram type)
@@ -357,7 +357,9 @@ fn dispatch(input: &str) -> Result<Diagram, ParseError> {
     match head_token {
         "pie" => pie::parse(input).map(Diagram::Pie),
         "sequenceDiagram" => sequence::parse(input).map(Diagram::Sequence),
-        "flowchart" | "graph" => flowchart::parse(input).map(Diagram::Flowchart),
+        // `flowchart-elk` selects the ELK layouter upstream; we lay it out with
+        // sugiyama like the `layout: elk` config, matching our layout-deviation policy.
+        "flowchart" | "graph" | "flowchart-elk" => flowchart::parse(input).map(Diagram::Flowchart),
         "stateDiagram" | "stateDiagram-v2" => state::parse(input).map(Diagram::State),
         "classDiagram" | "classDiagram-v2" => class::parse(input).map(Diagram::Class),
         "erDiagram" => er::parse(input).map(Diagram::Er),

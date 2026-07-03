@@ -250,7 +250,9 @@ fn split_semicolons(line: &str) -> Vec<&str> {
 }
 
 fn parse_header(line: &str, diag: &mut FlowchartDiagram, line_no: usize) -> Result<(), ParseError> {
-    let rest = if let Some(r) = line.strip_prefix("flowchart") {
+    let rest = if let Some(r) = line.strip_prefix("flowchart-elk") {
+        r
+    } else if let Some(r) = line.strip_prefix("flowchart") {
         r
     } else if let Some(r) = line.strip_prefix("graph") {
         r
@@ -275,11 +277,12 @@ fn parse_header(line: &str, diag: &mut FlowchartDiagram, line_no: usize) -> Resu
 }
 
 fn parse_direction(s: &str) -> Option<FlowDirection> {
+    // Upstream's <dir> lexer also accepts the symbol aliases `>`/`<`/`^`/`v`.
     match s {
-        "" | "TD" | "TB" => Some(FlowDirection::TopDown),
-        "BT" => Some(FlowDirection::BottomTop),
-        "LR" => Some(FlowDirection::LeftRight),
-        "RL" => Some(FlowDirection::RightLeft),
+        "" | "TD" | "TB" | "v" => Some(FlowDirection::TopDown),
+        "BT" | "^" => Some(FlowDirection::BottomTop),
+        "LR" | ">" => Some(FlowDirection::LeftRight),
+        "RL" | "<" => Some(FlowDirection::RightLeft),
         _ => None,
     }
 }
@@ -359,6 +362,28 @@ mod tests {
         assert!(s1.node_ids.contains(&"B".to_string()) || s1.node_ids.contains(&"C".to_string()));
         assert!(s2.node_ids.contains(&"D".to_string()) || s2.node_ids.contains(&"C".to_string()));
         assert!(s1.child_subgraph_ids.contains(&"S2".to_string()));
+    }
+
+    #[test]
+    fn symbol_directions() {
+        for (src, dir) in [
+            ("graph >\nA --> B\n", FlowDirection::LeftRight),
+            ("graph <\nA --> B\n", FlowDirection::RightLeft),
+            ("graph ^\nA --> B\n", FlowDirection::BottomTop),
+            ("graph v\nA --> B\n", FlowDirection::TopDown),
+        ] {
+            assert_eq!(parse(src).unwrap().direction, dir, "src: {src}");
+        }
+    }
+
+    #[test]
+    fn flowchart_elk_header() {
+        let d = crate::parse("flowchart-elk LR\nA --> B\n").unwrap();
+        let crate::Diagram::Flowchart(f) = d else {
+            panic!("expected flowchart");
+        };
+        assert_eq!(f.direction, FlowDirection::LeftRight);
+        assert!(f.edges.iter().any(|e| e.from == "A" && e.to == "B"));
     }
 
     #[test]
