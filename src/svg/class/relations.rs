@@ -35,7 +35,15 @@ pub(super) fn draw_relation(
     }
     clipped.push(last);
 
-    let (dash, marker_end, marker_start) = style_for(rel.kind, rel.reversed);
+    let (dash, mut marker_end, mut marker_start) = style_for(rel.kind, rel.reversed);
+    // A lollipop-interface `()` end draws a socket circle, overriding any
+    // kind marker at that end.
+    if rel.lollipop_from {
+        marker_start = Some("cls-lollipop");
+    }
+    if rel.lollipop_to {
+        marker_end = Some("cls-lollipop");
+    }
     let dash_attr = if dash.is_empty() {
         String::new()
     } else {
@@ -159,10 +167,18 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
          <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
     );
+    // Lollipop interface socket — a hollow circle just off the interface end.
+    let lollipop = format!(
+        "<marker id=\"cls-lollipop\" viewBox=\"0 0 12 12\" refX=\"11\" refY=\"6\" \
+         markerWidth=\"14\" markerHeight=\"14\" orient=\"auto-start-reverse\">\
+         <circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
+         </marker>"
+    );
     svg.defs_raw(&triangle);
     svg.defs_raw(&arrow);
     svg.defs_raw(&diamond_filled);
     svg.defs_raw(&diamond_open);
+    svg.defs_raw(&lollipop);
 }
 
 #[cfg(test)]
@@ -227,6 +243,22 @@ mod tests {
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("marker-end=\"url(#cls-triangle)\""));
         assert!(!svg.contains("marker-start=\"url(#cls-triangle)\""));
+    }
+
+    #[test]
+    fn lollipop_interface_draws_socket_circle() {
+        // `bar ()-- foo`: socket circle at the `from` (bar) end via marker-start,
+        // and the class name stays clean.
+        let d = build("classDiagram\nbar ()-- foo\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">bar<"));
+        assert!(!svg.contains("bar ()"));
+        assert!(svg.contains("marker-start=\"url(#cls-lollipop)\""));
+
+        // `foo --() baz`: socket circle at the `to` (baz) end via marker-end.
+        let d = build("classDiagram\nfoo --() baz\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-end=\"url(#cls-lollipop)\""));
     }
 
     #[test]

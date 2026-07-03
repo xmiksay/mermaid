@@ -18,6 +18,7 @@
 //!     `--`          link
 //!     `..`          dashed link
 //!     `..>`         dependency
+//!     `()--` `--()` lollipop interface (socket circle at the `()` end)
 //!     With optional role multiplicities (`A "1" --> "*" B`) and `: label`.
 
 use std::collections::HashMap;
@@ -33,7 +34,10 @@ mod notes;
 mod relation;
 
 use notes::{parse_interaction, parse_note, parse_standalone_annotation, strip_any_prefix};
-use relation::{find_relation, is_reversed_token, split_leading_card, split_trailing_card};
+use relation::{
+    find_relation, is_reversed_token, split_leading_card, split_leading_lollipop,
+    split_trailing_card, split_trailing_lollipop,
+};
 
 pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
     let mut diag = ClassDiagram::default();
@@ -163,13 +167,16 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if let Some((tok_pos, tok, kind)) = find_relation(line) {
-            // Left end: `Class[:::style] ["card"]`.
-            let (left, from_class) = extract_inline_class(line[..tok_pos].trim());
+            // Left end: `Class[:::style] ["card"] [()]`. The lollipop `()` sits
+            // right against the token, so strip it before the multiplicity.
+            let (left, lollipop_from) = split_trailing_lollipop(line[..tok_pos].trim());
+            let (left, from_class) = extract_inline_class(&left);
             let (from, from_card) = split_trailing_card(&left);
-            // Right end: `["card"] Class[:::style] [: label]`. Strip the leading
-            // multiplicity and any `:::style` before splitting the `: label`,
-            // so neither collides with the `:` separator.
-            let (right, to_card) = split_leading_card(line[tok_pos + tok.len()..].trim());
+            // Right end: `[()] ["card"] Class[:::style] [: label]`. Strip the
+            // lollipop, then the leading multiplicity and any `:::style` before
+            // splitting the `: label`, so none collides with the `:` separator.
+            let (right, lollipop_to) = split_leading_lollipop(line[tok_pos + tok.len()..].trim());
+            let (right, to_card) = split_leading_card(&right);
             let (right, to_class) = extract_inline_class(right.trim());
             let (to_clean, label) = match right.split_once(':') {
                 Some((a, b)) => (a.trim().to_string(), Some(b.trim().to_string())),
@@ -197,6 +204,8 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
                 from_card,
                 to_card,
                 reversed: is_reversed_token(tok),
+                lollipop_from,
+                lollipop_to,
             });
             continue;
         }
