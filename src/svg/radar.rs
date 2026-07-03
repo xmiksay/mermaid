@@ -12,15 +12,15 @@ const TITLE_GAP: f64 = 32.0;
 const RADIUS: f64 = 170.0;
 
 pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let chart_d = RADIUS * 2.0 + 80.0;
     let width = PAD * 2.0 + chart_d + 160.0; // legend area
     let height = PAD * 2.0 + title_h + chart_d;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

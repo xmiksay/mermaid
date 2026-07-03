@@ -34,11 +34,11 @@ struct Rect {
 }
 
 pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let width = PAD * 2.0 + CHART_W;
     let height = PAD * 2.0 + title_h + CHART_H;
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(
@@ -119,12 +119,13 @@ fn draw_node(n: &TreemapNode, r: Rect, i: usize, depth: usize, svg: &mut SvgBuil
     );
     if r.w > 24.0 && r.h > 16.0 {
         let font_size = if r.w < 60.0 { 10 } else { 12 };
+        let label_fill: &str = if leaf { "#fff" } else { &ctx.theme.fg };
         svg.text(
             r.x + 4.0,
             r.y + 12.0,
             &format!(
                 "fill=\"{}\" font-size=\"{font_size}\" font-weight=\"bold\"",
-                if leaf { "#fff" } else { ctx.theme.fg }
+                label_fill
             ),
             &n.label,
         );

@@ -27,13 +27,13 @@ struct Laid {
 
 pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let Some(root) = d.root.clone() else {
-        let mut svg = SvgBuilder::new(200.0, 80.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(200.0, 80.0).theme(theme);
         svg.text(
             100.0,
             40.0,
             &format!(
                 "text-anchor=\"middle\" fill=\"{}\" font-size=\"13\"",
-                theme.fg_muted
+                &theme.fg_muted
             ),
             "(empty mindmap)",
         );
@@ -49,7 +49,7 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let width = max_x + 30.0;
     let height = (max_y + 30.0).max(total_h + 60.0);
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     draw_edges(&laid, &mut svg, theme);
     draw_nodes(&laid, &mut svg, theme, 0);
@@ -110,7 +110,7 @@ fn bbox(laid: &Laid) -> (f64, f64) {
 }
 
 fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
-    let stroke = theme.flow_edge_stroke;
+    let stroke = &theme.flow_edge_stroke;
     for c in &laid.children {
         let x1 = laid.x + laid.w;
         let y1 = laid.y;
@@ -139,9 +139,9 @@ fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
 }
 
 fn draw_nodes(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme, depth: usize) {
-    let fg = theme.fg;
-    let fill = theme.flow_node_fill;
-    let stroke = theme.flow_node_stroke;
+    let fg = &theme.fg;
+    let fill = &theme.flow_node_fill;
+    let stroke = &theme.flow_node_stroke;
     let n = &laid.node;
     let cx = laid.x + laid.w / 2.0;
     let cy = laid.y;

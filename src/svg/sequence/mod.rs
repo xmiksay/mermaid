@@ -52,10 +52,10 @@ const CREATE_GAP: f64 = 15.0; // gap above an inline `create`d actor box
 const DESTROY_CROSS: f64 = 7.0; // half-size of the `destroy` termination cross
 
 pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let lifeline = theme.lifeline;
+    let fg = &theme.fg;
+    let lifeline = &theme.lifeline;
     if d.participants.is_empty() {
-        let mut svg = SvgBuilder::new(200.0, 60.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(200.0, 60.0).theme(theme);
         if let Some(t) = &d.title {
             svg.text(
                 100.0,
@@ -115,7 +115,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let footer_bottom = footer_top + actor_h;
     let height = footer_bottom + PAD;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_markers(&mut svg, theme);
 
     if let Some(t) = &d.title {

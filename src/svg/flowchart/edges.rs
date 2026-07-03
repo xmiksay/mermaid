@@ -143,7 +143,7 @@ pub(super) fn draw_edge(
     let stroke = style_override
         .stroke
         .as_deref()
-        .unwrap_or(theme.flow_edge_stroke);
+        .unwrap_or(&theme.flow_edge_stroke);
     let default_w = match edge.line {
         EdgeLine::Thick => "3",
         _ => "1.5",
@@ -188,8 +188,8 @@ fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
 }
 
 fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme: &Theme) {
-    let fg = theme.fg;
-    let flow_label_bg = theme.flow_label_bg;
+    let fg = &theme.fg;
+    let flow_label_bg = &theme.flow_label_bg;
     let w = crate::svg::metrics::text_width(text, 7.0, theme.font_size) + 8.0;
     let h = 18.0;
     svg.rect(
@@ -236,7 +236,7 @@ fn clip_to_node(
 // ---- markers ---------------------------------------------------------------
 
 pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
-    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
     svg.defs_raw(&format!(
         "<marker id=\"arrow-filled\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\

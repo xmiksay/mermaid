@@ -44,8 +44,8 @@ fn wrap_event(text: &str) -> Vec<String> {
 }
 
 pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let total_periods: usize = d.sections.iter().map(|s| s.periods.len()).sum();
     let max_events: usize = d
@@ -78,7 +78,7 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let events_h = max_events as f64 * (event_box_h + EVENT_GAP) + EVENT_GAP;
     let height = PAD * 2.0 + title_h + band_h + AXIS_Y_OFFSET + events_h + 30.0;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

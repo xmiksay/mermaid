@@ -44,8 +44,7 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD);
     let width = PAD * 2.0 + total_w;
     let height = PAD * 2.0 + total_h + 20.0;
-    let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0))
-        .font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0)).theme(theme);
 
     // Resolve node geometry (recursively) for edges — leaf blocks *and*
     // composite groups, so an edge can target a `block:ID … end` group.
@@ -196,8 +195,8 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
 }
 
 fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme, class_defs: &HashMap<String, Style>) {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
     match &l.item {
         BlockItem::Block(b) => draw_block(b, l.x, l.y, l.w, l.h, svg, theme, class_defs),
         BlockItem::Group(g) => {
@@ -231,9 +230,9 @@ fn draw_block(
     class_defs: &HashMap<String, Style>,
 ) {
     let rs = resolve_style(class_defs, &b.classes, &b.style);
-    let attrs = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
-    let stroke = rs.stroke_or(theme.flow_node_stroke);
-    let label_fill = rs.label_fill(theme.fg);
+    let attrs = rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5");
+    let stroke = rs.stroke_or(&theme.flow_node_stroke);
+    let label_fill = rs.label_fill(&theme.fg);
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
     match b.shape {

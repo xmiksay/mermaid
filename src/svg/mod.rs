@@ -60,15 +60,35 @@ pub fn render(input: &str) -> Result<String, RenderError> {
 
 pub fn render_with(input: &str, theme: &Theme) -> Result<String, RenderError> {
     let (d, meta) = parse_with_meta(input)?;
-    // A theme named in the source preamble (frontmatter `config.theme` or an
-    // `%%{init}%%` directive) takes precedence over the caller's theme.
-    let effective = meta
+    let effective = theme_from_meta(theme, &meta);
+    let body = render_body(&d, &effective);
+    Ok(decorate::apply(body, &d, Some(&meta)))
+}
+
+/// Build the effective theme for a render from the caller's theme and the
+/// source-preamble config. A `theme` named in the preamble (frontmatter
+/// `config.theme` or an `%%{init}%%` directive) takes precedence over the
+/// caller's; `themeVariables`, `fontFamily`/`fontSize` and `useMaxWidth` then
+/// layer on top of whichever base was chosen.
+fn theme_from_meta(caller: &Theme, meta: &crate::parse::DiagramMeta) -> Theme {
+    let mut effective = meta
         .theme
         .as_deref()
         .and_then(Theme::by_name)
-        .unwrap_or(*theme);
-    let body = render_body(&d, &effective);
-    Ok(decorate::apply(body, &d, Some(&meta)))
+        .unwrap_or_else(|| caller.clone());
+    if !meta.theme_variables.is_empty() {
+        effective.apply_theme_variables(&meta.theme_variables);
+    }
+    if let Some(family) = &meta.font_family {
+        effective.font_family = family.clone().into();
+    }
+    if let Some(size) = meta.font_size {
+        effective.font_size = size;
+    }
+    if let Some(use_max_width) = meta.use_max_width {
+        effective.responsive = use_max_width;
+    }
+    effective
 }
 
 pub fn render_diagram(d: &Diagram) -> Result<String, RenderError> {

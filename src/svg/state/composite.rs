@@ -224,7 +224,7 @@ pub(super) fn draw_composites(
     dividers: &HashMap<String, Vec<f64>>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     for comp in &d.composites {
         let Some(&(x0, y0, x1, y1)) = boxes.get(&comp.id) else {
             continue;
@@ -281,7 +281,7 @@ pub(super) fn draw_state_note(
     boxes: &HashMap<String, (f64, f64, f64, f64)>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     let laid_out = id_to_u32
         .get(&note.target)
         .and_then(|u| pos.get(u).map(|p| (*u, *p)));

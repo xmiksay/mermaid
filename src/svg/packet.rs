@@ -13,10 +13,10 @@ const RULER_H: f64 = 14.0;
 const BITS_PER_ROW: u32 = 32;
 
 pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
-    let fill = theme.flow_node_fill;
-    let stroke = theme.flow_node_stroke;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
+    let fill = &theme.flow_node_fill;
+    let stroke = &theme.flow_node_stroke;
 
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let last_bit = d.fields.iter().map(|f| f.end).max().unwrap_or(0);
@@ -30,7 +30,7 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + chart_w;
     let height = PAD * 2.0 + title_h + RULER_H + rows as f64 * ROW_H + 10.0;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

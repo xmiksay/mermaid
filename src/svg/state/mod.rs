@@ -26,7 +26,7 @@ const CANVAS_PAD: f64 = 24.0;
 
 pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     if d.states.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(40.0, 40.0).theme(theme);
         define_marker(&mut svg, theme);
         return svg.finish();
     }
@@ -129,7 +129,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     let width = max_x + CANVAS_PAD;
     let height = max_y + CANVAS_PAD;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_marker(&mut svg, theme);
 
     // Cluster frames first (under nodes/edges) so labels stay legible.
@@ -207,10 +207,10 @@ fn draw_state(
     theme: &Theme,
 ) {
     let rs = resolve_style(class_defs, &s.classes, &s.style);
-    let fg = rs.label_fill(theme.fg);
-    // Pseudo-state marker fill: `theme.fg` keeps the dark dot on light themes
+    let fg = rs.label_fill(&theme.fg);
+    // Pseudo-state marker fill: `&theme.fg` keeps the dark dot on light themes
     // yet stays visible on the dark theme (was a hardcoded near-invisible #333).
-    let pseudo = theme.fg;
+    let pseudo = &theme.fg;
     match s.kind {
         StateKind::Start => {
             svg.circle(
@@ -247,7 +247,7 @@ fn draw_state(
             );
             svg.path(
                 &d,
-                &rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5"),
+                &rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5"),
             );
         }
         StateKind::Fork | StateKind::Join => {
@@ -264,7 +264,7 @@ fn draw_state(
                 cx,
                 cy,
                 PSEUDO_R,
-                &rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5"),
+                &rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5"),
             );
             let label = if deep { "H*" } else { "H" };
             svg.text(
@@ -275,7 +275,7 @@ fn draw_state(
             );
         }
         StateKind::Normal => {
-            let base = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
+            let base = rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5");
             svg.rect(
                 cx - w / 2.0,
                 cy - h / 2.0,
@@ -301,9 +301,9 @@ fn draw_transition(
     end: &StateEndClip,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_edge_stroke = theme.flow_edge_stroke;
-    let flow_label_bg = theme.flow_label_bg;
+    let fg = &theme.fg;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
+    let flow_label_bg = &theme.flow_label_bg;
     let n = pts.len();
     if n < 2 {
         return;
@@ -370,7 +370,7 @@ fn clip_to_state(
 }
 
 fn define_marker(svg: &mut SvgBuilder, theme: &Theme) {
-    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
     let m = format!(
         "<marker id=\"state-arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
          markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\

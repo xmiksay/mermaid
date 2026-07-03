@@ -57,12 +57,15 @@ Custom themes: construct a [`Theme`] with the colors you want
 
 ```rust
 let custom = Theme {
-    flow_node_fill: "#fffbe6",
-    flow_node_stroke: "#caa400",
+    flow_node_fill: "#fffbe6".into(),
+    flow_node_stroke: "#caa400".into(),
     ..Theme::default_theme()
 };
 let svg = render_with(source, &custom)?;
 ```
+
+The color/font fields are `Cow<'static, str>`, so the built-ins stay `const`
+while overrides accept owned runtime strings (`"#fffbe6".into()`).
 
 The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
 `Theme::forest()`, and `Theme::neutral()`; `Theme::with_font(family)` and
@@ -106,13 +109,22 @@ flag uses the same lookup.
 These work on every diagram type:
 
 - **YAML frontmatter** — a leading `--- … ---` block sets the diagram `title:`
-  and, via `config: { theme: … }`, the render theme.
-- **`%%{init: {"theme": …}}%%` directives** — select a built-in theme inline.
+  and a nested `config:` block.
+- **`%%{init: {…}}%%` directives** — the same config, inline and anywhere.
+- **Config** — the whole `config:` tree (frontmatter *and* `init`) is honored:
+  `theme` (a built-in name; `base` aliases `default`), `themeVariables`
+  (upstream's `theme: base` recoloring path — `primaryColor`, `lineColor`,
+  `primaryBorderColor`, `noteBkgColor`, `fontFamily`, `fontSize`, …), top-level
+  `fontFamily`/`fontSize`, and `useMaxWidth: false` (emit a fixed-size SVG
+  instead of the responsive envelope). Every other key is still parsed into a
+  flattened dotted map (`DiagramMeta::config`, e.g. `flowchart.htmlLabels`,
+  `kanban.ticketBaseUrl`, `treemap.valueFormat`) for per-diagram consumers.
 - **`accTitle:` / `accDescr:`** (and the `accDescr { … }` block form) — emitted
   as `<title>`/`<desc>` and linked with `aria-labelledby`/`aria-describedby`;
   the root `<svg>` always carries `role` + `aria-roledescription`.
 - **Responsive output** — `width="100%"` + `style="max-width: Npx;"` + `viewBox`
-  (no fixed height), so diagrams scale to their container.
+  (no fixed height), so diagrams scale to their container (unless
+  `config.useMaxWidth: false` pins a fixed pixel `width`/`height`).
 - **Entity codes & markdown strings in labels** — `#quot;`, `#35;`, `#x2665;`
   etc. are decoded; backtick-fenced markdown emphasis (`**bold**`) is stripped
   to plain text.

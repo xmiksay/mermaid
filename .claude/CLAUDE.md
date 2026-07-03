@@ -141,6 +141,20 @@ When adding a new color to `Theme`, also add it to all four built-in
 constructors in `src/svg/theme.rs`. Custom themes use struct-update syntax
 from one of the built-ins, so adding a field is non-breaking.
 
+Color/font fields are `Cow<'static, str>` (not `&'static str`): built-in
+constructors stay `const` (`Cow::Borrowed(...)`), but `themeVariables`/
+`fontFamily` config and downstream overrides supply owned runtime strings
+(`fg: "#000".into()`). `Theme` is thus `Clone`, **not** `Copy`. Renderers read a
+color as `&theme.fg` (a `&Cow<str>` that deref-coerces to `&str`), so
+`let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working.
+`Theme::apply_theme_variables(&mut self, vars)` recolors a base theme from the
+upstream `themeVariables` names; `theme_from_meta` in `src/svg/mod.rs` wires
+theme name → `themeVariables` → `fontFamily`/`fontSize` → `useMaxWidth` onto the
+effective theme. `Theme::responsive` (default `true`) is cleared by
+`config.useMaxWidth: false`, making `SvgBuilder::finish` emit a fixed pixel
+`width`/`height`; every renderer adopts font + responsiveness via
+`SvgBuilder::new(w, h).theme(theme)`.
+
 ## Conventions
 
 - No extra comments — only where the *why* is non-obvious from the code.
@@ -181,13 +195,25 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 
 - **Source preamble** (`src/parse/preamble.rs`) is stripped by
   `parse_with_meta` *before* per-diagram dispatch, yielding a `DiagramMeta`
-  (title, `acc_title`, `acc_descr`, `theme`): YAML frontmatter (`--- title: …
-  / config: { theme: … } ---`), `%%{init: {theme: …}}%%` directives, and
-  `accTitle:`/`accDescr:` (line + `accDescr { … }` block). `parse()` still
-  returns just the `Diagram`; a frontmatter `title` is copied onto the
-  diagram's own `title` field when it has one (flowchart gained a `title`).
+  (title, `acc_title`, `acc_descr`, and the config-derived fields): YAML
+  frontmatter (`--- title: … / config: { … } ---`), `%%{init: {…}}%%`
+  directives, and `accTitle:`/`accDescr:` (line + `accDescr { … }` block).
+  `parse()` still returns just the `Diagram`; a frontmatter `title` is copied
+  onto the diagram's own `title` field when it has one (flowchart gained a
+  `title`).
+- **The whole `config:` tree is flattened** (frontmatter YAML via `flatten_yaml`
+  indentation, `%%{init}%%` via `parse_init_object`'s JSON-ish recursion) into
+  `DiagramMeta.config`, a dotted `key → value` map (`themeVariables.primaryColor`,
+  `gitGraph.mainBranchName`, `kanban.ticketBaseUrl`, `flowchart.htmlLabels`, …;
+  frontmatter/first-init wins). `derive_typed_fields` reads the honored subset
+  out of it: `theme`, `theme_variables`, `font_family`, `font_size`,
+  `use_max_width`, `look`/`layout`/`security_level` (parsed, not yet honored),
+  `ticket_base_url`, `value_format`, `git_graph.*`. Closing a per-diagram config
+  gap is a `meta.config` lookup, not new scanning.
 - **Rendering is `parse_with_meta` → `render_body` (per-diagram match) →
-  `decorate::apply`.** A preamble `theme` overrides the caller's theme.
+  `decorate::apply`.** `theme_from_meta` builds the effective theme: a preamble
+  `theme` overrides the caller's, then `themeVariables`/`fontFamily`/`fontSize`/
+  `useMaxWidth` layer on top.
   `decorate` (string surgery on the finished doc) always adds
   `role="graphics-document document"` + `aria-roledescription="<kind>"`, and
   when meta carries accTitle/accDescr injects `<title>`/`<desc>` + the matching

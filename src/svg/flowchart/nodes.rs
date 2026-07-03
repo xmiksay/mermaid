@@ -58,8 +58,8 @@ pub(super) fn draw_node(
         open_click(svg, action);
     }
     let rs = resolve_style(class_defs, &node.classes, &node.style);
-    let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
-    let fill_attr = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
+    let flow_node_stroke = rs.stroke_or(&theme.flow_node_stroke);
+    let fill_attr = rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5");
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     let off = 12.0; // skew for parallelogram/trapezoid
@@ -243,7 +243,7 @@ pub(super) fn draw_node(
             flow_node_stroke,
         ),
     }
-    let fg = rs.label_fill(theme.fg);
+    let fg = rs.label_fill(&theme.fg);
     let font = rs.font_size.as_deref();
     draw_label(svg, (cx, cy), &node.text, fg, font);
     if let Some(action) = &node.click {
@@ -348,7 +348,7 @@ pub(super) fn draw_subgraphs(
     boxes: &HashMap<String, (f64, f64, f64, f64)>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     for sub in &d.subgraphs {
         let Some(&(x0, y0, x1, y1)) = boxes.get(&sub.id) else {
             continue;
@@ -356,7 +356,7 @@ pub(super) fn draw_subgraphs(
         // Themed cluster fill + solid border, overridable by a `style`/`class`
         // on the subgraph id (upstream styles the cluster rect).
         let rs = resolve_style(&d.class_defs, &sub.classes, &sub.style);
-        let frame = rs.shape_attrs(theme.flow_cluster_fill, theme.flow_cluster_stroke, "1");
+        let frame = rs.shape_attrs(&theme.flow_cluster_fill, &theme.flow_cluster_stroke, "1");
         svg.rect(x0, y0, x1 - x0, y1 - y0, &format!("{frame} rx=\"6\""));
         let label = if sub.label.is_empty() {
             sub.id.as_str()

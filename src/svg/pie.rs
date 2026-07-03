@@ -18,8 +18,8 @@ const LEGEND_LABEL_MAX: usize = 24;
 const MIN_SLICE: f64 = 0.01;
 
 pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
     let pie_color = |i| theme.pie_color(i);
 
     let total: f64 = p.entries.iter().map(|e| e.value.max(0.0)).sum();
@@ -52,7 +52,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     let width = PAD * 2.0 + RADIUS * 2.0 + legend_w;
     let height = PAD * 2.0 + title_h + RADIUS * 2.0;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &p.title {
         svg.text(

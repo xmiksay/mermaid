@@ -22,7 +22,7 @@ const PAD: f64 = 16.0;
 const TIME_COL_MIN_W: f64 = 480.0;
 
 pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     // Step 1 — resolve absolute start positions in "days from epoch".
     let resolved = resolve_tasks(d);
     let project_start = resolved
@@ -51,7 +51,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let width = LABEL_COL_W + time_col_w + PAD * 2.0;
     let height = HEADER_H + AXIS_H + body_h + PAD * 2.0;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     // Title
     if let Some(t) = &d.title {
