@@ -8,6 +8,9 @@ fn person(alias: &str, label: &str) -> C4Element {
         label: label.into(),
         descr: None,
         technology: None,
+        sprite: None,
+        tags: None,
+        link: None,
         external: false,
         boundary_alias: None,
         boundary_label: None,
@@ -23,6 +26,9 @@ fn boundary(alias: &str, label: &str, kind: C4BoundaryKind, members: Vec<C4Eleme
         label: label.into(),
         descr: None,
         technology: None,
+        sprite: None,
+        tags: None,
+        link: None,
         external: false,
         boundary_alias: None,
         boundary_label: None,
@@ -104,6 +110,9 @@ fn arrow_marker_present() {
             to: "b".into(),
             label: "uses".into(),
             technology: None,
+            sprite: None,
+            tags: None,
+            link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
         }],
@@ -126,6 +135,9 @@ fn bidirectional_has_both_markers() {
             to: "b".into(),
             label: "syncs".into(),
             technology: None,
+            sprite: None,
+            tags: None,
+            link: None,
             direction: C4RelDirection::Default,
             bidirectional: true,
         }],
@@ -147,6 +159,9 @@ fn relations_are_solid() {
             to: "b".into(),
             label: "uses".into(),
             technology: None,
+            sprite: None,
+            tags: None,
+            link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
         }],
@@ -209,6 +224,9 @@ fn rel_is_curved_and_unbacked() {
             to: "b".into(),
             label: "uses".into(),
             technology: Some("HTTPS".into()),
+            sprite: None,
+            tags: None,
+            link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
         }],
@@ -316,6 +334,9 @@ fn element_style_override_applies_colors() {
             label: "Sys".into(),
             descr: None,
             technology: None,
+            sprite: None,
+            tags: None,
+            link: None,
             external: false,
             boundary_alias: None,
             boundary_label: None,
@@ -347,6 +368,9 @@ fn rel_style_override_colors_line_and_label() {
             to: "b".into(),
             label: "uses".into(),
             technology: None,
+            sprite: None,
+            tags: None,
+            link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
         }],
@@ -363,6 +387,30 @@ fn rel_style_override_colors_line_and_label() {
     let svg = render(&d, &Theme::default());
     assert!(svg.contains("stroke=\"#FF0000\""));
     assert!(svg.contains("fill=\"#00FF00\""));
+}
+
+#[test]
+fn boundary_style_override_applies_colors() {
+    let d = C4Diagram {
+        kind: C4Kind::Context,
+        title: None,
+        elements: vec![boundary(
+            "b",
+            "Group",
+            C4BoundaryKind::System,
+            vec![person("a", "A")],
+        )],
+        relations: vec![],
+        boundary_styles: vec![C4ElementStyle {
+            alias: "b".into(),
+            bg_color: Some("#EEEEEE".into()),
+            font_color: None,
+            border_color: Some("#333333".into()),
+        }],
+        ..Default::default()
+    };
+    let svg = render(&d, &Theme::default());
+    assert!(svg.contains("fill=\"#EEEEEE\" stroke=\"#333333\""));
 }
 
 #[test]

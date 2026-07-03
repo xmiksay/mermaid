@@ -10,13 +10,16 @@ use super::super::ParseError;
 
 pub(super) enum C4Directive {
     Element(C4ElementStyle),
+    Boundary(C4ElementStyle),
     Rel(C4RelStyle),
     Layout(C4LayoutConfig),
+    ShowLegend,
 }
 
 pub(super) fn apply_directive(d: &mut C4Diagram, dir: C4Directive) {
     match dir {
         C4Directive::Element(s) => d.element_styles.push(s),
+        C4Directive::Boundary(s) => d.boundary_styles.push(s),
         C4Directive::Rel(s) => d.rel_styles.push(s),
         C4Directive::Layout(c) => {
             if c.shape_in_row.is_some() {
@@ -26,6 +29,7 @@ pub(super) fn apply_directive(d: &mut C4Diagram, dir: C4Directive) {
                 d.layout.boundary_in_row = c.boundary_in_row;
             }
         }
+        C4Directive::ShowLegend => d.show_legend = true,
     }
 }
 
@@ -37,23 +41,9 @@ pub(super) fn parse_directive(line: &str) -> Option<C4Directive> {
     let args_str = rest.trim_start_matches('(').trim_end_matches(')');
     let args = split_args(args_str);
     match token {
-        "UpdateElementStyle" => {
-            let mut s = C4ElementStyle {
-                alias: args.first().cloned().unwrap_or_default(),
-                ..Default::default()
-            };
-            for a in args.iter().skip(1) {
-                if let Some((k, v)) = kv(a) {
-                    match k {
-                        "$bgColor" => s.bg_color = Some(v),
-                        "$fontColor" => s.font_color = Some(v),
-                        "$borderColor" => s.border_color = Some(v),
-                        _ => {}
-                    }
-                }
-            }
-            Some(C4Directive::Element(s))
-        }
+        "SHOW_LEGEND" => Some(C4Directive::ShowLegend),
+        "UpdateElementStyle" => Some(C4Directive::Element(parse_style_directive(&args))),
+        "UpdateBoundaryStyle" => Some(C4Directive::Boundary(parse_style_directive(&args))),
         "UpdateRelStyle" => {
             let mut s = C4RelStyle {
                 from: args.first().cloned().unwrap_or_default(),
@@ -101,6 +91,58 @@ fn kv(arg: &str) -> Option<(&str, String)> {
     Some((k.trim(), v.trim().trim_matches('"').to_string()))
 }
 
+/// `Update{Element,Boundary}Style(alias, $bgColor=…, $fontColor=…, $borderColor=…)`.
+/// The first positional arg is the alias; the rest are `$key=value` overrides.
+fn parse_style_directive(args: &[String]) -> C4ElementStyle {
+    let mut s = C4ElementStyle {
+        alias: args.first().cloned().unwrap_or_default(),
+        ..Default::default()
+    };
+    for a in args.iter().skip(1) {
+        if let Some((k, v)) = kv(a) {
+            match k {
+                "$bgColor" => s.bg_color = Some(v),
+                "$fontColor" => s.font_color = Some(v),
+                "$borderColor" => s.border_color = Some(v),
+                _ => {}
+            }
+        }
+    }
+    s
+}
+
+/// Keyword args (`$descr`/`$techn`/`$sprite`/`$tags`/`$link`) shared by every
+/// element and relation macro. Upstream accepts them in any position, so
+/// `split_macro_args` separates them from the positional args before slotting.
+#[derive(Default)]
+struct MacroKeywords {
+    descr: Option<String>,
+    techn: Option<String>,
+    sprite: Option<String>,
+    tags: Option<String>,
+    link: Option<String>,
+}
+
+/// Split a macro's args into its positional args (in order) and the recognized
+/// `$key=value` keyword args. A `$key=value` token is pulled out of the
+/// positional stream so it can't shift the remaining positional fields.
+fn split_macro_args(args: &[String]) -> (Vec<String>, MacroKeywords) {
+    let mut positional = Vec::new();
+    let mut kw = MacroKeywords::default();
+    for a in args {
+        match kv(a) {
+            Some(("$descr", v)) => kw.descr = Some(v),
+            Some(("$techn", v)) => kw.techn = Some(v),
+            Some(("$sprite", v)) => kw.sprite = Some(v),
+            Some(("$tags", v)) => kw.tags = Some(v),
+            Some(("$link", v)) => kw.link = Some(v),
+            Some(_) => {} // unknown $keyword — drop, don't corrupt positions
+            None => positional.push(a.clone()),
+        }
+    }
+    (positional, kw)
+}
+
 pub(super) fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Element>, ParseError> {
     let (token, rest) = match line.find('(') {
         Some(p) => (&line[..p], &line[p..]),
@@ -131,7 +173,7 @@ pub(super) fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Elem
         _ => return Ok(None),
     };
     let args_str = rest.trim_start_matches('(').trim_end_matches(')');
-    let args = split_args(args_str);
+    let (args, kw) = split_macro_args(&split_args(args_str));
     let alias = args.first().cloned().unwrap_or_default();
     let label = args.get(1).cloned().unwrap_or_default();
     let (technology, descr) = match kind {
@@ -143,12 +185,18 @@ pub(super) fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Elem
         | C4ElementKind::ComponentQueue => (args.get(2).cloned(), args.get(3).cloned()),
         _ => (None, args.get(2).cloned()),
     };
+    // Keyword args override the positional slot when both are present.
+    let technology = kw.techn.or(technology);
+    let descr = kw.descr.or(descr);
     Ok(Some(C4Element {
         kind,
         alias,
         label,
         descr,
         technology,
+        sprite: kw.sprite,
+        tags: kw.tags,
+        link: kw.link,
         external,
         boundary_alias: None,
         boundary_label: None,
@@ -172,16 +220,19 @@ pub(super) fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation
         _ => return Ok(None),
     };
     let args_str = rest.trim_start_matches('(').trim_end_matches(')');
-    let args = split_args(args_str);
+    let (args, kw) = split_macro_args(&split_args(args_str));
     let from = args.first().cloned().unwrap_or_default();
     let to = args.get(1).cloned().unwrap_or_default();
     let label = args.get(2).cloned().unwrap_or_default();
-    let technology = args.get(3).cloned();
+    let technology = kw.techn.or_else(|| args.get(3).cloned());
     Ok(Some(C4Relation {
         from,
         to,
         label,
         technology,
+        sprite: kw.sprite,
+        tags: kw.tags,
+        link: kw.link,
         direction,
         bidirectional,
     }))
