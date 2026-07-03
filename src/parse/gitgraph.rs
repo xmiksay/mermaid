@@ -41,29 +41,27 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
             continue;
         }
 
-        if let Some(rest) = line.strip_prefix("title") {
+        if let Some(rest) = keyword(line, "title") {
             d.title = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("commit") {
-            let (id, tag, kind) = parse_commit_attrs(rest);
-            d.events.push(GitEvent::Commit { id, tag, kind });
-        } else if let Some(rest) = line.strip_prefix("branch") {
+        } else if let Some(rest) = keyword(line, "commit") {
+            let (id, tags, kind) = parse_commit_attrs(rest, CommitKind::Normal);
+            d.events.push(GitEvent::Commit { id, tags, kind });
+        } else if let Some(rest) = keyword(line, "branch") {
             let (name, order) = parse_branch(rest);
             d.events.push(GitEvent::Branch { name, order });
-        } else if let Some(rest) = line.strip_prefix("checkout") {
-            d.events.push(GitEvent::Checkout {
-                name: rest.trim().to_string(),
+        } else if let Some(rest) = keyword(line, "checkout").or_else(|| keyword(line, "switch")) {
+            let (name, _) = take_value(rest);
+            d.events.push(GitEvent::Checkout { name });
+        } else if let Some(rest) = keyword(line, "merge") {
+            let (from, attrs) = take_value(rest);
+            let (id, tags, kind) = parse_commit_attrs(attrs, CommitKind::Merge);
+            d.events.push(GitEvent::Merge {
+                from,
+                id,
+                tags,
+                kind,
             });
-        } else if let Some(rest) = line.strip_prefix("switch") {
-            d.events.push(GitEvent::Checkout {
-                name: rest.trim().to_string(),
-            });
-        } else if let Some(rest) = line.strip_prefix("merge") {
-            let mut iter = rest.split_whitespace();
-            let from = iter.next().unwrap_or("").to_string();
-            let attrs = iter.collect::<Vec<_>>().join(" ");
-            let (id, tag, _) = parse_commit_attrs(&attrs);
-            d.events.push(GitEvent::Merge { from, id, tag });
-        } else if let Some(rest) = line.strip_prefix("cherry-pick") {
+        } else if let Some(rest) = keyword(line, "cherry-pick") {
             let (id, tag, parent) = parse_cherry_pick_attrs(rest);
             d.events.push(GitEvent::CherryPick {
                 commit_id: id.unwrap_or_default(),
@@ -82,6 +80,18 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
         return Err(ParseError::Empty);
     }
     Ok(d)
+}
+
+/// Match `kw` as a whole keyword: the line must equal `kw` or continue with
+/// whitespace after it, so `commitxyz`/`branches` don't masquerade as
+/// `commit`/`branch` (they hard-error instead). Returns the remainder.
+fn keyword<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(kw)?;
+    match rest.chars().next() {
+        None => Some(rest),
+        Some(c) if c.is_whitespace() => Some(rest),
+        _ => None,
+    }
 }
 
 /// `branch <name> [order: <n>] [tag: <t>]` — the name is the first token; the
@@ -135,10 +145,17 @@ fn parse_cherry_pick_attrs(s: &str) -> (Option<String>, Option<String>, Option<S
     (id, tag, parent)
 }
 
-fn parse_commit_attrs(s: &str) -> (Option<String>, Option<String>, CommitKind) {
+/// Parse the trailing `id:`/`tag:`/`type:` attributes shared by `commit` and
+/// `merge`. `default_kind` is the glyph used when no `type:` is given
+/// (`Normal` for commits, `Merge` for merges); `tag:` accumulates into a list
+/// (upstream `tags+=STRING`).
+fn parse_commit_attrs(
+    s: &str,
+    default_kind: CommitKind,
+) -> (Option<String>, Vec<String>, CommitKind) {
     let mut id = None;
-    let mut tag = None;
-    let mut kind = CommitKind::Normal;
+    let mut tags = Vec::new();
+    let mut kind = default_kind;
     let mut s = s.trim();
     while !s.is_empty() {
         if let Some(rest) = s.strip_prefix("id:") {
@@ -147,14 +164,15 @@ fn parse_commit_attrs(s: &str) -> (Option<String>, Option<String>, CommitKind) {
             s = r;
         } else if let Some(rest) = s.strip_prefix("tag:") {
             let (v, r) = take_value(rest);
-            tag = Some(v);
+            tags.push(v);
             s = r;
         } else if let Some(rest) = s.strip_prefix("type:") {
             let (v, r) = take_value(rest);
             kind = match v.as_str() {
                 "HIGHLIGHT" => CommitKind::Highlight,
                 "REVERSE" => CommitKind::Reverse,
-                _ => CommitKind::Normal,
+                "NORMAL" => CommitKind::Normal,
+                _ => default_kind,
             };
             s = r;
         } else {
@@ -165,7 +183,7 @@ fn parse_commit_attrs(s: &str) -> (Option<String>, Option<String>, CommitKind) {
             }
         }
     }
-    (id, tag, kind)
+    (id, tags, kind)
 }
 
 fn take_value(s: &str) -> (String, &str) {
@@ -191,9 +209,9 @@ mod tests {
         let d = parse("gitGraph\ncommit\ncommit id: \"x\" tag: \"v1\"\nbranch develop\ncheckout develop\ncommit\nmerge develop\n").unwrap();
         assert_eq!(d.events.len(), 6);
         match &d.events[1] {
-            GitEvent::Commit { id, tag, .. } => {
+            GitEvent::Commit { id, tags, .. } => {
                 assert_eq!(id.as_deref(), Some("x"));
-                assert_eq!(tag.as_deref(), Some("v1"));
+                assert_eq!(tags, &["v1"]);
             }
             _ => panic!(),
         }
@@ -256,6 +274,62 @@ mod tests {
         assert!(!g.config.show_branches);
         // Untouched keys keep their upstream defaults.
         assert!(g.config.show_commit_label);
+    }
+
+    #[test]
+    fn quoted_branch_names_are_unquoted_everywhere() {
+        let d = parse(
+            "gitGraph\ncommit\nbranch \"feat x\"\ncheckout \"feat x\"\ncommit\ncheckout main\nmerge \"feat x\"\n",
+        )
+        .unwrap();
+        match &d.events[1] {
+            GitEvent::Branch { name, .. } => assert_eq!(name, "feat x"),
+            _ => panic!("expected branch"),
+        }
+        match &d.events[2] {
+            GitEvent::Checkout { name } => assert_eq!(name, "feat x"),
+            _ => panic!("expected checkout"),
+        }
+        match &d.events.last().unwrap() {
+            GitEvent::Merge { from, .. } => assert_eq!(from, "feat x"),
+            _ => panic!("expected merge"),
+        }
+    }
+
+    #[test]
+    fn merge_type_override_is_kept() {
+        let d = parse(
+            "gitGraph\ncommit\nbranch dev\ncommit\ncheckout main\nmerge dev type: HIGHLIGHT\n",
+        )
+        .unwrap();
+        match d.events.last().unwrap() {
+            GitEvent::Merge { from, kind, .. } => {
+                assert_eq!(from, "dev");
+                assert_eq!(*kind, CommitKind::Highlight);
+            }
+            _ => panic!("expected merge"),
+        }
+        // No override → the merge glyph is the default.
+        let d = parse("gitGraph\ncommit\nbranch dev\ncommit\ncheckout main\nmerge dev\n").unwrap();
+        match d.events.last().unwrap() {
+            GitEvent::Merge { kind, .. } => assert_eq!(*kind, CommitKind::Merge),
+            _ => panic!("expected merge"),
+        }
+    }
+
+    #[test]
+    fn multiple_tags_accumulate() {
+        let d = parse("gitGraph\ncommit tag: \"v1\" tag: \"v2\" tag: \"latest\"\n").unwrap();
+        match &d.events[0] {
+            GitEvent::Commit { tags, .. } => assert_eq!(tags, &["v1", "v2", "latest"]),
+            _ => panic!("expected commit"),
+        }
+    }
+
+    #[test]
+    fn prefix_garbage_hard_errors() {
+        assert!(parse("gitGraph\ncommitxyz\n").is_err());
+        assert!(parse("gitGraph\nbranches foo\n").is_err());
     }
 
     #[test]

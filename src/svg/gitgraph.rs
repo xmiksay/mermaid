@@ -16,7 +16,7 @@ const TITLE_GAP: f64 = 32.0;
 
 struct CommitNode {
     id: String,
-    tag: Option<String>,
+    tags: Vec<String>,
     kind: CommitKind,
     /// Column index (commit position along time axis).
     col: usize,
@@ -59,8 +59,9 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     let mut nodes: Vec<CommitNode> = Vec::new();
     let mut branches: Vec<String> = vec![main_branch.to_string()];
     // Explicit `order:` per branch (parallel to `branches`); None keeps
-    // insertion order.
-    let mut branch_orders: Vec<Option<usize>> = vec![None];
+    // insertion order. Main takes `mainBranchOrder` so it can sit among the
+    // ordered branches instead of always claiming lane 0.
+    let mut branch_orders: Vec<Option<usize>> = vec![d.config.main_branch_order];
     let mut current_branch = main_branch.to_string();
     // last commit id per branch.
     let mut head: BTreeMap<String, String> = BTreeMap::new();
@@ -80,7 +81,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
 
     for ev in &d.events {
         match ev {
-            GitEvent::Commit { id, tag, kind } => {
+            GitEvent::Commit { id, tags, kind } => {
                 let id = next_id(id.clone(), &mut auto_idx);
                 let parents = head
                     .get(&current_branch)
@@ -92,7 +93,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 col_of.insert(id.clone(), c);
                 nodes.push(CommitNode {
                     id: id.clone(),
-                    tag: tag.clone(),
+                    tags: tags.clone(),
                     kind: *kind,
                     col: c,
                     lane,
@@ -120,7 +121,12 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                     branch_orders.push(None);
                 }
             }
-            GitEvent::Merge { from, id, tag } => {
+            GitEvent::Merge {
+                from,
+                id,
+                tags,
+                kind,
+            } => {
                 let id = next_id(id.clone(), &mut auto_idx);
                 let mut parents = Vec::new();
                 if let Some(p) = head.get(&current_branch) {
@@ -135,8 +141,8 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 col_of.insert(id.clone(), c);
                 nodes.push(CommitNode {
                     id: id.clone(),
-                    tag: tag.clone(),
-                    kind: CommitKind::Merge,
+                    tags: tags.clone(),
+                    kind: *kind,
                     col: c,
                     lane,
                     parents,
@@ -154,7 +160,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 col_of.insert(new_id.clone(), c);
                 nodes.push(CommitNode {
                     id: new_id,
-                    tag: tag.clone(),
+                    tags: tag.iter().cloned().collect(),
                     kind: CommitKind::CherryPick,
                     col: c,
                     lane,
@@ -343,10 +349,11 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
             }
             svg.text(x, ly, &attrs, &n.id);
         }
-        if let Some(t) = &n.tag {
+        // Tags stack upward from the node (upstream `tags+=STRING`).
+        for (ti, t) in n.tags.iter().enumerate() {
             svg.text(
                 x,
-                y - COMMIT_R - 6.0,
+                y - COMMIT_R - 6.0 - ti as f64 * 13.0,
                 &format!(
                     "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\" font-weight=\"bold\""
                 ),
@@ -405,12 +412,12 @@ mod tests {
             events: vec![
                 GitEvent::Commit {
                     id: None,
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
                 GitEvent::Commit {
                     id: None,
-                    tag: Some("v1".into()),
+                    tags: vec!["v1".into()],
                     kind: CommitKind::Highlight,
                 },
                 GitEvent::Branch {
@@ -419,7 +426,7 @@ mod tests {
                 },
                 GitEvent::Commit {
                     id: None,
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
             ],
@@ -439,12 +446,12 @@ mod tests {
             events: vec![
                 GitEvent::Commit {
                     id: Some("a".into()),
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
                 GitEvent::Commit {
                     id: Some("b".into()),
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
             ],
@@ -470,7 +477,7 @@ mod tests {
             events: vec![
                 GitEvent::Commit {
                     id: Some("a".into()),
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
                 GitEvent::Branch {
@@ -495,7 +502,7 @@ mod tests {
         let d = GitGraphDiagram {
             events: vec![GitEvent::Commit {
                 id: None,
-                tag: None,
+                tags: Vec::new(),
                 kind: CommitKind::Normal,
             }],
             config: crate::parse::GitGraphConfig {
@@ -514,7 +521,7 @@ mod tests {
         let d = GitGraphDiagram {
             events: vec![GitEvent::Commit {
                 id: Some("only".into()),
-                tag: None,
+                tags: Vec::new(),
                 kind: CommitKind::Normal,
             }],
             config: crate::parse::GitGraphConfig {
@@ -537,7 +544,7 @@ mod tests {
             events: vec![
                 GitEvent::Commit {
                     id: Some("a".into()),
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
                 GitEvent::Branch {
@@ -546,7 +553,7 @@ mod tests {
                 },
                 GitEvent::Commit {
                     id: Some("b".into()),
-                    tag: None,
+                    tags: Vec::new(),
                     kind: CommitKind::Normal,
                 },
                 GitEvent::Checkout {
@@ -555,7 +562,8 @@ mod tests {
                 GitEvent::Merge {
                     from: "dev".into(),
                     id: Some("m".into()),
-                    tag: None,
+                    tags: Vec::new(),
+                    kind: CommitKind::Merge,
                 },
                 GitEvent::CherryPick {
                     commit_id: "b".into(),
@@ -573,6 +581,88 @@ mod tests {
         assert!(svg.contains("r=\"2.5\""));
         assert!(svg.contains("r=\"5\""));
         assert!(!svg.contains("rotate(45"));
+    }
+
+    #[test]
+    fn merge_type_override_draws_highlight_glyph() {
+        // `merge dev type: HIGHLIGHT` must not draw the merge glyph.
+        let d = GitGraphDiagram {
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
+                GitEvent::Commit {
+                    id: Some("b".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Checkout {
+                    name: "main".into(),
+                },
+                GitEvent::Merge {
+                    from: "dev".into(),
+                    id: Some("m".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Highlight,
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // The highlight glyph is an r="10" circle (COMMIT_R + 2); the merge
+        // glyph's inner ring is r="5" — absent here.
+        assert!(svg.contains("r=\"10\""));
+        assert!(!svg.contains("r=\"5\""));
+    }
+
+    #[test]
+    fn multiple_tags_all_render() {
+        let d = GitGraphDiagram {
+            events: vec![GitEvent::Commit {
+                id: Some("a".into()),
+                tags: vec!["v1".into(), "v2".into()],
+                kind: CommitKind::Normal,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">[v1]<"));
+        assert!(svg.contains(">[v2]<"));
+    }
+
+    #[test]
+    fn main_branch_order_positions_main_among_lanes() {
+        // With mainBranchOrder=2, `main` (order 2) sits after `dev` (insertion
+        // lane 1) instead of claiming the first lane.
+        let d = GitGraphDiagram {
+            direction: GitDirection::TopDown,
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
+            ],
+            config: crate::parse::GitGraphConfig {
+                main_branch_order: Some(2),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        let main_x = lane_x_before(&svg, svg.find(">main<").unwrap());
+        let dev_x = lane_x_before(&svg, svg.find(">dev<").unwrap());
+        assert!(dev_x < main_x, "dev should claim the earlier lane");
     }
 
     /// Reads the `x="…"` of the `<text>` element ending just before byte `end`.
