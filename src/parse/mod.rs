@@ -142,6 +142,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let Diagram::GitGraph(g) = &mut diagram {
         apply_git_graph_config(&mut g.config, &meta.git_graph);
     }
+    if let Diagram::Packet(p) = &mut diagram {
+        apply_packet_config(&mut p.config, &meta.config);
+    }
     Ok((diagram, meta))
 }
 
@@ -188,6 +191,47 @@ fn apply_git_graph_config(cfg: &mut ast::GitGraphConfig, meta: &ast::GitGraphMet
     }
     if let Some(v) = meta.parallel_commits {
         cfg.parallel_commits = v;
+    }
+}
+
+/// Overlay the preamble's `config.packet.*` keys onto the packet layout config,
+/// leaving the renderer's defaults where the source set nothing (or set an
+/// unparseable / non-positive value).
+fn apply_packet_config(
+    cfg: &mut ast::PacketConfig,
+    map: &std::collections::BTreeMap<String, String>,
+) {
+    if let Some(v) = map.get("packet.bitsPerRow").and_then(|v| v.parse().ok()) {
+        if v >= 1 {
+            cfg.bits_per_row = v;
+        }
+    }
+    if let Some(v) = map.get("packet.bitWidth").and_then(|v| v.parse().ok()) {
+        if v > 0.0 {
+            cfg.bit_width = v;
+        }
+    }
+    if let Some(v) = map.get("packet.rowHeight").and_then(|v| v.parse().ok()) {
+        if v > 0.0 {
+            cfg.row_height = v;
+        }
+    }
+    if let Some(v) = map.get("packet.showBits") {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => cfg.show_bits = true,
+            "false" | "0" | "no" => cfg.show_bits = false,
+            _ => {}
+        }
+    }
+    if let Some(v) = map.get("packet.paddingX").and_then(|v| v.parse().ok()) {
+        if v >= 0.0 {
+            cfg.padding_x = v;
+        }
+    }
+    if let Some(v) = map.get("packet.paddingY").and_then(|v| v.parse().ok()) {
+        if v >= 0.0 {
+            cfg.padding_y = v;
+        }
     }
 }
 
@@ -300,5 +344,28 @@ mod tests {
     #[test]
     fn classifies_malformed_statement() {
         assert_eq!(kind_of("pie\n : 3\n"), SyntaxKind::Malformed);
+    }
+
+    #[test]
+    fn packet_config_overlays_from_frontmatter() {
+        let src = "---\nconfig:\n  packet:\n    bitsPerRow: 16\n    rowHeight: 24\n    showBits: false\n---\npacket-beta\n0-15: \"Src\"\n";
+        let (d, _) = parse_with_meta(src).unwrap();
+        let Diagram::Packet(p) = d else {
+            panic!("expected packet diagram")
+        };
+        assert_eq!(p.config.bits_per_row, 16);
+        assert_eq!(p.config.row_height, 24.0);
+        assert!(!p.config.show_bits);
+        // Unset knobs keep their defaults.
+        assert_eq!(p.config.bit_width, 16.0);
+    }
+
+    #[test]
+    fn packet_config_defaults_when_absent() {
+        let (d, _) = parse_with_meta("packet-beta\n0-15: \"Src\"\n").unwrap();
+        let Diagram::Packet(p) = d else {
+            panic!("expected packet diagram")
+        };
+        assert_eq!(p.config, ast::PacketConfig::default());
     }
 }
