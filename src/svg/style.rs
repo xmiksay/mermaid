@@ -19,6 +19,12 @@ pub(crate) struct ResolvedStyle {
     pub color: Option<String>,
     /// `font-size`, with any trailing `px` stripped.
     pub font_size: Option<String>,
+    /// `font-weight` (e.g. `bold`, `600`).
+    pub font_weight: Option<String>,
+    /// `font-style` (e.g. `italic`).
+    pub font_style: Option<String>,
+    /// `opacity` — applied to the shape.
+    pub opacity: Option<String>,
 }
 
 impl ResolvedStyle {
@@ -32,12 +38,29 @@ impl ResolvedStyle {
         if let Some(d) = &self.stroke_dasharray {
             s.push_str(&format!(" stroke-dasharray=\"{d}\""));
         }
+        if let Some(o) = &self.opacity {
+            s.push_str(&format!(" opacity=\"{o}\""));
+        }
         s
     }
 
     /// Label text colour, falling back to the theme foreground.
     pub(crate) fn label_fill<'a>(&'a self, def_fg: &'a str) -> &'a str {
         self.color.as_deref().unwrap_or(def_fg)
+    }
+
+    /// Extra text-presentation attributes (`font-weight`/`font-style`)
+    /// contributed by the style, as a space-prefixed attribute string (empty
+    /// when the style is silent). Appended after a renderer's own `<text>` attrs.
+    pub(crate) fn text_attrs(&self) -> String {
+        let mut s = String::new();
+        if let Some(w) = &self.font_weight {
+            s.push_str(&format!(" font-weight=\"{w}\""));
+        }
+        if let Some(st) = &self.font_style {
+            s.push_str(&format!(" font-style=\"{st}\""));
+        }
+        s
     }
 
     /// Stroke colour for inner separators, falling back to the theme stroke.
@@ -100,6 +123,9 @@ fn pick(acc: &Style) -> ResolvedStyle {
         stroke_dasharray: get("stroke-dasharray"),
         color: get("color"),
         font_size: strip_px(get("font-size")),
+        font_weight: get("font-weight"),
+        font_style: get("font-style"),
+        opacity: get("opacity"),
     }
 }
 
@@ -150,6 +176,25 @@ mod tests {
         let r = pick(&s(&[("stroke-width", "4px"), ("font-size", "18px")]));
         assert_eq!(r.stroke_width.as_deref(), Some("4"));
         assert_eq!(r.font_size.as_deref(), Some("18"));
+    }
+
+    #[test]
+    fn honors_font_weight_style_opacity() {
+        let r = pick(&s(&[
+            ("font-weight", "bold"),
+            ("font-style", "italic"),
+            ("opacity", "0.5"),
+        ]));
+        assert_eq!(r.font_weight.as_deref(), Some("bold"));
+        assert_eq!(r.font_style.as_deref(), Some("italic"));
+        assert_eq!(r.opacity.as_deref(), Some("0.5"));
+        assert_eq!(
+            r.text_attrs(),
+            " font-weight=\"bold\" font-style=\"italic\""
+        );
+        assert!(r
+            .shape_attrs("#fff", "#000", "1")
+            .contains("opacity=\"0.5\""));
     }
 
     #[test]

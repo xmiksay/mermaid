@@ -1,6 +1,7 @@
 //! Entity-relationship (ER) AST types.
 
 use super::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ErDiagram {
@@ -8,6 +9,8 @@ pub struct ErDiagram {
     pub relations: Vec<ErRelation>,
     /// `direction TB/BT/LR/RL`; drives the same layout transpose as flowchart.
     pub direction: FlowDirection,
+    /// `classDef <name> <props>` style classes, resolved per entity.
+    pub class_defs: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +20,10 @@ pub struct Entity {
     /// Display text; equals `name` unless an `id[Alias]` form set an alias.
     pub label: String,
     pub attributes: Vec<EntityAttribute>,
+    /// CSS classes attached via `class <id> <name>` or the `id:::name` shorthand.
+    pub classes: Vec<String>,
+    /// Inline `style <id> <props>` declarations.
+    pub style: Style,
 }
 
 #[derive(Debug, Clone, PartialEq)]
