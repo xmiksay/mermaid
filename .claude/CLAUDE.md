@@ -348,6 +348,11 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `src/parse/flowchart/mod.rs`): a top-level `direction` is a validated no-op,
   and unknown keys / `shape:` names inside a v11 `id@{ … }` block fall back to
   `Rect` for forward compatibility.
+- Flowchart **header aliases**: `parse_direction` also accepts upstream's `<dir>`
+  symbol aliases — `>`=LR, `<`=RL, `^`=BT, `v`=TB (`graph >`). The
+  `flowchart-elk` header (upstream's ELK-layouter selector) is dispatched to the
+  flowchart parser and laid out with sugiyama, matching the `layout: elk`
+  config's layout-deviation tolerance.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `;` is a **statement terminator/separator** anywhere a newline is
