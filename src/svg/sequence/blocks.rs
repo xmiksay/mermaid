@@ -10,7 +10,7 @@ pub(super) fn layout_items(
     items: &[SequenceItem],
     out: &mut Vec<Event>,
     cursor: &mut f64,
-    counter: &mut u32,
+    counter: &mut f64,
     num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
@@ -19,7 +19,8 @@ pub(super) fn layout_items(
             SequenceItem::AutoNumber(cfg) => match cfg {
                 Some(c) => {
                     num.on = true;
-                    num.step = c.step.max(1);
+                    // A non-positive step would never advance; fall back to 1.
+                    num.step = if c.step > 0.0 { c.step } else { 1.0 };
                     *counter = c.start;
                 }
                 None => num.on = false,
@@ -119,7 +120,7 @@ fn emit_simple_block(
     block: &SequenceBlock,
     out: &mut Vec<Event>,
     cursor: &mut f64,
-    counter: &mut u32,
+    counter: &mut f64,
     num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
@@ -146,7 +147,7 @@ fn emit_rect_block(
     rect: &SequenceRect,
     out: &mut Vec<Event>,
     cursor: &mut f64,
-    counter: &mut u32,
+    counter: &mut f64,
     num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
@@ -170,7 +171,7 @@ fn emit_branched_block(
     branches: &[AltBranch],
     out: &mut Vec<Event>,
     cursor: &mut f64,
-    counter: &mut u32,
+    counter: &mut f64,
     num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
@@ -464,6 +465,26 @@ mod tests {
         // After `autonumber off`, subsequent messages carry no prefix.
         assert!(svg.contains(">c<"));
         assert!(!svg.contains(">20. c<"));
+    }
+
+    #[test]
+    fn autonumber_decimal_numbers_render() {
+        // `autonumber 1.5 0.5` → 1.5, 2, 2.5 — integral values drop the decimal
+        // point (#176).
+        let svg = render(
+            &build("sequenceDiagram\nautonumber 1.5 0.5\nA->>B: a\nA->>B: b\nA->>B: c\n"),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">1.5. a<"));
+        assert!(svg.contains(">2. b<"));
+        assert!(svg.contains(">2.5. c<"));
+    }
+
+    #[test]
+    fn half_arrow_uses_half_marker() {
+        let svg = render(&build("sequenceDiagram\nA-\\B: x\n"), &Theme::default());
+        assert!(svg.contains("id=\"arrow-half\""));
+        assert!(svg.contains("marker-end=\"url(#arrow-half)\""));
     }
 
     #[test]

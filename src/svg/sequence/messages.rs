@@ -197,6 +197,8 @@ fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'sta
         ArrowKind::DashedOpen => ("6 4", None, Some("arrow-open")),
         ArrowKind::BiSolidArrow => ("", Some("arrow-filled"), Some("arrow-filled")),
         ArrowKind::BiDashedArrow => ("6 4", Some("arrow-filled"), Some("arrow-filled")),
+        ArrowKind::HalfArrow => ("", None, Some("arrow-half")),
+        ArrowKind::DashedHalfArrow => ("6 4", None, Some("arrow-half")),
     }
 }
 
@@ -224,9 +226,18 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
         h = h,
         half = h / 2.0,
     );
+    // Half arrow: a single upper barb of the filled arrowhead (`-\`/`-/`).
+    let half_arrow = format!(
+        "<marker id=\"arrow-half\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
+         markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto-start-reverse\">\
+         <path d=\"M0 0 L{h} {half}\" fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"/></marker>",
+        h = h,
+        half = h / 2.0,
+    );
     svg.defs_raw(&filled);
     svg.defs_raw(&open);
     svg.defs_raw(&cross);
+    svg.defs_raw(&half_arrow);
 }
 
 fn svg_n(v: f64) -> String {

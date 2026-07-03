@@ -100,8 +100,11 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     // First pass: precompute events with y positions.
     let mut events: Vec<Event> = Vec::new();
     let mut cursor = body_top;
-    let mut step_counter: u32 = 1;
-    let mut num = Numbering { on: false, step: 1 };
+    let mut step_counter: f64 = 1.0;
+    let mut num = Numbering {
+        on: false,
+        step: 1.0,
+    };
     layout_items(
         &d.items,
         &mut events,
@@ -203,7 +206,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
                 let x2 = x_of.get(&msg.to);
                 if let (Some(&x1), Some(&x2)) = (x1, x2) {
                     let label = if let Some(n) = number {
-                        format!("{n}. {}", msg.text)
+                        format!("{}. {}", fmt_seq_number(*n), msg.text)
                     } else {
                         msg.text.clone()
                     };
@@ -230,7 +233,7 @@ struct Event {
 enum EventKind {
     Message {
         msg: Message,
-        number: Option<u32>,
+        number: Option<f64>,
     },
     Note(SequenceNote),
     Activate(String),
@@ -273,7 +276,18 @@ enum BlockKind {
 #[derive(Debug, Clone, Copy)]
 struct Numbering {
     on: bool,
-    step: u32,
+    step: f64,
+}
+
+/// Format a message number for display: an integral value drops the decimal
+/// point (`2.0` → `2`), a fractional one keeps it (`1.5`), matching upstream's
+/// JS `Number` stringification for `autonumber 1.5 0.5`.
+fn fmt_seq_number(n: f64) -> String {
+    if n.fract() == 0.0 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 #[cfg(test)]

@@ -5,19 +5,22 @@
 //!   * `title <text>`.
 //!   * `participant <id> [as <alias>]`, `actor <id> [as <alias>]`.
 //!   * Messages: `from <arrow> to : text` with arrows
-//!     `->`, `->>`, `-->`, `-->>`, `-x`, `--x`, `-)`, `--)`, and the
-//!     bidirectional forms `<<->>`, `<<-->>`.
-//!   * `autonumber` (sets a per-diagram flag).
+//!     `->`, `->>`, `-->`, `-->>`, `-x`, `--x`, `-)`, `--)`, the bidirectional
+//!     forms `<<->>`, `<<-->>`, and the v11.12.3+ half (single-barb) arrows
+//!     `-\`, `-/`, `-|\`, `-|/` (dashed variants with the extra leading dash).
+//!   * `autonumber [start [step]]` — `start`/`step` may be fractional
+//!     (`autonumber 1.5 0.5`, v11.15+).
 //!   * `activate <id>` / `deactivate <id>`, plus the `->>+`/`-->>-` arrow
 //!     activation shorthand.
 //!   * `create [participant|actor] <id> [as <alias>]` / `destroy <id>` —
 //!     participant lifecycle (positional items, spawned/terminated inline).
-//!   * `link <id>: …` / `links <id>: {…}` actor menus (consumed, not rendered).
+//!   * `link <id>: …` / `links <id>: {…}` actor menus and `properties <id>: {…}`
+//!     / `details <id>: {…}` actor metadata (consumed, not rendered).
 //!   * Notes: `Note over A[,B]: text`, `Note right of A: text`, `Note left of A: text`.
 //!   * Blocks (each followed by item lines, terminated by `end`):
 //!     `alt label` ... `else label` ... `end`,
 //!     `loop label` ... `end`,
-//!     `par label` ... `and label` ... `end`,
+//!     `par label` ... `and label` ... `end` (and the overlapping `par_over`),
 //!     `opt label` ... `end`,
 //!     `critical label` ... `option label` ... `end`.
 //!   * `box label` ... `end` — collects participants declared inside.
@@ -193,6 +196,28 @@ mod tests {
             .unwrap();
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[0].label, "req");
+        assert_eq!(branches[1].label, "other");
+    }
+
+    #[test]
+    fn par_over_block() {
+        // `par_over` is upstream's overlapping-par frame; it reuses the Par
+        // branch structure and must not hard-error (#176).
+        let d = parse("sequenceDiagram\npar_over shared\nA->>B: x\nand other\nA->>C: y\nend\n")
+            .unwrap();
+        let branches = d
+            .items
+            .iter()
+            .find_map(|i| {
+                if let SequenceItem::Par(b) = i {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[0].label, "shared");
         assert_eq!(branches[1].label, "other");
     }
 
