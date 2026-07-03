@@ -299,6 +299,7 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.security_level = get("securityLevel");
     meta.ticket_base_url = get("kanban.ticketBaseUrl");
     meta.value_format = get("treemap.valueFormat");
+    meta.show_values = get("treemap.showValues").as_deref().and_then(parse_flag);
     meta.sankey_link_color = get("sankey.linkColor");
     meta.sankey_node_alignment = get("sankey.nodeAlignment");
     meta.timeline_disable_multicolor = get("timeline.disableMulticolor")
@@ -474,6 +475,13 @@ mod tests {
         let (m, s) = strip(src);
         assert_eq!(m.value_format.as_deref(), Some("$0,0"));
         assert_eq!(s, "treemap-beta\n\"A\": 5");
+    }
+
+    #[test]
+    fn frontmatter_treemap_show_values() {
+        let src = "---\nconfig:\n  treemap:\n    showValues: false\n---\ntreemap-beta\n\"A\": 5\n";
+        let (m, _) = strip(src);
+        assert_eq!(m.show_values, Some(false));
     }
 
     #[test]
