@@ -333,6 +333,14 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   registered in `existing` by `push_pseudo` so region-tracking counts them as
   members and their circles render inside the frame. Pseudo-state (start/end/
   fork/join) fills use `theme.fg` so they stay visible on the dark theme.
+  Parallel regions (`--`) are disconnected components that the shared sugiyama
+  layout would otherwise interleave, so `stack_regions` (`svg/state/composite.rs`)
+  post-processes `pos`: it left-aligns each region and translates it into its own
+  vertical band below the previous one, returning the y of each dashed divider
+  (`stroke-dasharray="3 3"`) drawn between adjacent regions in `draw_composites`.
+  Every node in a region shares one stacking offset, so `render` shifts each
+  routed edge's polyline by its from-node's `node_offset` to keep edges tracking
+  the moved states.
 - State aliasing `state "description" as X` binds `X`'s display label to the
   quoted text (`parse_quoted_as` in `parse_state_decl`), so the id stays clean
   and a later transition referencing `X` reuses the same state — no phantom box
