@@ -88,10 +88,23 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     };
 
     // Screen-space positions for laid-out (non-composite) states.
-    let pos: HashMap<NodeId, (f64, f64)> = layout
+    let mut pos: HashMap<NodeId, (f64, f64)> = layout
         .node_pos
         .iter()
         .map(|(&u, &p)| (u, transform(p)))
+        .collect();
+
+    // Stack the parallel regions of multi-region composites into disjoint
+    // vertical bands; record how far each moved so routed edges follow.
+    let orig_pos = pos.clone();
+    let dividers = stack_regions(d, &id_to_u32, &sizes, &mut pos);
+    let node_offset: HashMap<NodeId, (f64, f64)> = pos
+        .iter()
+        .filter_map(|(&u, &(x, y))| {
+            let (ox, oy) = orig_pos[&u];
+            let off = (x - ox, y - oy);
+            (off.0 != 0.0 || off.1 != 0.0).then_some((u, off))
+        })
         .collect();
 
     let boxes = compute_composite_boxes(d, &id_to_u32, &pos, &sizes);
@@ -115,7 +128,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     define_marker(&mut svg, theme);
 
     // Cluster frames first (under nodes/edges) so labels stay legible.
-    draw_composites(&mut svg, d, &boxes, theme);
+    draw_composites(&mut svg, d, &boxes, &dividers, theme);
 
     for tr in &d.transitions {
         let (Some(start), Some(end)) = (
@@ -129,7 +142,17 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         // connector clipped to the cluster box.
         let pts: Vec<(f64, f64)> = match (id_to_u32.get(&tr.from), id_to_u32.get(&tr.to)) {
             (Some(&u), Some(&v)) => match layout.edge_points.get(&(u, v)) {
-                Some(p) if p.len() >= 2 => p.iter().map(|&q| transform(q)).collect(),
+                // Both endpoints share a region, hence the same stacking offset;
+                // shift the whole routed polyline so it tracks the moved nodes.
+                Some(p) if p.len() >= 2 => {
+                    let (ox, oy) = node_offset.get(&u).copied().unwrap_or((0.0, 0.0));
+                    p.iter()
+                        .map(|&q| {
+                            let (x, y) = transform(q);
+                            (x + ox, y + oy)
+                        })
+                        .collect()
+                }
                 _ => vec![start.center, end.center],
             },
             _ => vec![start.center, end.center],
@@ -464,6 +487,25 @@ mod tests {
         // also emitted as a standalone node.
         assert_eq!(svg.matches("rx=\"10\" stroke-dasharray").count(), 1);
         assert_eq!(svg.matches("rx=\"10\"").count(), 2);
+    }
+
+    #[test]
+    fn parallel_regions_stacked_with_divider() {
+        // Two concurrent regions must render in disjoint vertical bands with a
+        // dashed divider between them, not interleaved into one blob.
+        let d = build(
+            "stateDiagram-v2\nstate Active {\n[*] --> NumLockOff\n--\n[*] --> CapsLockOff\n}\n",
+        );
+        let svg = render(&d, &Theme::default());
+        // One dashed region divider inside the frame.
+        assert_eq!(svg.matches("stroke-dasharray=\"3 3\"").count(), 1);
+        // The two regions' states sit in separate vertical bands.
+        let (_, up) = label_center(&svg, "NumLockOff");
+        let (_, down) = label_center(&svg, "CapsLockOff");
+        assert!(
+            (up - down).abs() > 20.0,
+            "regions overlap vertically: {up} vs {down}",
+        );
     }
 
     #[test]

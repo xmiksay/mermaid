@@ -12,6 +12,8 @@ use crate::svg::theme::Theme;
 
 pub(super) const FRAME_PAD: f64 = 14.0;
 const FRAME_HEADER: f64 = 18.0;
+/// Vertical gap between two stacked parallel regions inside a composite.
+const REGION_GAP: f64 = 24.0;
 
 /// Clip target for one end of a transition: the shape boundary a connector
 /// stops at. `kind` is `None` for a composite cluster box (clipped as a rect).
@@ -102,19 +104,124 @@ fn collect_member_ids<'a>(
     out: &mut Vec<&'a str>,
 ) {
     for region in &comp.regions {
-        for child in region {
-            out.push(child.as_str());
-            if let Some(child_comp) = by_id.get(child.as_str()) {
-                collect_member_ids(child_comp, by_id, out);
+        collect_region_member_ids(region, by_id, out);
+    }
+}
+
+/// Ids of every state reachable from one region, descending into nested
+/// composites so a whole region moves as a unit when regions are stacked.
+fn collect_region_member_ids<'a>(
+    region: &'a [String],
+    by_id: &HashMap<&str, &'a CompositeState>,
+    out: &mut Vec<&'a str>,
+) {
+    for child in region {
+        out.push(child.as_str());
+        if let Some(child_comp) = by_id.get(child.as_str()) {
+            for r in &child_comp.regions {
+                collect_region_member_ids(r, by_id, out);
             }
         }
     }
+}
+
+/// Stack the parallel regions of every multi-region composite into disjoint
+/// vertical bands (they otherwise share layers and render interleaved). Each
+/// region is left-aligned to a common x and translated down below the previous
+/// one; `pos` is mutated in place. Returns the y of each dashed divider drawn
+/// between adjacent regions, keyed by composite id.
+pub(super) fn stack_regions(
+    d: &StateDiagram,
+    id_to_u32: &HashMap<String, NodeId>,
+    sizes: &[(f64, f64)],
+    pos: &mut HashMap<NodeId, (f64, f64)>,
+) -> HashMap<String, Vec<f64>> {
+    let by_id: HashMap<&str, &CompositeState> =
+        d.composites.iter().map(|c| (c.id.as_str(), c)).collect();
+    let mut dividers: HashMap<String, Vec<f64>> = HashMap::new();
+
+    for comp in &d.composites {
+        if comp.regions.len() < 2 {
+            continue;
+        }
+
+        // Resolve each region to its laid-out member node ids.
+        let regions: Vec<Vec<NodeId>> = comp
+            .regions
+            .iter()
+            .map(|region| {
+                let mut ids: Vec<&str> = Vec::new();
+                collect_region_member_ids(region, &by_id, &mut ids);
+                ids.iter()
+                    .filter_map(|id| id_to_u32.get(*id).copied())
+                    .filter(|u| pos.contains_key(u))
+                    .collect()
+            })
+            .collect();
+
+        // Left edge shared by every band, so the stacked regions line up.
+        let overall_min_x = regions
+            .iter()
+            .filter_map(|nodes| region_bbox(nodes, sizes, pos).map(|b| b.0))
+            .fold(f64::INFINITY, f64::min);
+        if !overall_min_x.is_finite() {
+            continue;
+        }
+
+        let mut divs = Vec::new();
+        let mut prev_bottom: Option<f64> = None;
+        for nodes in &regions {
+            let Some((min_x, min_y, _max_x, max_y)) = region_bbox(nodes, sizes, pos) else {
+                continue;
+            };
+            let dx = overall_min_x - min_x;
+            let target_top = match prev_bottom {
+                Some(bottom) => bottom + REGION_GAP,
+                None => min_y,
+            };
+            let dy = target_top - min_y;
+            for &u in nodes {
+                if let Some(p) = pos.get_mut(&u) {
+                    p.0 += dx;
+                    p.1 += dy;
+                }
+            }
+            if let Some(bottom) = prev_bottom {
+                divs.push((bottom + target_top) / 2.0);
+            }
+            prev_bottom = Some(max_y + dy);
+        }
+        dividers.insert(comp.id.clone(), divs);
+    }
+    dividers
+}
+
+/// Bounding box `(min_x, min_y, max_x, max_y)` of a set of laid-out nodes.
+fn region_bbox(
+    nodes: &[NodeId],
+    sizes: &[(f64, f64)],
+    pos: &HashMap<NodeId, (f64, f64)>,
+) -> Option<(f64, f64, f64, f64)> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for &u in nodes {
+        let (cx, cy) = *pos.get(&u)?;
+        let (w, h) = sizes[u as usize];
+        min_x = min_x.min(cx - w / 2.0);
+        max_x = max_x.max(cx + w / 2.0);
+        min_y = min_y.min(cy - h / 2.0);
+        max_y = max_y.max(cy + h / 2.0);
+    }
+    min_x.is_finite().then_some((min_x, min_y, max_x, max_y))
 }
 
 pub(super) fn draw_composites(
     svg: &mut SvgBuilder,
     d: &StateDiagram,
     boxes: &HashMap<String, (f64, f64, f64, f64)>,
+    dividers: &HashMap<String, Vec<f64>>,
     theme: &Theme,
 ) {
     let fg = theme.fg;
@@ -150,6 +257,18 @@ pub(super) fn draw_composites(
             y0 + 20.0,
             "stroke=\"#999\" stroke-width=\"1\"",
         );
+        // Dashed dividers between stacked parallel regions.
+        if let Some(ys) = dividers.get(&comp.id) {
+            for &y in ys {
+                svg.line(
+                    x0,
+                    y,
+                    x1,
+                    y,
+                    "stroke=\"#999\" stroke-width=\"1\" stroke-dasharray=\"3 3\"",
+                );
+            }
+        }
     }
 }
 
