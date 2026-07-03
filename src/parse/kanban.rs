@@ -15,6 +15,7 @@
 //! part before `[` is the id, the bracketed text the display label.
 
 use super::ast::{KanbanColumn, KanbanDiagram, KanbanTask};
+use super::token::split_unquoted;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<KanbanDiagram, ParseError> {
@@ -94,7 +95,7 @@ fn parse_task(body: &str) -> KanbanTask {
     let mut ticket = None;
     if let Some(a) = attrs {
         let a = a.trim_end_matches('}').trim();
-        for kv in a.split(',') {
+        for kv in split_unquoted(a, ',') {
             let (k, v) = match kv.split_once(':') {
                 Some(p) => p,
                 None => continue,
@@ -177,6 +178,17 @@ mod tests {
         assert_eq!(t.text, "Write blog");
         assert_eq!(t.ticket.as_deref(), Some("MC-2037"));
         assert_eq!(t.priority.as_deref(), Some("Very High"));
+    }
+
+    #[test]
+    fn attrs_split_is_quote_aware() {
+        let d = parse(
+            "kanban\n  todo[Todo]\n    t1[Task]@{ assigned: 'Alice, Bob', priority: 'High' }\n",
+        )
+        .unwrap();
+        let t = &d.columns[0].tasks[0];
+        assert_eq!(t.assigned.as_deref(), Some("Alice, Bob"));
+        assert_eq!(t.priority.as_deref(), Some("High"));
     }
 
     #[test]
