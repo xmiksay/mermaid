@@ -57,6 +57,9 @@ pub struct DiagramMeta {
     /// `config.kanban.ticketBaseUrl` from frontmatter — copied onto a
     /// [`KanbanDiagram`] to build per-card ticket links.
     pub ticket_base_url: Option<String>,
+    /// `config.treemap.valueFormat` from frontmatter — copied onto a
+    /// [`TreemapDiagram`] to format leaf values.
+    pub value_format: Option<String>,
 }
 
 #[derive(Debug, Clone)]

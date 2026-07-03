@@ -98,7 +98,7 @@ flag uses the same lookup.
 | Block | `block-beta`, `block` | grid layout, spanning blocks, edges |
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards, `id[Label]` form, `@{…}` metadata (assigned/priority/ticket), priority-colored borders, hyperlinked tickets |
-| Treemap | `treemap-beta`, `treemap` | nested weighted rectangles, `classDef` + `:::class` fill/stroke overrides |
+| Treemap | `treemap-beta`, `treemap` | squarified nested weighted rectangles, `config.treemap.valueFormat` value formatting, `classDef` + `:::class` fill/stroke overrides |
 | ZenUML | `zenuml` | annotators, method calls, nesting braces, `return`, if/while/opt/par/try; rendered via the sequence renderer |
 
 ### Cross-cutting features
