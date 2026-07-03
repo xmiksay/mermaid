@@ -447,9 +447,23 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
     (`parse_message` in `src/parse/sequence/message.rs`): a leading `+`/`-` on the
     target id is stripped (not part of the participant name) and
-    `parse_line_to_items` synthesizes the paired event — `+` appends
-    `Activate(target)` *after* the message, `-` prepends `Deactivate(target)`
-    *before* it, matching upstream ordering.
+    `parse_line_to_items` synthesizes the paired event **after** the message
+    (upstream jison `actor signaltype +/- actor text`) — `+` appends
+    `Activate(receiver)` (`msg.to`), `-` appends `Deactivate(sender)`
+    (`msg.from`, the participant activated when it earlier received a message).
+    Deactivating the *sender* (not the receiver) is what closes John's band in
+    the canonical `Alice->>+John` / `John-->>-Alice` example.
+- Sequence `title` accepts both the space form (`title Demo`) and the legacy
+  colon form (`title: Demo`, upstream lexer `"title:"\s…`); both set
+  `SequenceDiagram.title`.
+- Sequence participant **type metadata** `id@{ "type": "database" }` (v11.12+)
+  is split off in `parse_participant` (`split_participant_meta`/`meta_type_kind`):
+  the `@{…}` block is stripped from the id and its `type`
+  (`boundary`/`control`/`entity`/`database`/`actor`/`participant`) maps onto
+  `ParticipantKind` — reusing the ZenUML stereotype glyphs in
+  `src/svg/sequence/glyphs.rs`. Unknown/absent types keep the declared
+  `participant`/`actor` kind, and a trailing `as <alias>` still binds the
+  display name.
 - Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
   head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
   in `src/svg/sequence/participants.rs` branches on `Participant.kind`.

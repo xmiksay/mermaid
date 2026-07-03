@@ -25,7 +25,12 @@ pub(super) fn parse_line_to_items(
     diag: &mut SequenceDiagram,
     line_no: usize,
 ) -> Result<Vec<SequenceItem>, ParseError> {
-    if let Some(rest) = line.strip_prefix("title ") {
+    // Both the space form (`title Demo`) and the legacy colon form
+    // (`title: Demo`, upstream lexer `"title:"\s[^#\n;]+`).
+    if let Some(rest) = line
+        .strip_prefix("title ")
+        .or_else(|| line.strip_prefix("title:"))
+    {
         diag.title = Some(rest.trim().to_string());
         return Ok(Vec::new());
     }
@@ -86,18 +91,21 @@ pub(super) fn parse_line_to_items(
     let (msg, activation) = parse_message(line, line_no)?;
     register_implicit_participant(diag, &msg.from);
     register_implicit_participant(diag, &msg.to);
-    // Activation shorthand: `->>+B` activates the target *after* the message,
-    // `-->>-A` deactivates it *before* the message — matching upstream ordering.
-    let target = msg.to.clone();
+    // Activation shorthand, both *after* the message (upstream jison
+    // `actor signaltype +/- actor text`): `->>+B` activates the receiver
+    // (`msg.to`), `-->>-B` deactivates the *sender* (`msg.from`) — the
+    // participant that was activated when it earlier received a message.
+    let receiver = msg.to.clone();
+    let sender = msg.from.clone();
     let mut items = Vec::new();
     match activation {
         Activation::Activate => {
             items.push(SequenceItem::Message(msg));
-            items.push(SequenceItem::Activate(target));
+            items.push(SequenceItem::Activate(receiver));
         }
         Activation::Deactivate => {
-            items.push(SequenceItem::Deactivate(target));
             items.push(SequenceItem::Message(msg));
+            items.push(SequenceItem::Deactivate(sender));
         }
         Activation::None => items.push(SequenceItem::Message(msg)),
     }
@@ -176,7 +184,16 @@ fn parse_participant(
     if s.is_empty() {
         return Err(ParseError::malformed(line_no, "missing participant id"));
     }
-    if let Some((id, alias)) = s.split_once(" as ") {
+    // v11.12+ metadata: `id@{ "type": "database" }` sets the participant type
+    // (drawn with the matching stereotype glyph) without leaking the raw block
+    // into the id.
+    let (decl, meta_kind) = split_participant_meta(s);
+    let kind = meta_kind.unwrap_or(kind);
+    let decl = decl.trim();
+    if decl.is_empty() {
+        return Err(ParseError::malformed(line_no, "missing participant id"));
+    }
+    if let Some((id, alias)) = decl.split_once(" as ") {
         Ok(Participant {
             id: id.trim().to_string(),
             display: alias.trim().to_string(),
@@ -184,10 +201,51 @@ fn parse_participant(
         })
     } else {
         Ok(Participant {
-            id: s.to_string(),
-            display: s.to_string(),
+            id: decl.to_string(),
+            display: decl.to_string(),
             kind,
         })
+    }
+}
+
+/// Split a v11.12+ `@{ … }` metadata block off a participant declaration,
+/// returning the declaration with the block removed and the [`ParticipantKind`]
+/// its `type` implies (if any). Upstream `participant Db@{ "type": "database" }`.
+fn split_participant_meta(s: &str) -> (String, Option<ParticipantKind>) {
+    let Some(at) = s.find("@{") else {
+        return (s.to_string(), None);
+    };
+    let Some(close_rel) = s[at + 2..].find('}') else {
+        return (s.to_string(), None);
+    };
+    let close = at + 2 + close_rel;
+    let kind = meta_type_kind(&s[at + 2..close]);
+    let mut decl = String::from(&s[..at]);
+    decl.push_str(&s[close + 1..]);
+    (decl, kind)
+}
+
+/// Read the `type` value out of a `{ "type": "database" }` metadata body and map
+/// it onto a [`ParticipantKind`]. Unknown/absent types return `None` so the
+/// caller keeps the declared `participant`/`actor` kind.
+fn meta_type_kind(meta: &str) -> Option<ParticipantKind> {
+    let after_key = &meta[meta.find("type")? + "type".len()..];
+    let value_part = &after_key[after_key.find(':')? + 1..];
+    let value = value_part
+        .split(',')
+        .next()
+        .unwrap_or(value_part)
+        .trim()
+        .trim_matches(|c: char| c == '"' || c == '\'' || c == '}')
+        .trim();
+    match value.to_ascii_lowercase().as_str() {
+        "boundary" => Some(ParticipantKind::Boundary),
+        "control" => Some(ParticipantKind::Control),
+        "entity" => Some(ParticipantKind::Entity),
+        "database" | "db" => Some(ParticipantKind::Database),
+        "actor" => Some(ParticipantKind::Actor),
+        "participant" => Some(ParticipantKind::Participant),
+        _ => None,
     }
 }
 
@@ -357,12 +415,51 @@ mod tests {
         assert_eq!(d.participants.len(), 2);
         assert!(d.participants.iter().all(|p| p.id == "A" || p.id == "B"));
 
-        // Sequence: Message(A->B), Activate(B), Deactivate(A), Message(B->A).
+        // `+` activates the receiver *after* the message; `-` deactivates the
+        // *sender* *after* the message. So B is activated then closed:
+        // Message(A->B), Activate(B), Message(B->A), Deactivate(B).
         assert!(matches!(&d.items[0], SequenceItem::Message(m) if m.to == "B"));
         assert!(matches!(&d.items[1], SequenceItem::Activate(s) if s == "B"));
-        assert!(matches!(&d.items[2], SequenceItem::Deactivate(s) if s == "A"));
-        assert!(matches!(&d.items[3], SequenceItem::Message(m) if m.to == "A"));
+        assert!(matches!(&d.items[2], SequenceItem::Message(m) if m.to == "A"));
+        assert!(matches!(&d.items[3], SequenceItem::Deactivate(s) if s == "B"));
         assert_eq!(d.items.len(), 4);
+    }
+
+    #[test]
+    fn deactivation_shorthand_closes_sender_band() {
+        // Canonical docs example: John is activated by the first message and the
+        // trailing `-` on the reply must close *John's* band, not Alice's.
+        let d = parse("sequenceDiagram\nAlice->>+John: hi\nJohn-->>-Alice: ok\n").unwrap();
+        assert!(matches!(&d.items[1], SequenceItem::Activate(s) if s == "John"));
+        assert!(matches!(&d.items[3], SequenceItem::Deactivate(s) if s == "John"));
+    }
+
+    #[test]
+    fn title_colon_form() {
+        let d = parse("sequenceDiagram\ntitle: Demo Title\nA->>B: hi\n").unwrap();
+        assert_eq!(d.title.as_deref(), Some("Demo Title"));
+    }
+
+    #[test]
+    fn participant_type_metadata_sets_kind() {
+        let d = parse("sequenceDiagram\nparticipant Db@{ \"type\": \"database\" }\nDb->>Db: q\n")
+            .unwrap();
+        // One clean `Db` participant, no phantom raw-metadata id.
+        assert_eq!(d.participants.len(), 1);
+        let p = &d.participants[0];
+        assert_eq!(p.id, "Db");
+        assert_eq!(p.kind, ParticipantKind::Database);
+    }
+
+    #[test]
+    fn participant_metadata_with_alias() {
+        let d =
+            parse("sequenceDiagram\nparticipant Q@{ \"type\": \"boundary\" } as Queue\nQ->>Q: x\n")
+                .unwrap();
+        let p = &d.participants[0];
+        assert_eq!(p.id, "Q");
+        assert_eq!(p.display, "Queue");
+        assert_eq!(p.kind, ParticipantKind::Boundary);
     }
 
     #[test]
