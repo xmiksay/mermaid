@@ -10,6 +10,7 @@ use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
+use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -291,6 +292,16 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
                 &theme.flow_edge_stroke
             ),
         );
+
+        if let Some(title) = &e.label {
+            let (mx, my) = polyline_midpoint(&pts);
+            svg.text(
+                mx,
+                my - 3.0,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+                title,
+            );
+        }
     }
 
     for p in &placed_services {
@@ -481,6 +492,7 @@ mod tests {
                 to_side: ArchSide::Right,
                 to_arrow: false,
                 group: false,
+                label: None,
             }],
         };
         let svg = render(&d, &Theme::default());
@@ -515,6 +527,24 @@ architecture-beta
             truncate_icon_name("mdi:application-braces-outline"),
             "application-bra…"
         );
+    }
+
+    #[test]
+    fn edge_title_renders() {
+        // The `-[title]-` connector draws the title text on the edge (#184).
+        let src = "\
+architecture-beta
+    service db(database)[DB]
+    service server(server)[Srv]
+    db:R -[Queries]- L:server
+";
+        let d = match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Architecture(d) => d,
+            _ => panic!("expected architecture diagram"),
+        };
+        assert_eq!(d.edges[0].label.as_deref(), Some("Queries"));
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Queries<"), "edge title missing");
     }
 
     #[test]

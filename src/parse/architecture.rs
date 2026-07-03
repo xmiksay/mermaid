@@ -44,6 +44,9 @@ pub(crate) fn parse(input: &str) -> Result<ArchitectureDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix("junction") {
             let (id, parent) = split_parent(rest);
             d.junctions.push(ArchJunction { id, parent });
+        } else if is_align_stmt(line) {
+            // v11.16+ `align row|column id id...` — consumed; honoring the
+            // alignment constraint in layout is a follow-up.
         } else {
             d.edges.push(parse_edge(line, line_no)?);
         }
@@ -99,7 +102,14 @@ fn parse_id_icon_label(s: &str) -> (String, Option<String>, Option<String>) {
         .unwrap_or(s.len());
     let id = s[..id_end].trim().to_string();
     let icon = if let (Some(o), Some(c)) = (s[id_end..].find('('), s[id_end..].find(')')) {
-        Some(s[id_end + o + 1..id_end + c].to_string())
+        // Upstream allows a quoted icon name (`("logos:aws-lambda")`); strip the
+        // quotes so the fallback caption doesn't render a stray `"`.
+        Some(
+            s[id_end + o + 1..id_end + c]
+                .trim()
+                .trim_matches('"')
+                .to_string(),
+        )
     } else {
         None
     };
@@ -115,22 +125,28 @@ fn parse_id_icon_label(s: &str) -> (String, Option<String>, Option<String>) {
 fn parse_edge(line: &str, line_no: usize) -> Result<ArchEdge, ParseError> {
     // forms:
     //   id:S -- S:id
-    //   id:S --> S:id      (with arrow on to)
-    //   id:S <-- S:id      (with arrow on from)
-    //   id{group}:S -- S:id   (group edge)
+    //   id:S --> S:id            (with arrow on to)
+    //   id:S <-- S:id            (with arrow on from)
+    //   id:S -[title]- S:id      (titled edge)
+    //   id{group}:S -- S:id      (group edge)
     let mut from_arrow = false;
     let mut to_arrow = false;
     let mut group = false;
+    let mut label = None;
 
-    let pat = if line.contains("--") {
-        "--"
+    // Connector is either `--` or the titled form `-[title]-` (upstream langium
+    // Arrow `'--' | '-' title=ARCH_TITLE '-'`).
+    let (left, right) = if let Some((l, title, r)) = split_titled_edge(line) {
+        label = Some(title);
+        (l, r)
+    } else if let Some((l, r)) = line.split_once("--") {
+        (l, r)
     } else {
         return Err(ParseError::malformed(
             line_no,
             format!("expected '--' edge: '{line}'"),
         ));
     };
-    let (left, right) = line.split_once(pat).unwrap();
     let mut left = left.trim();
     let mut right = right.trim();
     if let Some(s) = left.strip_suffix('<') {
@@ -160,7 +176,30 @@ fn parse_edge(line: &str, line_no: usize) -> Result<ArchEdge, ParseError> {
         to_side,
         to_arrow,
         group,
+        label,
     })
+}
+
+/// Splits a titled edge `left -[title]- right` into its three parts. Returns
+/// `None` when the line has no `-[…]-` connector.
+fn split_titled_edge(line: &str) -> Option<(&str, String, &str)> {
+    let open = line.find("-[")?;
+    let close_rel = line[open + 2..].find("]-")?;
+    let close = open + 2 + close_rel;
+    let title = line[open + 2..close].trim().to_string();
+    Some((&line[..open], title, &line[close + 2..]))
+}
+
+/// True for a `align row|column …` statement (v11.16+). Requires whitespace
+/// after `align` so a service/edge id starting with `align` isn't captured.
+fn is_align_stmt(line: &str) -> bool {
+    match line.strip_prefix("align") {
+        Some(rest) if rest.starts_with(char::is_whitespace) => {
+            let kw = rest.trim_start();
+            kw.starts_with("row") || kw.starts_with("column")
+        }
+        _ => false,
+    }
 }
 
 /// Strips a trailing `{group}` endpoint marker, returning the bare id and
@@ -222,5 +261,47 @@ mod tests {
         assert_eq!(e.from_side, ArchSide::Right);
         assert_eq!(e.to_side, ArchSide::Left);
         assert!(e.group);
+    }
+
+    #[test]
+    fn edge_title() {
+        // Upstream `-[title]-` connector carries an edge title (#184).
+        let src = "architecture-beta\nservice db(database)[DB]\nservice server(server)[Srv]\ndb:R -[Queries]- L:server\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges.len(), 1);
+        let e = &d.edges[0];
+        assert_eq!(e.from, "db");
+        assert_eq!(e.to, "server");
+        assert_eq!(e.from_side, ArchSide::Right);
+        assert_eq!(e.to_side, ArchSide::Left);
+        assert_eq!(e.label.as_deref(), Some("Queries"));
+    }
+
+    #[test]
+    fn edge_title_with_arrows() {
+        let src =
+            "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\na:R <-[link]-> L:b\n";
+        let d = parse(src).unwrap();
+        let e = &d.edges[0];
+        assert!(e.from_arrow);
+        assert!(e.to_arrow);
+        assert_eq!(e.label.as_deref(), Some("link"));
+    }
+
+    #[test]
+    fn align_statement_consumed() {
+        // `align row|column id id…` (v11.16+) is consumed, not a hard error (#184).
+        let src = "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign row a b\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.services.len(), 2);
+        assert_eq!(d.edges.len(), 0);
+    }
+
+    #[test]
+    fn quoted_icon_name_strips_quotes() {
+        // A quoted iconify name must not leak the quote into the fallback caption (#184).
+        let src = "architecture-beta\nservice lambda(\"logos:aws-lambda\")[Lambda]\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.services[0].icon.as_deref(), Some("logos:aws-lambda"));
     }
 }

@@ -252,6 +252,9 @@ pub struct ArchEdge {
     pub to_side: ArchSide,
     pub to_arrow: bool,
     pub group: bool,
+    /// Optional edge title from the `-[title]-` connector form (upstream
+    /// langium Arrow `'-' title=ARCH_TITLE '-'`), rendered at the edge midpoint.
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

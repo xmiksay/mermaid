@@ -855,9 +855,12 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   static renderer can't fetch Iconify packs (`logos:aws-lambda`, `mdi:…`), so an
   unrecognized name falls back to the generic box **plus** the name as a caption
   (`truncate_icon_name`: segment after the last `:`, capped at 16 chars) — the
-  icon identity is shown, not silently lost. `ArchEdge` has no `label` field:
-  upstream architecture-beta has no edge-label syntax, so it was dropped as dead
-  weight.
+  icon identity is shown, not silently lost. A quoted icon name
+  (`("logos:aws-lambda")`) is unquoted in `parse_id_icon_label`, so the caption
+  never keeps a stray `"`. The titled edge form `id:S -[title]- S:id` (upstream
+  langium Arrow `'--' | '-' title=ARCH_TITLE '-'`) fills `ArchEdge.label`
+  (`split_titled_edge`), rendered at the edge midpoint. `align row|column id id…`
+  (v11.16+) is consumed by `is_align_stmt` (honoring it in layout is a follow-up).
 - timeline header accepts a v11.14+ direction token — `timeline LR`/`timeline TD`
   (also `TB`/`BT`/`RL`) parse into `TimelineDiagram.direction` (`parse_header` in
   `src/parse/timeline.rs`), validated against the known set (unknown tokens still
