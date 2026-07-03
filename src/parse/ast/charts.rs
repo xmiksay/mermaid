@@ -50,6 +50,13 @@ pub struct TimelinePeriod {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SankeyDiagram {
     pub links: Vec<SankeyLink>,
+    /// `config.sankey.linkColor` — how each link's stroke color is derived:
+    /// `source`/`target` (the node's palette color), `gradient` (source→target
+    /// gradient), or a literal hex. `None` defaults to `source`.
+    pub link_color: Option<String>,
+    /// `config.sankey.nodeAlignment` — `justify`/`center`/`left`/`right`.
+    /// `None` defaults to `justify`.
+    pub node_alignment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

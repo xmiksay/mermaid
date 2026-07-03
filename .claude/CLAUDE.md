@@ -255,7 +255,18 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - Sankey nodes render their **throughput value** after the name
   (`Name\n42`, upstream `showValues` — on by default). The value is the node's
   `max(in, out)` flow; the `SvgBuilder::text` multi-line path stacks it as a
-  second `<tspan>`.
+  second `<tspan>`. Each node gets its **own palette color** (`pie_color(node
+  index)`), no longer one flat fill. `config.sankey.linkColor` and
+  `config.sankey.nodeAlignment` (frontmatter/`%%{init}%%`) flow through the
+  preamble → `DiagramMeta.sankey_link_color`/`sankey_node_alignment` → copied
+  onto `SankeyDiagram` in `parse_with_meta`. `linkColor` (`LinkColor::parse`,
+  default `source`): `source`/`target` tint each link from that node's color,
+  `gradient` emits a per-link `<linearGradient>` in `<defs>`, any other value is
+  a literal stroke color. `nodeAlignment` (`Alignment::parse`, default
+  `justify`) maps onto the column-assignment step (`assign_columns`, using
+  `column_depths`/`column_heights`): `left` = depth from source, `right` =
+  distance to sink, `justify` pushes sinks to the last column, `center` nudges
+  source-less nodes toward their earliest target (d3-sankey semantics).
 - xychart series accept an optional **quoted title** — `bar "Revenue" [..]` /
   `line "Trend" [..]` parses into `XySeries.title` (previously a hard error);
   upstream draws no legend, so the renderer ignores it. Category lists split

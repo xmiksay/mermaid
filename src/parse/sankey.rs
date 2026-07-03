@@ -113,4 +113,14 @@ mod tests {
         let d = parse("sankey-beta\n\"A,1\",B,3\n").unwrap();
         assert_eq!(d.links[0].source, "A,1");
     }
+
+    #[test]
+    fn config_link_color_and_node_alignment() {
+        let src = "---\nconfig:\n  sankey:\n    linkColor: gradient\n    nodeAlignment: right\n---\nsankey-beta\nA,B,5\n";
+        let crate::parse::ast::Diagram::Sankey(d) = crate::parse::parse(src).unwrap() else {
+            panic!("expected sankey");
+        };
+        assert_eq!(d.link_color.as_deref(), Some("gradient"));
+        assert_eq!(d.node_alignment.as_deref(), Some("right"));
+    }
 }

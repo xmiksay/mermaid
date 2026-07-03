@@ -69,6 +69,14 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let (Diagram::Treemap(t), Some(fmt)) = (&mut diagram, &meta.value_format) {
         t.value_format = Some(fmt.clone());
     }
+    if let Diagram::Sankey(s) = &mut diagram {
+        if meta.sankey_link_color.is_some() {
+            s.link_color = meta.sankey_link_color.clone();
+        }
+        if meta.sankey_node_alignment.is_some() {
+            s.node_alignment = meta.sankey_node_alignment.clone();
+        }
+    }
     if let Diagram::GitGraph(g) = &mut diagram {
         apply_git_graph_config(&mut g.config, &meta.git_graph);
     }
