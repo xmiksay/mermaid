@@ -30,6 +30,7 @@ use super::ast::{
     RequirementKind,
 };
 use super::style::parse_style_props;
+use super::token::{find_unquoted, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
@@ -77,13 +78,13 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
         }
 
         if let Some(kind) = parse_req_kind(line) {
-            let after_kind = &line[kind_token_len(line)..].trim_start();
-            let rest = after_kind;
-            // <name> {
-            let open = rest.find('{').ok_or_else(|| {
+            let rest = line[kind_token_len(line)..].trim_start();
+            // <name>[:::classes] {  (name may be quoted)
+            let open = find_unquoted(rest, "{").ok_or_else(|| {
                 ParseError::unclosed(line_no, format!("expected '{{' in '{line}'"))
             })?;
-            let name = rest[..open].trim().to_string();
+            let (name, classes) = split_name(&rest[..open]);
+            add_classes(&mut d, &name, classes);
             let mut req = Requirement {
                 kind,
                 name,
@@ -96,10 +97,11 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
             d.requirements.push(req);
         } else if let Some(rest) = line.strip_prefix("element") {
             let rest = rest.trim_start();
-            let open = rest.find('{').ok_or_else(|| {
+            let open = find_unquoted(rest, "{").ok_or_else(|| {
                 ParseError::unclosed(line_no, format!("expected '{{' in '{line}'"))
             })?;
-            let name = rest[..open].trim().to_string();
+            let (name, classes) = split_name(&rest[..open]);
+            add_classes(&mut d, &name, classes);
             let mut el = ReqElement {
                 name,
                 type_: None,
@@ -107,6 +109,9 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
             };
             consume_element_body(&mut lines, &mut el)?;
             d.elements.push(el);
+        } else if let Some((id, classes)) = parse_class_shorthand(line) {
+            // Standalone `id:::classA classB` — attach classes to the node.
+            add_classes(&mut d, &id, classes);
         } else {
             // relation line: a - kind -> b
             d.relations.push(parse_relation(line, line_no)?);
@@ -193,6 +198,47 @@ fn kind_token_len(line: &str) -> usize {
     line.split_whitespace().next().map(|t| t.len()).unwrap_or(0)
 }
 
+/// Split a declared name into its (unquoted) name and any trailing
+/// `:::classA classB` style-class shorthand. Upstream's `qString` strips the
+/// surrounding quotes, so `"My Req"` renders as `My Req`.
+fn split_name(s: &str) -> (String, Vec<String>) {
+    match s.split_once(":::") {
+        Some((name, classes)) => (unquote(name).to_string(), class_list(classes)),
+        None => (unquote(s).to_string(), Vec::new()),
+    }
+}
+
+/// A standalone `id:::classA classB` line (no relation arrows) attaches the
+/// classes to an existing node. Returns `None` for anything else.
+fn parse_class_shorthand(line: &str) -> Option<(String, Vec<String>)> {
+    let (id, classes) = line.split_once(":::")?;
+    if find_unquoted(line, "->").is_some() || find_unquoted(line, "<-").is_some() {
+        return None;
+    }
+    let list = class_list(classes);
+    if list.is_empty() {
+        return None;
+    }
+    Some((unquote(id).to_string(), list))
+}
+
+fn class_list(s: &str) -> Vec<String> {
+    s.split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|c| !c.is_empty())
+        .map(|c| c.to_string())
+        .collect()
+}
+
+fn add_classes(d: &mut RequirementDiagram, name: &str, classes: Vec<String>) {
+    if classes.is_empty() {
+        return;
+    }
+    d.node_classes
+        .entry(name.to_string())
+        .or_default()
+        .extend(classes);
+}
+
 fn consume_req_body<'a, I: Iterator<Item = (usize, &'a str)>>(
     lines: &mut std::iter::Peekable<I>,
     req: &mut Requirement,
@@ -267,8 +313,8 @@ fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError>
         })?;
         let kind = parse_relation_kind(kind_str, line_no)?;
         return Ok(ReqRelation {
-            from: src.trim().to_string(),
-            to: dst.trim().to_string(),
+            from: unquote(src).to_string(),
+            to: unquote(dst).to_string(),
             kind,
         });
     }
@@ -279,11 +325,11 @@ fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError>
     let (from, kind_str) = left.rsplit_once('-').ok_or_else(|| {
         ParseError::malformed(line_no, format!("expected 'a - kind -> b': '{line}'"))
     })?;
-    let from = from.trim().trim_end_matches('-').trim().to_string();
+    let from = unquote(from.trim().trim_end_matches('-')).to_string();
     let kind = parse_relation_kind(kind_str, line_no)?;
     Ok(ReqRelation {
         from,
-        to: to.trim().to_string(),
+        to: unquote(to).to_string(),
         kind,
     })
 }
@@ -355,5 +401,37 @@ mod tests {
             ("fill".into(), "#0f0".into())
         );
         assert_eq!(d.relations.len(), 1);
+    }
+
+    #[test]
+    fn class_shorthand_on_decl() {
+        let src = "requirementDiagram\nrequirement test_req:::important {\n    id: 1\n}\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.requirements[0].name, "test_req");
+        assert_eq!(
+            d.node_classes.get("test_req").unwrap(),
+            &vec!["important".to_string()]
+        );
+    }
+
+    #[test]
+    fn standalone_class_shorthand() {
+        let src = "requirementDiagram\nrequirement r {\n    id: 1\n}\nr:::important\n";
+        let d = parse(src).unwrap();
+        assert_eq!(
+            d.node_classes.get("r").unwrap(),
+            &vec!["important".to_string()]
+        );
+    }
+
+    #[test]
+    fn quoted_names_are_stripped() {
+        let src =
+            "requirementDiagram\nrequirement \"My Req\" {\n    id: 1\n}\nelement \"My El\" {\n    type: sim\n}\n\"My El\" - satisfies -> \"My Req\"\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.requirements[0].name, "My Req");
+        assert_eq!(d.elements[0].name, "My El");
+        assert_eq!(d.relations[0].from, "My El");
+        assert_eq!(d.relations[0].to, "My Req");
     }
 }

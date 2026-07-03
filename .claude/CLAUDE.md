@@ -628,9 +628,15 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   instead of hard-erroring: `direction` fills `RequirementDiagram.direction`
   (drives the same size-swap/transpose the flowchart uses), while
   `classDef`/`class`/`style` fill `class_defs`/`node_classes`/`node_styles`
-  (reusing `parse/style.rs` + `svg/style.rs::resolve_style`). The `contains`
-  relation draws upstream's crossed-circle containment head (`req-contains`
-  marker) instead of the plain arrow.
+  (reusing `parse/style.rs` + `svg/style.rs::resolve_style`). Beyond the `class`
+  statement, a `:::className` shorthand attaches classes to a node
+  (`split_name`/`parse_class_shorthand`): trailing on a decl
+  (`requirement r:::important { … }`) or standalone on its own line
+  (`r:::important`). Requirement/element/relation names are **quote-aware** —
+  `find_unquoted` locates the body brace and `token::unquote` strips the
+  surrounding quotes (`requirement "My Req" { … }` renders `My Req`, matching
+  upstream's `qString`). The `contains` relation draws upstream's crossed-circle
+  containment head (`req-contains` marker) instead of the plain arrow.
 - gitGraph header (`src/parse/gitgraph.rs`) tolerates a trailing colon on both
   the keyword and the direction token — `gitGraph:`, `gitGraph TB:`,
   `gitGraph BT:` all parse (the dispatcher in `src/parse/mod.rs` also trims a
