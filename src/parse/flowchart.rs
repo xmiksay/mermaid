@@ -18,7 +18,10 @@
 //!   * `subgraph <id> [label]` ... `end` blocks tracked in `subgraphs`,
 //!     including nesting.
 //!   * `click <id> …` binds a hyperlink or JS callback to a node.
-//!   * Skipped quietly: `style`, `classDef`, `class`, `linkStyle`.
+//!   * Mermaid v11 edge ids: the `e1@` prefix in `A e1@--> B` and a standalone
+//!     `e1@{ … }` edge-attribute statement are parsed and ignored.
+//!   * `style`/`class` on a subgraph id styles the cluster frame; other
+//!     `style`/`classDef`/`class`/`linkStyle` populate the node/edge styles.
 
 use std::collections::{HashMap, HashSet};
 
@@ -36,6 +39,10 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
     let mut nodes_by_id: HashMap<String, usize> = HashMap::new();
     let mut subgraph_stack: Vec<usize> = Vec::new();
     let mut subgraph_auto_id = 0usize;
+    // Edge ids from the v11 `A e1@--> B` syntax. Recorded so a later standalone
+    // `e1@{ … }` edge-attribute statement is recognized and dropped rather than
+    // materialized as a phantom node.
+    let mut edge_ids: HashSet<String> = HashSet::new();
 
     // A `;` terminates a statement anywhere a newline would (upstream grammar),
     // so flatten each source line into its `;`-separated statements. This lets
@@ -106,7 +113,16 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             continue;
         }
 
-        let added_node_ids = parse_statement(line, &mut diag, &mut nodes_by_id, line_no)?;
+        // A standalone `e1@{ … }` edge-attribute statement (v11) referencing a
+        // known edge id carries no node — skip it so it doesn't spawn a phantom.
+        if let Some(eid) = edge_attr_stmt_id(line) {
+            if edge_ids.contains(&eid) {
+                continue;
+            }
+        }
+
+        let added_node_ids =
+            parse_statement(line, &mut diag, &mut nodes_by_id, &mut edge_ids, line_no)?;
         if let Some(&parent) = subgraph_stack.last() {
             for id in added_node_ids {
                 if !diag.subgraphs[parent].node_ids.contains(&id) {
@@ -126,6 +142,20 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
     // its string endpoint and the renderer routes it to the cluster box.
     let sub_ids: HashSet<String> = diag.subgraphs.iter().map(|s| s.id.clone()).collect();
     if !sub_ids.is_empty() {
+        // A `style`/`class` directive on a subgraph id lands on the phantom node
+        // about to be dropped — move it onto the cluster so the frame is styled.
+        for s in &mut diag.subgraphs {
+            if let Some(n) = diag.nodes.iter().find(|n| n.id == s.id) {
+                if !n.style.is_empty() {
+                    s.style = n.style.clone();
+                }
+                for c in &n.classes {
+                    if !s.classes.contains(c) {
+                        s.classes.push(c.clone());
+                    }
+                }
+            }
+        }
         diag.nodes.retain(|n| !sub_ids.contains(&n.id));
         for s in &mut diag.subgraphs {
             s.node_ids.retain(|id| !sub_ids.contains(id));
@@ -237,6 +267,8 @@ fn handle_subgraph_open(
         direction: None,
         node_ids: Vec::new(),
         child_subgraph_ids: Vec::new(),
+        classes: Vec::new(),
+        style: Style::new(),
     });
     if let Some(&parent) = stack.last() {
         diag.subgraphs[parent].child_subgraph_ids.push(id);
@@ -345,6 +377,7 @@ fn parse_statement(
     line: &str,
     diag: &mut FlowchartDiagram,
     nodes_by_id: &mut HashMap<String, usize>,
+    edge_ids: &mut HashSet<String>,
     line_no: usize,
 ) -> Result<Vec<String>, ParseError> {
     let mut sc = Scanner::new(line);
@@ -363,6 +396,11 @@ fn parse_statement(
         sc.skip_ws();
         if sc.eof() {
             break;
+        }
+        // Optional v11 edge id prefix `e1@` before the connector — recorded then
+        // ignored (the edge itself is unchanged).
+        if let Some(eid) = consume_edge_id(&mut sc) {
+            edge_ids.insert(eid);
         }
         let Some((line_style, tail, head, label)) = parse_arrow(&mut sc, line_no)? else {
             return Err(ParseError::Syntax {
@@ -393,6 +431,43 @@ fn parse_statement(
         prev_group = next;
     }
     Ok(referenced)
+}
+
+/// Consume an optional v11 edge-id prefix `id@` sitting between a node and its
+/// connector (`A e1@--> B`). Returns the id when the `@` is immediately followed
+/// by a connector opener; otherwise leaves the scanner untouched. The id is not
+/// stored on the edge — only recorded so the paired `id@{ … }` statement is
+/// recognized.
+fn consume_edge_id(sc: &mut Scanner<'_>) -> Option<String> {
+    let save = sc.i;
+    let id = sc.read_ident()?;
+    if !sc.try_consume("@") {
+        sc.i = save;
+        return None;
+    }
+    match sc.remaining().chars().next() {
+        Some('-' | '=' | '.' | '<' | '~' | 'o' | 'x') => Some(id),
+        _ => {
+            sc.i = save;
+            None
+        }
+    }
+}
+
+/// If `line` is exactly a v11 edge-attribute statement `id@{ … }` (an id, `@{`,
+/// a body, a closing `}`, and nothing more), return the id. Used to drop such a
+/// statement when `id` names a known edge instead of spawning a phantom node.
+fn edge_attr_stmt_id(line: &str) -> Option<String> {
+    let mut sc = Scanner::new(line);
+    let id = sc.read_ident()?;
+    if !sc.peek_str("@{") {
+        return None;
+    }
+    sc.advance(2);
+    sc.read_until("}")?;
+    sc.try_consume("}");
+    sc.skip_ws();
+    sc.eof().then_some(id)
 }
 
 fn parse_node_group(sc: &mut Scanner<'_>, line_no: usize) -> Result<Vec<FlowNode>, ParseError> {
@@ -1446,6 +1521,65 @@ mod tests {
             d.edge_styles[&0],
             vec![("stroke".to_string(), "#abc".to_string())]
         );
+    }
+
+    #[test]
+    fn v11_edge_id_prefix_parsed_and_ignored() {
+        // `A e1@--> B` is a normal solid arrow; the `e1@` edge id is dropped.
+        let d = parse("flowchart TD\nA e1@--> B\n").unwrap();
+        assert_eq!(d.nodes.len(), 2);
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edges[0].from, "A");
+        assert_eq!(d.edges[0].to, "B");
+        assert_eq!(d.edges[0].line, EdgeLine::Solid);
+        assert_eq!(d.edges[0].head, EdgeHead::Arrow);
+        // No phantom `e1` node.
+        assert!(!d.nodes.iter().any(|n| n.id == "e1"));
+    }
+
+    #[test]
+    fn v11_edge_attr_statement_is_dropped() {
+        // `e1@{ animate: true }` referencing a known edge id spawns no node.
+        let d = parse("flowchart TD\nA e1@--> B\ne1@{ animate: true }\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.nodes.len(), 2);
+        assert!(!d.nodes.iter().any(|n| n.id == "e1"));
+    }
+
+    #[test]
+    fn at_node_decl_still_works_when_not_an_edge_id() {
+        // A standalone `A@{ … }` with no known edge id still declares node A.
+        let d = parse("flowchart TD\nA@{ shape: circle, label: \"hi\" }\n").unwrap();
+        let a = node(&d, "A");
+        assert_eq!(a.shape, NodeShape::Circle);
+        assert_eq!(a.text, "hi");
+    }
+
+    #[test]
+    fn style_on_subgraph_id_lands_on_cluster() {
+        let d = parse(
+            "flowchart TD\nsubgraph S [Group]\nA --> B\nend\nstyle S fill:#f9f,stroke:#333\n",
+        )
+        .unwrap();
+        assert!(!d.nodes.iter().any(|n| n.id == "S"));
+        let s = d.subgraphs.iter().find(|s| s.id == "S").unwrap();
+        assert_eq!(
+            s.style,
+            vec![
+                ("fill".to_string(), "#f9f".to_string()),
+                ("stroke".to_string(), "#333".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn class_on_subgraph_id_lands_on_cluster() {
+        let d =
+            parse("flowchart TD\nsubgraph S\nA --> B\nend\nclassDef hot fill:#f00\nclass S hot\n")
+                .unwrap();
+        assert!(!d.nodes.iter().any(|n| n.id == "S"));
+        let s = d.subgraphs.iter().find(|s| s.id == "S").unwrap();
+        assert_eq!(s.classes, vec!["hot".to_string()]);
     }
 
     #[test]
