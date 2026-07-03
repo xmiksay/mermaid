@@ -10,16 +10,17 @@ binary alongside the library.
 src/
 ├── lib.rs           public API: render*/parse/Diagram/ast::*/Theme/errors
 ├── bin/
-│   └── mermaid-svg.rs   CLI (stdin/file → stdout/file, --theme flag)
+│   └── mermaid-svg.rs   CLI (stdin/file → stdout/file, --theme/-f|--font/--font-size flags)
 ├── parse/           Mermaid source → Diagram AST (line-oriented scanners)
 │   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError, ast re-export
-│   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta
+│   ├── ast/         all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta —
+│   │                mod + block/c4/charts/class/er/flowchart/gantt/sequence/state/structure
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
 │   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing
 │   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted
-│   └── {pie,sequence,flowchart,state,class,er,gantt,
-│        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
-│        gitgraph,requirement,c4,block,architecture,kanban,treemap,zenuml}.rs
+│   ├── {sequence,flowchart,state,class,c4,block}/  multi-file per-diagram parsers (mod + submodules)
+│   └── {pie,er,gantt,journey,timeline,sankey,quadrant,xychart,radar,packet,
+│        mindmap,gitgraph,requirement,architecture,kanban,treemap,zenuml}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
@@ -28,9 +29,11 @@ src/
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
 │   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*
 │   ├── style.rs     resolves classDef/style/linkStyle into inline fill/stroke
-│   └── {pie,sequence,flowchart,state,class,er,gantt,
-│        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
-│        gitgraph,requirement,c4,block,architecture,kanban,treemap}.rs
+│   ├── gantt_date.rs civil day-count date math (days_from_civil/format_date/Excludes)
+│   ├── interact.rs  shared click/link wrappers (open_click/close_click)
+│   ├── {sequence,flowchart,state,class,c4,block}/  multi-file per-diagram renderers (mod + submodules)
+│   └── {pie,er,gantt,journey,timeline,sankey,quadrant,xychart,radar,packet,
+│        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
 │   ├── tests.rs
@@ -88,7 +91,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (307 tests)
+cargo test               # unit + integration + doctest (454 tests: 440 lib + 13 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -161,11 +164,11 @@ from one of the built-ins, so adding a field is non-breaking.
 
 ## Flowchart pipeline (important)
 
-Direction transform in `src/svg/flowchart.rs`: sugiyama only knows top-down,
-so for `LR`/`RL` we **swap input sizes** `(w, h) → (h, w)` and **output
-coordinates** `(sx, sy) → (sy, sx)`. For `BT`/`RL` we flip the axis.
+Direction transform in `src/svg/flowchart/mod.rs`: sugiyama only knows
+top-down, so for `LR`/`RL` we **swap input sizes** `(w, h) → (h, w)` and
+**output coordinates** `(sx, sy) → (sy, sx)`. For `BT`/`RL` we flip the axis.
 
-Edge clipping (`clip_to_node`) has per-shape variants:
+Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape variants:
 - rect: `t = min(hw/|dx|, hh/|dy|)`
 - circle: normalize to radius
 - rhombus: `t = 1 / (|dx|/hw + |dy|/hh)`
@@ -295,14 +298,14 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   right instead of overwriting. Activations still open at the end of the event
   loop are flushed down to `lifeline_bottom`.
   - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
-    (`parse_message` in `src/parse/sequence.rs`): a leading `+`/`-` on the
+    (`parse_message` in `src/parse/sequence/message.rs`): a leading `+`/`-` on the
     target id is stripped (not part of the participant name) and
     `parse_line_to_items` synthesizes the paired event — `+` appends
     `Activate(target)` *after* the message, `-` prepends `Deactivate(target)`
     *before* it, matching upstream ordering.
 - Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
   head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
-  in `src/svg/sequence.rs` branches on `Participant.kind`.
+  in `src/svg/sequence/participants.rs` branches on `Participant.kind`.
 - Sequence `box <color> <label>` groups participants: `SequenceBox` carries an
   optional `color` (parsed in `split_box_color` — hex, `rgb()/rgba()`, or a
   named CSS color; else the whole string is the label) plus the member
@@ -358,13 +361,13 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   (forward); `orient="auto-start-reverse"` points it into its node at either
   end. Composition/aggregation draw *only* the diamond — no far-end arrowhead.
 - Class generics `~T~` are converted to angle brackets at render time
-  (`convert_generics` in `src/svg/class.rs`) for class names and member/return
+  (`convert_generics` in `src/svg/class/members.rs`) for class names and member/return
   types — `List~int~` → `List<int>`, nested `List~List~int~~` →
   `List<List<int>>`, `Map~string, int~` → `Map<string, int>` (innermost pair
   first; a lone unmatched `~` is left alone). The same `member_display` pass
   strips the trailing UML classifier (`*` abstract → `font-style="italic"`,
   `$` static → `text-decoration="underline"`).
-- Class notes/annotations/labels/interactivity (`src/parse/class.rs`):
+- Class notes/annotations/labels/interactivity (`src/parse/class/`):
   `note "text"` (free) and `note for <Class> "text"` (attached) fill
   `ClassDiagram.notes` (`ClassNote { target, text }`); the renderer draws them
   as yellow sticky boxes in a row below the diagram, with a dashed connector to
@@ -426,9 +429,9 @@ Edge clipping (`clip_to_node`) has per-shape variants:
 - Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
-  `src/parse/flowchart.rs` and rendered in `src/svg/flowchart.rs`.
+  `src/parse/flowchart/node.rs` and rendered in `src/svg/flowchart/nodes.rs`.
 - Flowchart v11 attribute syntax `id@{ shape: …, label: … }` is handled in
-  `parse_at_node` (`src/parse/flowchart.rs`): the `@{…}` block right after a
+  `parse_at_node` (`src/parse/flowchart/node.rs`): the `@{…}` block right after a
   node id is split into `key: value` pairs (quote-aware comma/colon split), the
   `shape` name mapped onto a `NodeShape` by `shape_from_name` (aliases like
   `rounded`/`diam`/`cyl`/`lean-r`/`trap-b`/`dbl-circ`/`subproc`; unknown or
@@ -493,7 +496,7 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `config.kanban.ticketBaseUrl` is set (captured in `preamble.rs` →
   `DiagramMeta.ticket_base_url`, copied onto `KanbanDiagram` in
   `parse_with_meta`; `#TICKET#` in the URL is replaced by the id).
-- block-beta styling & edges (`src/parse/block.rs` / `src/svg/block.rs`):
+- block-beta styling & edges (`src/parse/block/` / `src/svg/block/`):
   `classDef <name> <props>` fills `BlockDiagram.class_defs`; `class a,b <name>`
   and the inline `id:::name` shorthand fill `Block.classes`; `style <id> <props>`
   fills `Block.style`. `class`/`style` are **deferred** (a `Ctx` collects them,
