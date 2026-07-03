@@ -10,7 +10,6 @@ use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
-use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -292,25 +291,6 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
                 theme.flow_edge_stroke
             ),
         );
-        if let Some(label) = &e.label {
-            if !label.is_empty() {
-                let (mx, my) = polyline_midpoint(&pts);
-                let lw = (label.chars().count() as f64 * 6.0 + 12.0).max(40.0);
-                svg.rect(
-                    mx - lw / 2.0,
-                    my - 8.0,
-                    lw,
-                    14.0,
-                    &format!("fill=\"{}\" stroke=\"none\" rx=\"2\"", theme.flow_label_bg),
-                );
-                svg.text(
-                    mx,
-                    my + 3.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-                    label,
-                );
-            }
-        }
     }
 
     for p in &placed_services {
@@ -333,7 +313,17 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         let label_y = if let Some(icon_kind) = &p.icon {
             let ix = p.x + (p.w - ICON_SIZE) / 2.0;
             let iy = p.y + 10.0;
-            draw_arch_icon(&mut svg, icon_kind, ix, iy, stroke, fill);
+            // A pure-Rust renderer can't fetch Iconify packs (`logos:aws-lambda`
+            // etc.), so unrecognized names fall back to a generic box plus the
+            // name as a caption — the icon identity is shown, not silently lost.
+            if !draw_arch_icon(&mut svg, icon_kind, ix, iy, stroke, fill) {
+                svg.text(
+                    p.x + p.w / 2.0,
+                    iy + ICON_SIZE + 8.0,
+                    &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"8\""),
+                    &truncate_icon_name(icon_kind),
+                );
+            }
             p.y + ICON_SIZE + 26.0
         } else {
             p.y + p.h / 2.0 + 4.0
@@ -377,31 +367,54 @@ fn polyline_path(pts: &[(f64, f64)]) -> String {
     s
 }
 
-fn draw_arch_icon(svg: &mut SvgBuilder, kind: &str, x: f64, y: f64, stroke: &str, fill: &str) {
+/// Draws the icon glyph for `kind`. Returns `true` when the name maps to a
+/// built-in glyph, `false` when it falls back to the generic box (the caller
+/// then renders the raw name as a caption so the icon identity survives).
+fn draw_arch_icon(
+    svg: &mut SvgBuilder,
+    kind: &str,
+    x: f64,
+    y: f64,
+    stroke: &str,
+    fill: &str,
+) -> bool {
     let s = ICON_SIZE / 32.0;
-    let paths: &[&str] = match kind {
-        "database" | "db" | "disk" => &[
-            "M4 8 C4 4 28 4 28 8 L28 24 C28 28 4 28 4 24 Z",
-            "M4 8 C4 12 28 12 28 8",
-            "M4 13 C4 17 28 17 28 13",
-        ],
-        "server" => &[
-            "M3 5 H29 V13 H3 Z",
-            "M3 16 H29 V24 H3 Z",
-            "M6 9 H9 M6 20 H9",
-            "M24 9 H26 M24 20 H26",
-        ],
-        "cloud" => {
-            &["M9 24 C4 24 3 17 9 16 C9 11 16 9 18 14 C22 11 27 14 25 18 C30 19 28 24 24 24 Z"]
-        }
-        "internet" | "globe" => &[
-            "M16 4 A12 12 0 1 0 16 28 A12 12 0 1 0 16 4 Z",
-            "M4 16 H28",
-            "M16 4 C9 11 9 21 16 28",
-            "M16 4 C23 11 23 21 16 28",
-        ],
-        "queue" | "kafka" => &["M4 10 H28 V22 H4 Z", "M10 10 V22 M16 10 V22 M22 10 V22"],
-        _ => &["M6 6 H26 V26 H6 Z"],
+    let (paths, recognized): (&[&str], bool) = match kind {
+        "database" | "db" | "disk" => (
+            &[
+                "M4 8 C4 4 28 4 28 8 L28 24 C28 28 4 28 4 24 Z",
+                "M4 8 C4 12 28 12 28 8",
+                "M4 13 C4 17 28 17 28 13",
+            ],
+            true,
+        ),
+        "server" => (
+            &[
+                "M3 5 H29 V13 H3 Z",
+                "M3 16 H29 V24 H3 Z",
+                "M6 9 H9 M6 20 H9",
+                "M24 9 H26 M24 20 H26",
+            ],
+            true,
+        ),
+        "cloud" => (
+            &["M9 24 C4 24 3 17 9 16 C9 11 16 9 18 14 C22 11 27 14 25 18 C30 19 28 24 24 24 Z"],
+            true,
+        ),
+        "internet" | "globe" => (
+            &[
+                "M16 4 A12 12 0 1 0 16 28 A12 12 0 1 0 16 4 Z",
+                "M4 16 H28",
+                "M16 4 C9 11 9 21 16 28",
+                "M16 4 C23 11 23 21 16 28",
+            ],
+            true,
+        ),
+        "queue" | "kafka" => (
+            &["M4 10 H28 V22 H4 Z", "M10 10 V22 M16 10 V22 M22 10 V22"],
+            true,
+        ),
+        _ => (&["M6 6 H26 V26 H6 Z"], false),
     };
     let _ = write!(
         svg.body,
@@ -414,6 +427,21 @@ fn draw_arch_icon(svg: &mut SvgBuilder, kind: &str, x: f64, y: f64, stroke: &str
         let _ = write!(svg.body, "<path d=\"{p}\"/>");
     }
     svg.raw("</g>");
+    recognized
+}
+
+/// Shortens an Iconify-style icon name for the fallback caption: keeps the
+/// segment after the last `:` (`logos:aws-lambda` → `aws-lambda`) and caps the
+/// length so a long name can't overflow the service box.
+fn truncate_icon_name(name: &str) -> String {
+    let short = name.rsplit(':').next().unwrap_or(name);
+    const MAX: usize = 16;
+    if short.chars().count() > MAX {
+        let head: String = short.chars().take(MAX - 1).collect();
+        format!("{head}…")
+    } else {
+        short.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -452,7 +480,6 @@ mod tests {
                 to: "disk".into(),
                 to_side: ArchSide::Right,
                 to_arrow: false,
-                label: None,
                 group: false,
             }],
         };
@@ -460,6 +487,34 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">DB<"));
         assert!(svg.contains(">API<"));
+    }
+
+    #[test]
+    fn unknown_icon_renders_name_caption() {
+        // Iconify pack names can't be fetched by a static renderer; instead of
+        // silently drawing a blank box, the name is shown as a caption.
+        let src = "\
+architecture-beta
+    service lambda(logos:aws-lambda)[Lambda]
+";
+        let d = match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Architecture(d) => d,
+            _ => panic!("expected architecture diagram"),
+        };
+        let svg = render(&d, &Theme::default());
+        // Caption keeps the segment after the last ':', label stays intact.
+        assert!(svg.contains(">aws-lambda<"), "icon-name caption missing");
+        assert!(svg.contains(">Lambda<"), "service label missing");
+    }
+
+    #[test]
+    fn truncate_icon_name_shortens() {
+        assert_eq!(truncate_icon_name("logos:aws-lambda"), "aws-lambda");
+        assert_eq!(truncate_icon_name("cloud"), "cloud");
+        assert_eq!(
+            truncate_icon_name("mdi:application-braces-outline"),
+            "application-bra…"
+        );
     }
 
     #[test]

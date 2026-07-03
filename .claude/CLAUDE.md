@@ -563,3 +563,12 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     `Alt`, `while/for/loop` → `Loop`, `opt` → `Opt`, `par` → `Par`,
     `try/catch/finally` → `Critical` (catch/finally as option branches). The
     `else`/`catch`/`finally` chain tokens are consumed by their opener's handler.
+- architecture-beta icons: `draw_arch_icon` (`src/svg/architecture.rs`) draws
+  five built-in glyphs (`cloud`, `database`/`db`/`disk`, `server`,
+  `internet`/`globe`, `queue`/`kafka`) and returns `false` for anything else. A
+  static renderer can't fetch Iconify packs (`logos:aws-lambda`, `mdi:…`), so an
+  unrecognized name falls back to the generic box **plus** the name as a caption
+  (`truncate_icon_name`: segment after the last `:`, capped at 16 chars) — the
+  icon identity is shown, not silently lost. `ArchEdge` has no `label` field:
+  upstream architecture-beta has no edge-label syntax, so it was dropped as dead
+  weight.

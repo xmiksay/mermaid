@@ -198,7 +198,6 @@ pub struct ArchEdge {
     pub to: String,
     pub to_side: ArchSide,
     pub to_arrow: bool,
-    pub label: Option<String>,
     pub group: bool,
 }
 

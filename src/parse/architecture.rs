@@ -159,7 +159,6 @@ fn parse_edge(line: &str, line_no: usize) -> Result<ArchEdge, ParseError> {
         to,
         to_side,
         to_arrow,
-        label: None,
         group,
     })
 }
