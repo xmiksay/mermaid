@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 use crate::parse::{XyAxisKind, XyChartDiagram, XySeriesKind};
 
 use super::builder::{fnum, SvgBuilder};
+use super::metrics::text_width;
 use super::theme::Theme;
 
 const PAD: f64 = 40.0;
@@ -18,13 +19,29 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let fg_muted = &theme.fg_muted;
 
+    let chart_w = d.width.unwrap_or(CHART_W);
+    let chart_h = d.height.unwrap_or(CHART_H);
+
+    // Legend entries: one per titled series (upstream `showLegend`, default on).
+    let show_legend = d.show_legend.unwrap_or(true);
+    let legend: Vec<(usize, &str)> = if show_legend {
+        d.series
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.title.as_deref().map(|t| (i, t)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
-    let width = PAD * 2.0 + AXIS_LEFT + CHART_W + 20.0;
-    let height = PAD * 2.0 + title_h + CHART_H + AXIS_BOTTOM + 30.0;
+    let legend_h = if legend.is_empty() { 0.0 } else { 24.0 };
+    let width = PAD * 2.0 + AXIS_LEFT + chart_w + 20.0;
+    let height = PAD * 2.0 + title_h + legend_h + chart_h + AXIS_BOTTOM + 30.0;
     let chart_left = PAD + AXIS_LEFT;
-    let chart_top = PAD + title_h;
-    let chart_bottom = chart_top + CHART_H;
-    let chart_right = chart_left + CHART_W;
+    let chart_top = PAD + title_h + legend_h;
+    let chart_bottom = chart_top + chart_h;
+    let chart_right = chart_left + chart_w;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
@@ -35,6 +52,18 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
         );
+    }
+
+    let color_at = |i: usize| -> String {
+        if d.plot_color_palette.is_empty() {
+            theme.pie_color(i).to_string()
+        } else {
+            d.plot_color_palette[i % d.plot_color_palette.len()].clone()
+        }
+    };
+
+    if !legend.is_empty() {
+        draw_legend(&mut svg, &legend, &color_at, width, PAD + title_h, fg);
     }
 
     // Determine value range.
@@ -108,7 +137,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
 
     // Category tick spacing along the category axis (bottom when vertical,
     // left when horizontal).
-    let cat_axis_len = if horiz { CHART_H } else { CHART_W };
+    let cat_axis_len = if horiz { chart_h } else { chart_w };
     // For a numeric axis one step spans a single x unit; for categories it is
     // the per-category slot width used for bar thickness.
     let step = match x_range {
@@ -131,9 +160,9 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     let value_pos = |v: f64| -> f64 {
         let frac = (v - vmin) / (vmax - vmin);
         if horiz {
-            chart_left + frac * CHART_W
+            chart_left + frac * chart_w
         } else {
-            chart_bottom - frac * CHART_H
+            chart_bottom - frac * chart_h
         }
     };
 
@@ -249,7 +278,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     if let Some(t) = d.y_axis.as_ref().and_then(|a| a.title.as_ref()) {
         if horiz {
             svg.text(
-                chart_left + CHART_W / 2.0,
+                chart_left + chart_w / 2.0,
                 chart_bottom + 38.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
                 t,
@@ -257,9 +286,9 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         } else {
             svg.text(
                 chart_left - 40.0,
-                chart_top + CHART_H / 2.0,
+                chart_top + chart_h / 2.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" transform=\"rotate(-90 {} {})\"",
-                    fnum(chart_left - 40.0), fnum(chart_top + CHART_H / 2.0)),
+                    fnum(chart_left - 40.0), fnum(chart_top + chart_h / 2.0)),
                 t,
             );
         }
@@ -271,14 +300,14 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         if horiz {
             svg.text(
                 chart_left - 40.0,
-                chart_top + CHART_H / 2.0,
+                chart_top + chart_h / 2.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" transform=\"rotate(-90 {} {})\"",
-                    fnum(chart_left - 40.0), fnum(chart_top + CHART_H / 2.0)),
+                    fnum(chart_left - 40.0), fnum(chart_top + chart_h / 2.0)),
                 t,
             );
         } else {
             svg.text(
-                chart_left + CHART_W / 2.0,
+                chart_left + chart_w / 2.0,
                 chart_bottom + 38.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
                 t,
@@ -294,7 +323,8 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         .count();
     let mut bar_idx = 0;
     for (si, s) in d.series.iter().enumerate() {
-        let color = theme.pie_color(si);
+        let color = color_at(si);
+        let label_of = |i: usize| s.labels.get(i).and_then(|l| l.as_deref());
         let bar_w = (step * 0.7) / bar_count.max(1) as f64;
         match s.kind {
             XySeriesKind::Bar => {
@@ -308,6 +338,14 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                     } else {
                         let h = (chart_bottom - p).max(0.0);
                         svg.rect(off, p, bar_w, h, &format!("fill=\"{color}\""));
+                    }
+                    if let Some(label) = label_of(i) {
+                        let (lx, ly) = if horiz {
+                            (p + 4.0, off + bar_w / 2.0 + 4.0)
+                        } else {
+                            (center, p - 6.0)
+                        };
+                        draw_point_label(&mut svg, lx, ly, horiz, fg, label);
                     }
                 }
                 bar_idx += 1;
@@ -324,6 +362,9 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                         let _ = write!(path, "L{} {}", fnum(px), fnum(py));
                     }
                     svg.circle(px, py, 3.5, &format!("fill=\"{color}\""));
+                    if let Some(label) = label_of(i) {
+                        draw_point_label(&mut svg, px, py - 8.0, false, fg, label);
+                    }
                 }
                 svg.path(
                     &path,
@@ -334,6 +375,53 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
+}
+
+/// Draw a centered legend row of colored swatches + series titles just above
+/// the plot, starting at `top`.
+fn draw_legend(
+    svg: &mut SvgBuilder,
+    entries: &[(usize, &str)],
+    color_at: &dyn Fn(usize) -> String,
+    width: f64,
+    top: f64,
+    fg: &str,
+) {
+    const SWATCH: f64 = 12.0;
+    const GAP: f64 = 6.0;
+    const ITEM_GAP: f64 = 18.0;
+    let entry_w = |t: &str| SWATCH + GAP + text_width(t, 7.0, 12.0);
+    let total: f64 = entries.iter().map(|(_, t)| entry_w(t)).sum::<f64>()
+        + ITEM_GAP * (entries.len().saturating_sub(1)) as f64;
+    let mut x = (width - total) / 2.0;
+    for (i, t) in entries {
+        svg.rect(
+            x,
+            top,
+            SWATCH,
+            SWATCH,
+            &format!("fill=\"{}\"", color_at(*i)),
+        );
+        svg.text(
+            x + SWATCH + GAP,
+            top + SWATCH - 2.0,
+            &format!("text-anchor=\"start\" fill=\"{fg}\" font-size=\"12\""),
+            t,
+        );
+        x += entry_w(t) + ITEM_GAP;
+    }
+}
+
+/// Draw a per-point data label. Horizontal charts anchor it to the start
+/// (right of the point); vertical charts center it above the point.
+fn draw_point_label(svg: &mut SvgBuilder, x: f64, y: f64, horiz: bool, fg: &str, label: &str) {
+    let anchor = if horiz { "start" } else { "middle" };
+    svg.text(
+        x,
+        y,
+        &format!("text-anchor=\"{anchor}\" fill=\"{fg}\" font-size=\"10\""),
+        label,
+    );
 }
 
 #[cfg(test)]
@@ -361,7 +449,9 @@ mod tests {
                 kind: XySeriesKind::Bar,
                 title: None,
                 values: vec![40.0, 80.0],
+                labels: Vec::new(),
             }],
+            ..XyChartDiagram::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -405,7 +495,9 @@ mod tests {
                 kind: XySeriesKind::Bar,
                 title: None,
                 values: vec![40.0, 80.0],
+                labels: Vec::new(),
             }],
+            ..XyChartDiagram::default()
         };
 
         // Horizontal: value maps to bar width; the 80 bar is wider than 40,
@@ -449,7 +541,9 @@ mod tests {
                 kind: XySeriesKind::Bar,
                 title: None,
                 values: vec![40.0, 80.0],
+                labels: Vec::new(),
             }],
+            ..XyChartDiagram::default()
         };
         let h = bar_dims(&render(&d, &Theme::default()));
         assert_eq!(h.len(), 2);
@@ -474,7 +568,9 @@ mod tests {
                 kind: XySeriesKind::Bar,
                 title: None,
                 values: vec![3.0, 6.0],
+                labels: Vec::new(),
             }],
+            ..XyChartDiagram::default()
         };
         let svg = render(&d, &Theme::default());
         // Numeric ticks are emitted along the x-axis (the range max is a tick).
@@ -488,6 +584,93 @@ mod tests {
         assert!(
             (gap - CHART_W / 10.0).abs() < 1e-6,
             "points one x-unit apart: {xs:?}"
+        );
+    }
+
+    #[test]
+    fn renders_legend_and_palette() {
+        let d = XyChartDiagram {
+            series: vec![
+                XySeries {
+                    kind: XySeriesKind::Bar,
+                    title: Some("Revenue".into()),
+                    values: vec![40.0, 80.0],
+                    labels: Vec::new(),
+                },
+                XySeries {
+                    kind: XySeriesKind::Line,
+                    title: Some("Trend".into()),
+                    values: vec![40.0, 80.0],
+                    labels: Vec::new(),
+                },
+            ],
+            plot_color_palette: vec!["#111111".into(), "#222222".into()],
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Legend shows both series titles and the palette drives the fills.
+        assert!(svg.contains(">Revenue<"));
+        assert!(svg.contains(">Trend<"));
+        assert!(svg.contains("fill=\"#111111\""));
+        assert!(svg.contains("fill=\"#222222\""));
+    }
+
+    #[test]
+    fn hides_legend_when_disabled() {
+        let d = XyChartDiagram {
+            series: vec![XySeries {
+                kind: XySeriesKind::Bar,
+                title: Some("Revenue".into()),
+                values: vec![40.0, 80.0],
+                labels: Vec::new(),
+            }],
+            show_legend: Some(false),
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(!svg.contains(">Revenue<"));
+    }
+
+    #[test]
+    fn renders_point_labels() {
+        let d = XyChartDiagram {
+            series: vec![XySeries {
+                kind: XySeriesKind::Line,
+                title: None,
+                values: vec![40.0, 80.0],
+                labels: vec![Some("low".into()), Some("high".into())],
+            }],
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">low<"));
+        assert!(svg.contains(">high<"));
+    }
+
+    #[test]
+    fn width_height_config_resizes_plot() {
+        let base = XyChartDiagram {
+            series: vec![XySeries {
+                kind: XySeriesKind::Bar,
+                title: None,
+                values: vec![40.0, 80.0],
+                labels: Vec::new(),
+            }],
+            ..XyChartDiagram::default()
+        };
+        let wide = XyChartDiagram {
+            width: Some(CHART_W * 2.0),
+            ..base.clone()
+        };
+        let root_width = |svg: &str| -> f64 {
+            let key = "viewBox=\"0 0 ";
+            let start = svg.find(key).unwrap() + key.len();
+            let rest = &svg[start..];
+            rest[..rest.find(' ').unwrap()].parse().unwrap()
+        };
+        assert!(
+            root_width(&render(&wide, &Theme::default()))
+                > root_width(&render(&base, &Theme::default()))
         );
     }
 }

@@ -285,10 +285,25 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `column_depths`/`column_heights`): `left` = depth from source, `right` =
   distance to sink, `justify` pushes sinks to the last column, `center` nudges
   source-less nodes toward their earliest target (d3-sankey semantics).
+- xychart axis titles (`parse_axis`) accept upstream's `text: alphaNum | STR |
+  MD_STR` — a **quoted or bare-word** title before the optional `[..]` band or
+  `min --> max` range (`x-axis time 0 --> 10`, `y-axis revenue`, `x-axis "Label"
+  [a, b]`). For an unquoted range the word just before `-->` is the min; earlier
+  words are the title. A bare title with no band/range yields empty
+  `Categories`.
+- xychart data points accept an optional **per-point label** — upstream
+  `dataPoint: NUMBER_WITH_DECIMAL STR` (`line [1.5 "label", 2.3]`), parsed
+  (quote-aware) into `XySeries.labels` (aligned with `values`, `None` when
+  absent) and drawn beside each point. Category/value lists split **quote-aware**
+  (`split_unquoted`) so a `"a, b"` cell survives the comma.
 - xychart series accept an optional **quoted title** — `bar "Revenue" [..]` /
-  `line "Trend" [..]` parses into `XySeries.title` (previously a hard error);
-  upstream draws no legend, so the renderer ignores it. Category lists split
-  **quote-aware** (`split_unquoted`) so a `"a, b"` cell survives the comma.
+  `line "Trend" [..]` parses into `XySeries.title` and is now drawn in a
+  **legend** row above the plot (`draw_legend`, upstream `showLegend` default on;
+  `config.xyChart.showLegend: false` hides it). `config.xyChart.width`/`height`
+  (→ `XyChartDiagram.width`/`height`) override the default plot size, and
+  `themeVariables.xyChart.plotColorPalette` (comma-separated →
+  `plot_color_palette`) replaces the theme pie palette for series colors — all
+  wired through `apply_xychart_config` in `parse_with_meta`.
 - Treemap honors `classDef <name> <props>` (into `TreemapDiagram.class_defs`)
   and a node's trailing `:::name` (into `TreemapNode.class_name`, stripped
   before the label/value colon split). The renderer resolves the class through
