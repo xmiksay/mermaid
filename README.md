@@ -86,7 +86,7 @@ flag uses the same lookup.
 | State | `stateDiagram`, `stateDiagram-v2` | composite states with parallel regions (`--`), one-line and multi-line notes |
 | Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`), notes, standalone annotations, `Name["label"]`, `click`/`link`/`callback` |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
-| Gantt | `gantt` | sections, task end as duration/end-date/`until <id>`, duration-only tasks, `excludes` (weekends), `weekend friday`, `tickInterval`, `weekday`, `todayMarker` |
+| Gantt | `gantt` | sections, task end as duration (`ms`/`s`/`m`/`h`/`d`/`w`/`M`/`y`)/end-date/`until <id>`, duration-only tasks, `after <id> [<id> …]` (multiple predecessors), `milestone`/`vert` markers, sub-day `dateFormat HH:mm`, `click <id> href/call`, `excludes` (weekends), `weekend friday`, `tickInterval`, `weekday`, `todayMarker` (CSS style / `off`) |
 | Journey | `journey` | sections, tasks with scores and actors |
 | Timeline | `timeline` | sections, time periods with multiple events |
 | Sankey | `sankey-beta`, `sankey` | weighted source→target flows |

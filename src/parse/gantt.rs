@@ -8,14 +8,22 @@
 //!     `displayMode[:] compact` (stored; layout is a follow-up).
 //!   * `section <name>` blocks.
 //!   * Tasks: `<name> : [tags,] [id,] <start>, <end>` — the end may be a
-//!     duration (`Nd`/`Nw`/`Nh`/`Nm`), an end date, or `until <taskId>`.
-//!     A single time token (`<name> : 24d` / `<name> : until id`) is a
-//!     duration/until with an implicit start at the previous task's end.
-//!     Tags ⊆ {active, done, crit, milestone} (any combination), start is a
-//!     date or `after <id>`. `milestone` renders a diamond at the start date
-//!     (the end is ignored).
+//!     duration (units `ms`/`s`/`m`/`h`/`d`/`w`/`M`/`y`, decimals allowed), an
+//!     end date, or `until <taskId>`. A single time token (`<name> : 24d` /
+//!     `<name> : until id`) is a duration/until with an implicit start at the
+//!     previous task's end. Tags ⊆ {active, done, crit, milestone, vert} (any
+//!     combination), start is a date or `after <id> [<id> …]`. `milestone`
+//!     renders a diamond at the start date; `vert` a vertical marker line (both
+//!     ignore the end).
+//!   * `click <taskId> href "url"` / `click <taskId> call fn()` — binds an
+//!     interaction to a task (shared with the flowchart `click` parser).
 
-use super::ast::{GanttDiagram, GanttSection, GanttTask, TaskEnd, TaskStart, TaskStatus};
+use std::collections::HashMap;
+
+use super::ast::{
+    ClickAction, GanttDiagram, GanttSection, GanttTask, TaskEnd, TaskStart, TaskStatus,
+};
+use super::flowchart::click::parse_click;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
@@ -23,6 +31,7 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
     let mut header_seen = false;
     let mut last_task_id: Option<String> = None;
     let mut auto_id_counter = 0usize;
+    let mut clicks: HashMap<String, ClickAction> = HashMap::new();
 
     for (idx, raw) in input.lines().enumerate() {
         let line_no = idx + 1;
@@ -58,12 +67,16 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("todayMarker ") {
+            // The value is a CSS style string (or `off` to hide it), not a
+            // date — the marker is always positioned at the *current* date.
             diag.today_marker = Some(rest.trim().to_string());
             continue;
         }
-        // `today YYYY-MM-DD` shorthand used by some examples.
-        if let Some(rest) = line.strip_prefix("today ") {
-            diag.today_marker = Some(rest.trim().to_string());
+        if let Some(rest) = line.strip_prefix("click ") {
+            let (id, action) = parse_click(rest).ok_or_else(|| {
+                ParseError::malformed(line_no, "malformed gantt 'click' statement")
+            })?;
+            clicks.insert(id, action);
             continue;
         }
         if let Some(rest) = strip_kw(line, "weekend") {
@@ -127,6 +140,21 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
     if !header_seen {
         return Err(ParseError::Empty);
     }
+
+    // Bind collected `click` directives onto their tasks by id (a directive may
+    // appear before or after the task it targets).
+    if !clicks.is_empty() {
+        for section in &mut diag.sections {
+            for task in &mut section.tasks {
+                if let Some(id) = &task.id {
+                    if let Some(action) = clicks.remove(id) {
+                        task.click = Some(action);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(diag)
 }
 
@@ -148,16 +176,18 @@ fn parse_task(
     let mut status = TaskStatus::Normal;
     let mut crit = false;
     let mut milestone = false;
+    let mut vert = false;
     let mut id: Option<String> = None;
     let mut consumed = 0;
 
     // Leading tags (optional, any combination): `active`/`done` set the status;
-    // `crit` and `milestone` are orthogonal flags. Upstream combines them, e.g.
-    // `done, crit` keeps the done fill with a crit border rather than letting
-    // the last tag win.
+    // `crit`, `milestone` and `vert` are orthogonal flags. Upstream combines
+    // them, e.g. `done, crit` keeps the done fill with a crit border rather than
+    // letting the last tag win.
     while consumed < parts.len() {
         match parts[consumed] {
             "milestone" => milestone = true,
+            "vert" => vert = true,
             "active" => status = TaskStatus::Active,
             "done" => status = TaskStatus::Done,
             "crit" => crit = true,
@@ -210,6 +240,8 @@ fn parse_task(
         status,
         crit,
         milestone,
+        vert,
+        click: None,
     })
 }
 
@@ -227,7 +259,9 @@ fn strip_kw<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
 
 fn parse_start(start_raw: &str, last_task_id: Option<&str>) -> TaskStart {
     if let Some(after) = start_raw.strip_prefix("after ") {
-        TaskStart::AfterId(after.trim().to_string())
+        // `after a b c` — space-separated list of predecessor ids.
+        let ids: Vec<String> = after.split_whitespace().map(str::to_string).collect();
+        TaskStart::AfterId(ids)
     } else if start_raw.is_empty() && last_task_id.is_some() {
         TaskStart::AfterPrevious
     } else {
@@ -263,16 +297,28 @@ fn looks_like_end(s: &str) -> bool {
     parse_duration(s).is_some() || s.starts_with("until ") || looks_like_date(s)
 }
 
+/// A duration token → its length in days. Upstream units `ms`/`s`/`m`/`h`/`d`/
+/// `w`/`M`/`y` (decimals allowed); `M`(onth) and `y`(ear) are approximated as
+/// 30 and 365 days for the day-count model. `ms` is matched before the
+/// single-char `m`/`s` so it isn't mis-read.
 fn parse_duration(s: &str) -> Option<f64> {
     let s = s.trim();
-    let (num_part, unit) = if let Some(rest) = s.strip_suffix('d') {
+    let (num_part, unit) = if let Some(rest) = s.strip_suffix("ms") {
+        (rest, 1.0 / 86_400_000.0)
+    } else if let Some(rest) = s.strip_suffix('s') {
+        (rest, 1.0 / 86_400.0)
+    } else if let Some(rest) = s.strip_suffix('m') {
+        (rest, 1.0 / 1_440.0)
+    } else if let Some(rest) = s.strip_suffix('h') {
+        (rest, 1.0 / 24.0)
+    } else if let Some(rest) = s.strip_suffix('d') {
         (rest, 1.0)
     } else if let Some(rest) = s.strip_suffix('w') {
         (rest, 7.0)
-    } else if let Some(rest) = s.strip_suffix('h') {
-        (rest, 1.0 / 24.0)
-    } else if let Some(rest) = s.strip_suffix('m') {
-        (rest, 1.0 / 1440.0)
+    } else if let Some(rest) = s.strip_suffix('M') {
+        (rest, 30.0)
+    } else if let Some(rest) = s.strip_suffix('y') {
+        (rest, 365.0)
     } else {
         return None;
     };
@@ -303,7 +349,7 @@ mod tests {
         assert_eq!(design.end, TaskEnd::Duration(5.0));
         let review = &d.sections[0].tasks[1];
         match &review.start {
-            TaskStart::AfterId(s) => assert_eq!(s, "a1"),
+            TaskStart::AfterId(ids) => assert_eq!(ids, &["a1"]),
             _ => panic!("expected after id"),
         }
         let build = &d.sections[1].tasks[0];
@@ -398,6 +444,68 @@ mod tests {
         let t = &d.sections[0].tasks[0];
         assert_eq!(t.status, TaskStatus::Done);
         assert!(t.crit);
+    }
+
+    #[test]
+    fn duration_units_ms_s_m_h_d_w_month_year() {
+        assert_eq!(parse_duration("2d"), Some(2.0));
+        assert_eq!(parse_duration("1w"), Some(7.0));
+        assert_eq!(parse_duration("12h"), Some(0.5));
+        assert_eq!(parse_duration("720m"), Some(0.5));
+        assert_eq!(parse_duration("1M"), Some(30.0));
+        assert_eq!(parse_duration("1y"), Some(365.0));
+        assert_eq!(parse_duration("86400s"), Some(1.0));
+        assert_eq!(parse_duration("86400000ms"), Some(1.0));
+        assert_eq!(parse_duration("1.5d"), Some(1.5));
+        // `ms` isn't mis-read as minutes/seconds.
+        assert_eq!(parse_duration("500ms"), Some(500.0 / 86_400_000.0));
+        assert_eq!(parse_duration("nope"), None);
+    }
+
+    #[test]
+    fn month_year_units_do_not_hard_error() {
+        let d = parse("gantt\nsection S\nA : 2026-01-01, 1M\nB : 2026-06-01, 1y\n").unwrap();
+        assert_eq!(d.sections[0].tasks[0].end, TaskEnd::Duration(30.0));
+        assert_eq!(d.sections[0].tasks[1].end, TaskEnd::Duration(365.0));
+    }
+
+    #[test]
+    fn vert_tag_is_a_flag_not_the_id() {
+        let d = parse("gantt\nsection S\nDeadline : vert, v1, 2026-01-03, 0d\n").unwrap();
+        let t = &d.sections[0].tasks[0];
+        assert!(t.vert);
+        assert_eq!(t.id.as_deref(), Some("v1"));
+        assert_eq!(t.start, TaskStart::Date("2026-01-03".into()));
+        assert_eq!(t.end, TaskEnd::Duration(0.0));
+    }
+
+    #[test]
+    fn after_accepts_multiple_predecessors() {
+        let d = parse(
+            "gantt\nsection S\nA : a, 2026-01-01, 5d\nB : b, 2026-01-01, 2d\nC : after a b, 1d\n",
+        )
+        .unwrap();
+        match &d.sections[0].tasks[2].start {
+            TaskStart::AfterId(ids) => assert_eq!(ids, &["a", "b"]),
+            _ => panic!("expected after ids"),
+        }
+    }
+
+    #[test]
+    fn click_binds_href_and_call_to_tasks() {
+        let d = parse(
+            "gantt\nsection S\nA : a, 2026-01-01, 5d\nB : b, 2026-01-06, 2d\nclick a href \"https://example.com\"\nclick b call openTask()\n",
+        )
+        .unwrap();
+        use crate::parse::ClickAction;
+        assert!(matches!(
+            d.sections[0].tasks[0].click,
+            Some(ClickAction::Href { .. })
+        ));
+        assert!(matches!(
+            d.sections[0].tasks[1].click,
+            Some(ClickAction::Callback { .. })
+        ));
     }
 
     #[test]
