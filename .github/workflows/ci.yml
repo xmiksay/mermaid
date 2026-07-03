@@ -36,3 +36,10 @@ jobs:
 
       - name: Doctests
         run: cargo test --doc
+
+      # Same build the Docs pipeline runs on master; catches rustdoc
+      # warnings (e.g. broken intra-doc links) before merge.
+      - name: Doc build
+        run: cargo doc --no-deps --lib
+        env:
+          RUSTDOCFLAGS: -D warnings

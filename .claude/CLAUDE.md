@@ -94,7 +94,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (555 tests: 539 lib + 15 integration + 1 doctest)
+cargo test               # unit + integration + doctest (564 tests: 548 lib + 15 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty

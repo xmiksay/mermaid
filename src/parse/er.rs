@@ -368,10 +368,7 @@ fn entity_index(diag: &mut ErDiagram, by_name: &mut HashMap<String, usize>, name
 
 /// A `ParseError::Syntax` for a recognized directive keyword with a malformed body.
 fn malformed(keyword: &str, line_no: usize) -> ParseError {
-    ParseError::Syntax {
-        message: format!("malformed '{keyword}' statement"),
-        line: line_no,
-    }
+    ParseError::malformed(line_no, format!("malformed '{keyword}' statement"))
 }
 
 #[cfg(test)]
