@@ -104,6 +104,12 @@ pub struct DiagramMeta {
     pub sankey_height: Option<f64>,
     pub sankey_node_width: Option<f64>,
     pub sankey_node_padding: Option<f64>,
+    /// `config.quadrantChart.chartWidth` — copied onto a [`QuadrantDiagram`].
+    pub quadrant_chart_width: Option<f64>,
+    /// `config.quadrantChart.chartHeight` — copied onto a [`QuadrantDiagram`].
+    pub quadrant_chart_height: Option<f64>,
+    /// `config.quadrantChart.pointRadius` — copied onto a [`QuadrantDiagram`].
+    pub quadrant_point_radius: Option<f64>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
     /// `config.pie.textPosition` from the preamble — copied onto a
