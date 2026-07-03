@@ -13,6 +13,7 @@
 //! ```
 
 use super::ast::{XyAxis, XyAxisKind, XyChartDiagram, XySeries, XySeriesKind};
+use super::token::unquote;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
@@ -125,15 +126,6 @@ fn parse_value_list(rest: &str, line_no: usize) -> Result<Vec<f64>, ParseError> 
         out.push(v);
     }
     Ok(out)
-}
-
-fn unquote(s: &str) -> &str {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        &s[1..s.len() - 1]
-    } else {
-        s
-    }
 }
 
 #[cfg(test)]

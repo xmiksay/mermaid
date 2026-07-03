@@ -22,6 +22,7 @@
 use std::collections::HashMap;
 
 use super::ast::{RadarAxis, RadarCurve, RadarDiagram, RadarGraticule};
+use super::token::unquote;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
@@ -220,15 +221,6 @@ fn split_top(s: &str, delim: char) -> Vec<String> {
     }
     out.push(cur);
     out
-}
-
-fn unquote(s: &str) -> &str {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        &s[1..s.len() - 1]
-    } else {
-        s
-    }
 }
 
 #[cfg(test)]

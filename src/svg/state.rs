@@ -9,6 +9,7 @@ use crate::parse::{
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, fnum, SvgBuilder};
+use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -334,7 +335,7 @@ fn draw_transition(
         ),
     );
     if let Some(label) = &tr.label {
-        let mid = midpoint(&clipped);
+        let mid = polyline_midpoint(&clipped);
         let chars = label.chars().count() as f64;
         let w = chars * 7.0 + 8.0;
         let h = 18.0;
@@ -367,75 +368,6 @@ fn clip_to_state(
         StateKind::Choice => clip_rhombus(from, center, (CHOICE_W, CHOICE_H)),
         _ => clip_rect(from, center, size),
     }
-}
-
-fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
-    let dx = from.0 - c.0;
-    let dy = from.1 - c.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return c;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 {
-        hw / dx.abs()
-    } else {
-        f64::INFINITY
-    };
-    let ty = if dy.abs() > 1e-9 {
-        hh / dy.abs()
-    } else {
-        f64::INFINITY
-    };
-    let t = tx.min(ty);
-    (c.0 + dx * t, c.1 + dy * t)
-}
-
-fn clip_circle(from: (f64, f64), c: (f64, f64), r: f64) -> (f64, f64) {
-    let dx = from.0 - c.0;
-    let dy = from.1 - c.1;
-    let d = (dx * dx + dy * dy).sqrt().max(1e-9);
-    (c.0 + dx * r / d, c.1 + dy * r / d)
-}
-
-fn clip_rhombus(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
-    let dx = from.0 - c.0;
-    let dy = from.1 - c.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return c;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let t = 1.0 / (dx.abs() / hw + dy.abs() / hh).max(1e-9);
-    (c.0 + dx * t, c.1 + dy * t)
-}
-
-fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts[0];
-    }
-    let mut segs = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
 }
 
 fn define_marker(svg: &mut SvgBuilder, theme: &Theme) {

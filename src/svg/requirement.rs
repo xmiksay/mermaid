@@ -8,6 +8,7 @@ use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
+use super::geometry::{clip_rect, polyline_midpoint};
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -199,9 +200,9 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
                 vec![(acx, acy), (bcx, bcy)]
             };
 
-        let first = clip_rect_to_edge(pts[1], (acx, acy), a.2, a.3);
+        let first = clip_rect(pts[1], (acx, acy), (a.2, a.3));
         let last_idx = pts.len() - 1;
-        let last = clip_rect_to_edge(pts[last_idx - 1], (bcx, bcy), b.2, b.3);
+        let last = clip_rect(pts[last_idx - 1], (bcx, bcy), (b.2, b.3));
         let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(pts.len());
         clipped.push(first);
         for p in &pts[1..last_idx] {
@@ -314,56 +315,6 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
-}
-
-fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts.first().copied().unwrap_or((0.0, 0.0));
-    }
-    let mut segs = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
-}
-
-fn clip_rect_to_edge(from: (f64, f64), center: (f64, f64), w: f64, h: f64) -> (f64, f64) {
-    let dx = from.0 - center.0;
-    let dy = from.1 - center.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return center;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let tx = if dx.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hw / dx.abs()
-    };
-    let ty = if dy.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hh / dy.abs()
-    };
-    let t = tx.min(ty);
-    (center.0 + dx * t, center.1 + dy * t)
 }
 
 fn truncate(s: &str, n: usize) -> String {

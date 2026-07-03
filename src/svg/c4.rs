@@ -24,6 +24,7 @@ use crate::parse::{
 };
 
 use super::builder::{fnum, SvgBuilder};
+use super::geometry::{clip_rect, polyline_midpoint};
 use super::theme::Theme;
 
 const PAD: f64 = 32.0;
@@ -675,8 +676,8 @@ fn draw_rel(
     let (tx, ty) = (bx + bw / 2.0, by + bh / 2.0);
 
     // Point-to-point line, clipped to each node's rectangle.
-    let p_first = clip_rect_to_edge((tx, ty), (sx, sy), aw, ah);
-    let p_last = clip_rect_to_edge((sx, sy), (tx, ty), bw, bh);
+    let p_first = clip_rect((tx, ty), (sx, sy), (aw, ah));
+    let p_last = clip_rect((sx, sy), (tx, ty), (bw, bh));
     let clipped = vec![p_first, p_last];
 
     let markers = if r.bidirectional {
@@ -746,56 +747,6 @@ fn quad_path(pts: &[(f64, f64)]) -> String {
         fnum(end.0),
         fnum(end.1),
     )
-}
-
-fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts.first().copied().unwrap_or((0.0, 0.0));
-    }
-    let mut segs = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
-}
-
-fn clip_rect_to_edge(from: (f64, f64), center: (f64, f64), w: f64, h: f64) -> (f64, f64) {
-    let dx = from.0 - center.0;
-    let dy = from.1 - center.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return center;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let tx_lim = if dx.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hw / dx.abs()
-    };
-    let ty_lim = if dy.abs() < 1e-9 {
-        f64::INFINITY
-    } else {
-        hh / dy.abs()
-    };
-    let t = tx_lim.min(ty_lim);
-    (center.0 + dx * t, center.1 + dy * t)
 }
 
 fn wrap_text(s: &str, max_chars: usize, max_lines: usize) -> Vec<String> {

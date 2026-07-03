@@ -22,6 +22,7 @@ use super::ast::{
     FlowDirection, MemberKind, Namespace, Style, UmlClass, Visibility,
 };
 use super::style::parse_style_props;
+use super::token::find_unquoted;
 use super::{strip_comment, ParseError};
 
 const RELATIONS: &[(&str, ClassRelationKind)] = &[
@@ -516,28 +517,6 @@ fn parse_member(s: &str) -> ClassMember {
         text: rest,
         kind,
     }
-}
-
-/// Find the first byte position of `needle` in `haystack` that lies outside of
-/// any `"…"` quoted region. Cardinalities like `"1..*"` embed relation tokens
-/// (`..`), so token scanning must ignore quoted text.
-fn find_unquoted(haystack: &str, needle: &str) -> Option<usize> {
-    let bytes = haystack.as_bytes();
-    let nb = needle.as_bytes();
-    let mut in_quote = false;
-    let mut i = 0;
-    while i + nb.len() <= bytes.len() {
-        if bytes[i] == b'"' {
-            in_quote = !in_quote;
-            i += 1;
-            continue;
-        }
-        if !in_quote && &bytes[i..i + nb.len()] == nb {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
 }
 
 /// Strip a trailing `"card"` multiplicity, e.g. `Customer "1"` → (`Customer`, `1`).

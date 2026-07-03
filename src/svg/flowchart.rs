@@ -10,6 +10,7 @@ use crate::parse::{
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, fnum, split_label_lines, SvgBuilder};
+use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
 use super::interact::{close_click, open_click};
 use super::style::{resolve_edge_style, resolve_style, ResolvedStyle};
 use super::theme::Theme;
@@ -651,7 +652,7 @@ fn draw_edge(
     svg.path(&d, &attrs);
 
     if let Some(label) = &edge.label {
-        let mid = midpoint(&clipped);
+        let mid = polyline_midpoint(&clipped);
         draw_edge_label(svg, mid, label, theme);
     }
 }
@@ -676,34 +677,6 @@ fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
         attrs.push(format!("marker-end=\"url(#{id})\""));
     }
     attrs.join(" ")
-}
-
-fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts[0];
-    }
-    let mut segs: Vec<f64> = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
 }
 
 fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme: &Theme) {
@@ -749,47 +722,6 @@ fn clip_to_node(
         NodeShape::Rhombus => clip_rhombus(from, center, size),
         _ => clip_rect(from, center, size),
     }
-}
-
-fn clip_rect(from: (f64, f64), center: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
-    let dx = from.0 - center.0;
-    let dy = from.1 - center.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return center;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 {
-        hw / dx.abs()
-    } else {
-        f64::INFINITY
-    };
-    let ty = if dy.abs() > 1e-9 {
-        hh / dy.abs()
-    } else {
-        f64::INFINITY
-    };
-    let t = tx.min(ty);
-    (center.0 + dx * t, center.1 + dy * t)
-}
-
-fn clip_circle(from: (f64, f64), center: (f64, f64), r: f64) -> (f64, f64) {
-    let dx = from.0 - center.0;
-    let dy = from.1 - center.1;
-    let d = (dx * dx + dy * dy).sqrt().max(1e-9);
-    (center.0 + dx * r / d, center.1 + dy * r / d)
-}
-
-fn clip_rhombus(from: (f64, f64), center: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
-    let dx = from.0 - center.0;
-    let dy = from.1 - center.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return center;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let t = 1.0 / (dx.abs() / hw + dy.abs() / hh).max(1e-9);
-    (center.0 + dx * t, center.1 + dy * t)
 }
 
 // ---- markers ---------------------------------------------------------------

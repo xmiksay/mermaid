@@ -15,6 +15,7 @@
 //! the line-oriented per-diagram scanners never see them.
 
 use super::ast::DiagramMeta;
+use super::token::unquote_any as unquote;
 
 /// Extract the preamble metadata and return `(meta, cleaned_source)`.
 pub fn strip(input: &str) -> (DiagramMeta, String) {
@@ -196,16 +197,6 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
         Some(&s[prefix.len()..])
     } else {
         None
-    }
-}
-
-/// Strip a single pair of surrounding single or double quotes.
-fn unquote(s: &str) -> &str {
-    let b = s.as_bytes();
-    if b.len() >= 2 && (b[0] == b'"' || b[0] == b'\'') && b[b.len() - 1] == b[0] {
-        &s[1..s.len() - 1]
-    } else {
-        s
     }
 }
 

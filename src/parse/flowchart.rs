@@ -27,6 +27,7 @@ use super::ast::{
     NodeShape, Style, Subgraph,
 };
 use super::style::parse_style_props;
+use super::token::{split_unquoted, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
@@ -459,7 +460,7 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
             (false, "/]") => NodeShape::TrapezoidAlt,
             _ => NodeShape::Rect,
         };
-        return Ok(finish_node(id, unquote(text.trim()), shape, sc));
+        return Ok(finish_node(id, unquote(text.trim()).to_string(), shape, sc));
     }
     for (open, close, shape) in SHAPES {
         if sc.try_consume(open) {
@@ -468,7 +469,12 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
                 line: line_no,
             })?;
             let _ = sc.try_consume(close);
-            return Ok(finish_node(id, unquote(text.trim()), *shape, sc));
+            return Ok(finish_node(
+                id,
+                unquote(text.trim()).to_string(),
+                *shape,
+                sc,
+            ));
         }
     }
     let text = id.clone();
@@ -504,44 +510,12 @@ fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<Flo
 /// quotes so a quoted value may embed either character. Values are unquoted.
 fn split_attrs(body: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
-    for part in split_top_commas(body) {
+    for part in split_unquoted(body, ',') {
         if let Some((k, v)) = part.split_once(':') {
-            pairs.push((k.trim().to_string(), unquote(v.trim())));
+            pairs.push((k.trim().to_string(), unquote(v.trim()).to_string()));
         }
     }
     pairs
-}
-
-/// Split on commas that sit outside any `"`/`'` quoted run.
-fn split_top_commas(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    for c in s.chars() {
-        match quote {
-            Some(q) => {
-                if c == q {
-                    quote = None;
-                }
-                cur.push(c);
-            }
-            None if c == '"' || c == '\'' => {
-                quote = Some(c);
-                cur.push(c);
-            }
-            None if c == ',' => {
-                if !cur.trim().is_empty() {
-                    parts.push(cur.trim().to_string());
-                }
-                cur.clear();
-            }
-            None => cur.push(c),
-        }
-    }
-    if !cur.trim().is_empty() {
-        parts.push(cur.trim().to_string());
-    }
-    parts
 }
 
 /// Map a v11 named shape onto an existing `NodeShape`. Aliases follow upstream
@@ -696,14 +670,6 @@ fn tooltip_and_target(rest: &[ClickToken]) -> (Option<String>, Option<String>) {
     (tooltip, target)
 }
 
-fn unquote(s: &str) -> String {
-    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        s[1..s.len() - 1].to_string()
-    } else {
-        s.to_string()
-    }
-}
-
 fn read_until_either<'a>(
     sc: &mut Scanner<'a>,
     a: &'static str,
@@ -833,7 +799,7 @@ fn parse_arrow(sc: &mut Scanner<'_>, line_no: usize) -> Result<Option<ArrowSpec>
             line: line_no,
         })?;
         sc.try_consume("|");
-        Some(unquote(txt.trim()))
+        Some(unquote(txt.trim()).to_string())
     } else if head == EdgeHead::None && opener_len == 2 {
         // Inline edge-label form: `A -- text --> B` (also `-. text .->`,
         // `== text ==>`). The two-char opener with no head is Mermaid's
@@ -842,7 +808,7 @@ fn parse_arrow(sc: &mut Scanner<'_>, line_no: usize) -> Result<Option<ArrowSpec>
         match read_inline_label(sc, line_style) {
             Some((txt, closer_head)) => {
                 head = closer_head;
-                Some(unquote(txt.trim()))
+                Some(unquote(txt.trim()).to_string())
             }
             None => None,
         }
