@@ -305,7 +305,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   (`break` reuses the frame with a `break` title); `rect <color>` draws a
   colored background band behind its items via a separate `draw_rect_bands`
   pass (paired `RectOpen`/`RectClose` events, LIFO stack, default fill
-  `rgba(0,0,0,0.05)` when no color given).
+  `rgba(0,0,0,0.05)` when no color given). Block frames and rect bands are
+  **sized to the participants they enclose**, not the whole diagram (#123):
+  `draw_block_frames`/`draw_rect_bands` compute `min_x`/`max_x` from the
+  participant ids referenced by the events between each open/close pair
+  (`collect_ids`/`extents`, falling back to `all_extents` when the block
+  encloses no message). The frame-label tab fill is theme-driven
+  (`theme.frame_label_fill`) instead of a hardcoded `#EEE`.
 - Sequence `autonumber` is **positional**: it parses to
   `SequenceItem::AutoNumber(Option<AutoNumberConfig>)` interleaved in `items`.
   `autonumber [start [step]]` → `Some{start,step}` (defaults 1/1) turns numbering
@@ -318,7 +324,8 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   participant (`HashMap<String, Vec<f64>>`) so nested/stacked activations (the
   `->>+` shorthand) draw one band per level, each offset `level * 3px` to the
   right instead of overwriting. Activations still open at the end of the event
-  loop are flushed down to `lifeline_bottom`.
+  loop are flushed down to `lifeline_bottom`. The band fill/stroke are
+  theme-driven (`theme.activation_fill`/`activation_stroke`).
   - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
     (`parse_message` in `src/parse/sequence/message.rs`): a leading `+`/`-` on the
     target id is stripped (not part of the participant name) and
@@ -328,6 +335,14 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
   head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
   in `src/svg/sequence/participants.rs` branches on `Participant.kind`.
+- Sequence `note` boxes are theme-driven (`theme.note_fill`/`note_stroke`, no
+  longer a hardcoded `#FFF5AD`) and **word-wrap** to their box width (#123):
+  `note_geometry` (`src/svg/sequence/messages.rs`) computes the box (an `over`
+  note spans its participants with a `NOTE_MIN_W` floor; `left/right of` keep
+  `NOTE_SIDE_W`), wraps the text to the interior via `wrap_note_text` (honoring
+  existing `<br>`/`\n` breaks first), and grows the box height with the line
+  count. The layout pass reserves that computed height, so a multi-line note
+  pushes later events down.
 - Sequence `box <color> <label>` groups participants: `SequenceBox` carries an
   optional `color` (parsed in `split_box_color` — hex, `rgb()/rgba()`, or a
   named CSS color; else the whole string is the label) plus the member

@@ -62,6 +62,7 @@ pub(super) fn draw_activations(
     events: &[Event],
     x_of: &HashMap<String, f64>,
     lifeline_bottom: f64,
+    theme: &Theme,
 ) {
     // A stack of open start-ys per participant so nested activations
     // (e.g. the `->>+` shorthand) stack instead of overwriting. Each nesting
@@ -76,7 +77,7 @@ pub(super) fn draw_activations(
                 if let Some(start_y) = open.get_mut(id).and_then(Vec::pop) {
                     // The popped entry sat at depth == current stack length.
                     let level = open.get(id).map_or(0, Vec::len);
-                    draw_activation_band(svg, x_of, id, start_y, ev.y, level);
+                    draw_activation_band(svg, x_of, id, start_y, ev.y, level, theme);
                 }
             }
             _ => {}
@@ -85,11 +86,12 @@ pub(super) fn draw_activations(
     // Unclosed activations extend to the bottom of the lifelines.
     for (id, starts) in &open {
         for (level, &start_y) in starts.iter().enumerate() {
-            draw_activation_band(svg, x_of, id, start_y, lifeline_bottom, level);
+            draw_activation_band(svg, x_of, id, start_y, lifeline_bottom, level, theme);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_activation_band(
     svg: &mut SvgBuilder,
     x_of: &HashMap<String, f64>,
@@ -97,7 +99,10 @@ fn draw_activation_band(
     start_y: f64,
     end_y: f64,
     level: usize,
+    theme: &Theme,
 ) {
+    let activation_fill = theme.activation_fill;
+    let activation_stroke = theme.activation_stroke;
     if let Some(&cx) = x_of.get(id) {
         let offset = level as f64 * 3.0;
         svg.rect(
@@ -105,7 +110,9 @@ fn draw_activation_band(
             start_y,
             ACTIVATION_W,
             (end_y - start_y).max(8.0),
-            "fill=\"#ECECFF\" stroke=\"#9370DB\" stroke-width=\"1\"",
+            &format!(
+                "fill=\"{activation_fill}\" stroke=\"{activation_stroke}\" stroke-width=\"1\""
+            ),
         );
     }
 }
@@ -165,6 +172,17 @@ mod tests {
     }
 
     #[test]
+    fn activation_uses_theme_fill() {
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: req\nactivate B\nB-->>A: resp\ndeactivate B\n"),
+            &Theme::dark(),
+        );
+        // Dark theme must not fall back to the default light activation fill.
+        assert!(!svg.contains("#ECECFF"));
+        assert!(svg.contains(Theme::dark().activation_fill));
+    }
+
+    #[test]
     fn nested_activations_stack_and_offset() {
         // Two activations on B open before either closes: the bands must not
         // overwrite each other, and the inner one is offset horizontally.
@@ -189,7 +207,7 @@ mod tests {
         let mut x_of = HashMap::new();
         x_of.insert("B".to_string(), 100.0);
         let mut svg = SvgBuilder::new(300.0, 300.0);
-        draw_activations(&mut svg, &events, &x_of, 200.0);
+        draw_activations(&mut svg, &events, &x_of, 200.0, &Theme::default());
         let out = svg.finish();
         // Outer band starts at x = 95 (100 - 10/2 + 0), inner offset by 3 → 98.
         assert!(out.contains("x=\"95\""), "outer band at base x");
@@ -229,7 +247,7 @@ mod tests {
         let mut x_of = HashMap::new();
         x_of.insert("B".to_string(), 100.0);
         let mut svg = SvgBuilder::new(300.0, 300.0);
-        draw_activations(&mut svg, &events, &x_of, 200.0);
+        draw_activations(&mut svg, &events, &x_of, 200.0, &Theme::default());
         let out = svg.finish();
         // Band height = lifeline_bottom - start_y = 200 - 10 = 190.
         assert!(out.contains("#ECECFF"), "unclosed activation is drawn");

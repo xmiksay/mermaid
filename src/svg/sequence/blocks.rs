@@ -42,9 +42,10 @@ pub(super) fn layout_items(
                 });
             }
             SequenceItem::Note(n) => {
-                *cursor += NOTE_HEIGHT + 10.0;
+                let h = note_geometry(n, x_of).map_or(NOTE_HEIGHT, |g| g.height);
+                *cursor += h + 10.0;
                 out.push(Event {
-                    y: *cursor - NOTE_HEIGHT / 2.0,
+                    y: *cursor - h / 2.0,
                     kind: EventKind::Note(n.clone()),
                 });
             }
@@ -205,20 +206,85 @@ fn emit_branched_block(
     });
 }
 
+/// Participant ids an event touches, appended to `out`. Used to size a frame or
+/// band to only the participants involved in the messages it encloses (#123).
+fn collect_ids(kind: &EventKind, out: &mut Vec<String>) {
+    match kind {
+        EventKind::Message { msg, .. } => {
+            out.push(msg.from.clone());
+            out.push(msg.to.clone());
+        }
+        EventKind::Note(n) => out.extend(n.participants.iter().cloned()),
+        EventKind::Activate(id)
+        | EventKind::Deactivate(id)
+        | EventKind::Create(id)
+        | EventKind::Destroy(id) => out.push(id.clone()),
+        _ => {}
+    }
+}
+
+/// `(min_x, max_x)` of the participants referenced by `events[range]`, or `None`
+/// when the range touches no positioned participant.
+fn extents(
+    events: &[Event],
+    range: std::ops::Range<usize>,
+    x_of: &HashMap<String, f64>,
+) -> Option<(f64, f64)> {
+    let mut ids: Vec<String> = Vec::new();
+    for ev in &events[range] {
+        collect_ids(&ev.kind, &mut ids);
+    }
+    let xs: Vec<f64> = ids.iter().filter_map(|id| x_of.get(id).copied()).collect();
+    if xs.is_empty() {
+        return None;
+    }
+    Some((
+        xs.iter().copied().fold(f64::INFINITY, f64::min),
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    ))
+}
+
+/// Full-diagram extents, the fallback when a frame/band encloses no message.
+fn all_extents(x_of: &HashMap<String, f64>) -> (f64, f64) {
+    (
+        x_of.values().copied().fold(f64::INFINITY, f64::min),
+        x_of.values().copied().fold(f64::NEG_INFINITY, f64::max),
+    )
+}
+
+/// Map each `BlockOpen` event index to its matching `BlockClose` index.
+fn pair_blocks(events: &[Event]) -> HashMap<usize, usize> {
+    let mut map = HashMap::new();
+    let mut stack: Vec<usize> = Vec::new();
+    for (i, ev) in events.iter().enumerate() {
+        match ev.kind {
+            EventKind::BlockOpen { .. } => stack.push(i),
+            EventKind::BlockClose => {
+                if let Some(open) = stack.pop() {
+                    map.insert(open, i);
+                }
+            }
+            _ => {}
+        }
+    }
+    map
+}
+
 /// Draw `rect <color>` background bands. Bands nest strictly (LIFO), so a plain
-/// stack of open `(y_top, color)` pairs matches each close to its open.
+/// stack of open `(index, y_top, color)` tuples matches each close to its open;
+/// the band spans only the participants involved between the pair.
 pub(super) fn draw_rect_bands(svg: &mut SvgBuilder, events: &[Event], x_of: &HashMap<String, f64>) {
     if x_of.is_empty() {
         return;
     }
-    let min_x = x_of.values().copied().fold(f64::INFINITY, f64::min);
-    let max_x = x_of.values().copied().fold(f64::NEG_INFINITY, f64::max);
-    let mut stack: Vec<(f64, Option<String>)> = Vec::new();
-    for ev in events {
+    let mut stack: Vec<(usize, f64, Option<String>)> = Vec::new();
+    for (i, ev) in events.iter().enumerate() {
         match &ev.kind {
-            EventKind::RectOpen { color } => stack.push((ev.y, color.clone())),
+            EventKind::RectOpen { color } => stack.push((i, ev.y, color.clone())),
             EventKind::RectClose => {
-                if let Some((y_top, color)) = stack.pop() {
+                if let Some((open_i, y_top, color)) = stack.pop() {
+                    let (min_x, max_x) =
+                        extents(events, open_i + 1..i, x_of).unwrap_or_else(|| all_extents(x_of));
                     let fill = color.as_deref().unwrap_or("rgba(0,0,0,0.05)");
                     let x = min_x - 20.0;
                     svg.rect(
@@ -242,33 +308,41 @@ pub(super) fn draw_block_frames(
     theme: &Theme,
 ) {
     let fg = theme.fg;
-    let min_x = x_of.values().copied().fold(f64::INFINITY, f64::min);
-    let max_x = x_of.values().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Walk events to pair open/close with stack.
-    let mut stack: Vec<(usize, BlockKind, String)> = Vec::new();
+    let close_of = pair_blocks(events);
+    // Each open records its own participant extents so branch dividers (drawn
+    // before the close) and the closing frame share the same span.
+    let mut stack: Vec<(usize, BlockKind, String, f64, f64)> = Vec::new();
     for (i, ev) in events.iter().enumerate() {
         match &ev.kind {
-            EventKind::BlockOpen { kind, label } => stack.push((i, *kind, label.clone())),
+            EventKind::BlockOpen { kind, label } => {
+                let (min_x, max_x) = close_of
+                    .get(&i)
+                    .and_then(|&close| extents(events, i + 1..close, x_of))
+                    .unwrap_or_else(|| all_extents(x_of));
+                stack.push((i, *kind, label.clone(), min_x, max_x));
+            }
             EventKind::BlockBranch { label } => {
-                let y_branch = ev.y;
-                svg.line(
-                    min_x - 16.0,
-                    y_branch,
-                    max_x + 16.0,
-                    y_branch,
-                    "stroke=\"#888\" stroke-width=\"1\" stroke-dasharray=\"4 3\"",
-                );
-                if !label.is_empty() {
-                    svg.text(
-                        min_x + 4.0,
-                        y_branch - 4.0,
-                        &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
-                        &format!("[{label}]"),
+                if let Some(&(_, _, _, min_x, max_x)) = stack.last() {
+                    let y_branch = ev.y;
+                    svg.line(
+                        min_x - 16.0,
+                        y_branch,
+                        max_x + 16.0,
+                        y_branch,
+                        "stroke=\"#888\" stroke-width=\"1\" stroke-dasharray=\"4 3\"",
                     );
+                    if !label.is_empty() {
+                        svg.text(
+                            min_x + 4.0,
+                            y_branch - 4.0,
+                            &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
+                            &format!("[{label}]"),
+                        );
+                    }
                 }
             }
             EventKind::BlockClose => {
-                if let Some((open_idx, kind, label)) = stack.pop() {
+                if let Some((open_idx, kind, label, min_x, max_x)) = stack.pop() {
                     let y_top = events[open_idx].y;
                     let y_bot = ev.y;
                     draw_block_frame(svg, kind, &label, min_x, max_x, y_top, y_bot, theme);
@@ -291,6 +365,7 @@ fn draw_block_frame(
     theme: &Theme,
 ) {
     let fg = theme.fg;
+    let frame_label_fill = theme.frame_label_fill;
     let frame_x = min_x - 16.0;
     let frame_w = (max_x + 16.0) - frame_x;
     let frame_h = y_bot - y_top;
@@ -315,7 +390,7 @@ fn draw_block_frame(
         y_top - 0.5,
         BLOCK_LABEL_W,
         18.0,
-        "fill=\"#EEE\" stroke=\"#666\" stroke-width=\"1\"",
+        &format!("fill=\"{frame_label_fill}\" stroke=\"#666\" stroke-width=\"1\""),
     );
     svg.text(
         frame_x + 6.0,
@@ -399,6 +474,37 @@ mod tests {
         );
         assert!(svg.contains(">break<"));
         assert!(svg.contains("[connection lost]"));
+    }
+
+    #[test]
+    fn block_frame_bounds_to_involved_participants() {
+        // A is leftmost but the loop only involves B and C: the frame must start
+        // to the right of A instead of spanning the whole diagram (#123).
+        let svg = render(
+            &build(
+                "sequenceDiagram\nparticipant A\nparticipant B\nparticipant C\n\
+                 A->>B: setup\nloop retry\nB->>C: ping\nend\n",
+            ),
+            &Theme::default(),
+        );
+        assert!(svg.contains(">loop<"));
+        // B's column left edge (223) bounds the frame; a full-span frame would
+        // start at A's column (63).
+        assert!(svg.contains("x=\"223\""), "loop frame starts right of A");
+        assert!(
+            !svg.contains("x=\"63\""),
+            "loop frame must not span down to A's lifeline"
+        );
+    }
+
+    #[test]
+    fn block_frame_uses_theme_label_fill() {
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: q\nloop retry\nA->>B: y\nend\n"),
+            &Theme::dark(),
+        );
+        assert!(!svg.contains("fill=\"#EEE\""));
+        assert!(svg.contains(Theme::dark().frame_label_fill));
     }
 
     #[test]
