@@ -86,6 +86,9 @@ pub struct DiagramMeta {
     /// `config.sankey.nodeAlignment` from frontmatter — copied onto a
     /// [`SankeyDiagram`] to drive column alignment.
     pub sankey_node_alignment: Option<String>,
+    /// `config.timeline.disableMulticolor` from frontmatter — copied onto a
+    /// [`TimelineDiagram`] to keep a sectionless timeline one flat color.
+    pub timeline_disable_multicolor: Option<bool>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
     /// The whole `config:` tree flattened to dotted `key → value` entries

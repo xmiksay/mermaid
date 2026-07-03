@@ -129,11 +129,20 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
         &format!("stroke=\"{fg_muted}\" stroke-width=\"2\""),
     );
 
-    // Periods: tick, label, events.
+    // Periods: tick, label, events. Upstream colors by section, but a
+    // sectionless timeline advances the color per time-period instead
+    // (unless `timeline.disableMulticolor` is set, keeping it one flat color).
     let mut idx = 0usize;
     for (si, sec) in d.sections.iter().enumerate() {
-        let color = theme.pie_color(si);
         for period in &sec.periods {
+            let color_idx = if has_named_section {
+                si
+            } else if d.disable_multicolor {
+                0
+            } else {
+                idx
+            };
+            let color = theme.pie_color(color_idx);
             let cx = chart_left + idx as f64 * PERIOD_GAP + PERIOD_GAP / 2.0;
             svg.circle(
                 cx,
@@ -190,6 +199,8 @@ mod tests {
                     events: vec!["LinkedIn".into()],
                 }],
             }],
+            direction: None,
+            disable_multicolor: false,
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -208,12 +219,52 @@ mod tests {
                     events: vec!["Decentralized Social Networking".into()],
                 }],
             }],
+            direction: None,
+            disable_multicolor: false,
         };
         let svg = render(&d, &Theme::default());
         // Wrapped across <tspan>s, no ellipsis truncation.
         assert!(!svg.contains('…'));
         assert!(svg.contains("<tspan"));
         assert!(svg.contains(">Decentralized<"));
+    }
+
+    fn sectionless(disable_multicolor: bool) -> TimelineDiagram {
+        TimelineDiagram {
+            title: None,
+            sections: vec![TimelineSection {
+                name: None,
+                periods: vec![
+                    TimelinePeriod {
+                        label: "2002".into(),
+                        events: vec!["LinkedIn".into()],
+                    },
+                    TimelinePeriod {
+                        label: "2004".into(),
+                        events: vec!["Facebook".into()],
+                    },
+                ],
+            }],
+            direction: None,
+            disable_multicolor,
+        }
+    }
+
+    #[test]
+    fn sectionless_timeline_advances_color_per_period() {
+        let theme = Theme::default();
+        let svg = render(&sectionless(false), &theme);
+        // Distinct period colors are present.
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(0))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(1))));
+    }
+
+    #[test]
+    fn disable_multicolor_keeps_one_color() {
+        let theme = Theme::default();
+        let svg = render(&sectionless(true), &theme);
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(0))));
+        assert!(!svg.contains(&format!("fill=\"{}\"", theme.pie_color(1))));
     }
 
     #[test]

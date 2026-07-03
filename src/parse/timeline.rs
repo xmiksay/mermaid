@@ -34,9 +34,7 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
         }
 
         if !header_seen {
-            if line != "timeline" {
-                return Err(ParseError::header(line_no, "expected 'timeline' header"));
-            }
+            d.direction = parse_header(line, line_no)?;
             header_seen = true;
             continue;
         }
@@ -91,6 +89,31 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
         return Err(ParseError::Empty);
     }
     Ok(d)
+}
+
+/// Parse the `timeline` header, optionally followed by a v11.14+ direction
+/// token (`TB`/`TD`/`BT`/`RL`/`LR`). Returns the validated direction if present.
+fn parse_header(line: &str, line_no: usize) -> Result<Option<String>, ParseError> {
+    let mut tokens = line.split_whitespace();
+    if tokens.next() != Some("timeline") {
+        return Err(ParseError::header(line_no, "expected 'timeline' header"));
+    }
+    let direction = match tokens.next() {
+        None => None,
+        Some(dir) => match dir {
+            "TB" | "TD" | "BT" | "RL" | "LR" => Some(dir.to_string()),
+            other => {
+                return Err(ParseError::header(
+                    line_no,
+                    format!("unknown timeline direction '{other}'"),
+                ));
+            }
+        },
+    };
+    if tokens.next().is_some() {
+        return Err(ParseError::header(line_no, "trailing tokens after header"));
+    }
+    Ok(direction)
 }
 
 fn parse_period(line: &str, line_no: usize) -> Result<TimelinePeriod, ParseError> {
@@ -191,5 +214,23 @@ mod tests {
     #[test]
     fn requires_header() {
         assert!(matches!(parse("nope\n"), Err(ParseError::Syntax { .. })));
+    }
+
+    #[test]
+    fn header_direction() {
+        let d = parse("timeline LR\n2002 : LinkedIn\n").unwrap();
+        assert_eq!(d.direction.as_deref(), Some("LR"));
+        let d = parse("timeline TD\n2002 : LinkedIn\n").unwrap();
+        assert_eq!(d.direction.as_deref(), Some("TD"));
+        let d = parse("timeline\n2002 : LinkedIn\n").unwrap();
+        assert_eq!(d.direction, None);
+    }
+
+    #[test]
+    fn header_unknown_direction_errors() {
+        assert!(matches!(
+            parse("timeline sideways\n2002 : A\n"),
+            Err(ParseError::Syntax { .. })
+        ));
     }
 }
