@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::parse::ast::{BlockArrow, BlockEdge, BlockItem, BlockShape, Style};
+use crate::parse::ast::{BlockArrow, BlockEdge, BlockItem, BlockLinkStyle, BlockShape, Style};
 use crate::parse::style::parse_style_props;
 
 /// Style state gathered while scanning: `classDef` definitions plus the
@@ -13,7 +13,7 @@ use crate::parse::style::parse_style_props;
 pub(super) struct Ctx {
     pub(super) class_defs: HashMap<String, Style>,
     class_assign: Vec<(Vec<String>, String)>,
-    style_assign: Vec<(String, Style)>,
+    style_assign: Vec<(Vec<String>, Style)>,
 }
 
 /// Consume a `classDef`/`class`/`style` statement into `ctx`; returns whether
@@ -44,9 +44,16 @@ pub(super) fn handle_style_line(line: &str, ctx: &mut Ctx) -> bool {
         return true;
     }
     if let Some(rest) = line.strip_prefix("style ") {
-        if let Some((id, props)) = rest.trim().split_once(char::is_whitespace) {
-            ctx.style_assign
-                .push((id.trim().to_string(), parse_style_props(props)));
+        if let Some((ids, props)) = rest.trim().split_once(char::is_whitespace) {
+            let ids: Vec<String> = ids
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            if !ids.is_empty() {
+                ctx.style_assign.push((ids, parse_style_props(props)));
+            }
         }
         return true;
     }
@@ -64,8 +71,8 @@ pub(super) fn apply_assignments(items: &mut [BlockItem], ctx: &Ctx) {
                         b.classes.push(name.clone());
                     }
                 }
-                for (id, style) in &ctx.style_assign {
-                    if id == &b.id {
+                for (ids, style) in &ctx.style_assign {
+                    if ids.iter().any(|i| i == &b.id) {
                         b.style.extend(style.iter().cloned());
                     }
                 }
@@ -115,48 +122,45 @@ pub(super) fn parse_block_arrow(s: &str) -> Option<(String, BlockArrow, String)>
 
 pub(super) fn parse_shape(s: &str) -> (String, BlockShape, String) {
     let s = s.trim();
-    let shape_start = s.find(['[', '(', '{']);
+    // `>` opens the asymmetric `>text]` shape; the classic delimiters open the
+    // rest. The id is everything before the first opener.
+    let shape_start = s.find(['[', '(', '{', '>']);
     let (id, shape_part) = match shape_start {
         Some(p) => (&s[..p], &s[p..]),
         None => (s, ""),
     };
+    // (open_len, close_delim, shape) — longest openers first so `[[`/`(((`
+    // win over the single-char forms.
     let (shape, label_raw) = if shape_part.is_empty() {
         (BlockShape::Rect, id.to_string())
-    } else if shape_part.starts_with("[(") && shape_part.ends_with(")]") {
-        (
-            BlockShape::Cylinder,
-            shape_part[2..shape_part.len() - 2].to_string(),
-        )
-    } else if shape_part.starts_with("((") && shape_part.ends_with("))") {
-        (
-            BlockShape::Circle,
-            shape_part[2..shape_part.len() - 2].to_string(),
-        )
-    } else if shape_part.starts_with("([") && shape_part.ends_with("])") {
-        (
-            BlockShape::Stadium,
-            shape_part[2..shape_part.len() - 2].to_string(),
-        )
-    } else if shape_part.starts_with("{{") && shape_part.ends_with("}}") {
-        (
-            BlockShape::Hexagon,
-            shape_part[2..shape_part.len() - 2].to_string(),
-        )
-    } else if shape_part.starts_with('[') && shape_part.ends_with(']') {
-        (
-            BlockShape::Rect,
-            shape_part[1..shape_part.len() - 1].to_string(),
-        )
-    } else if shape_part.starts_with('(') && shape_part.ends_with(')') {
-        (
-            BlockShape::Round,
-            shape_part[1..shape_part.len() - 1].to_string(),
-        )
-    } else if shape_part.starts_with('{') && shape_part.ends_with('}') {
-        (
-            BlockShape::Rhombus,
-            shape_part[1..shape_part.len() - 1].to_string(),
-        )
+    } else if let Some(inner) = strip_pair(shape_part, "[[", "]]") {
+        (BlockShape::Subroutine, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "(((", ")))") {
+        (BlockShape::DoubleCircle, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[(", ")]") {
+        (BlockShape::Cylinder, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "((", "))") {
+        (BlockShape::Circle, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "([", "])") {
+        (BlockShape::Stadium, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "{{", "}}") {
+        (BlockShape::Hexagon, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[/", "/]") {
+        (BlockShape::LeanRight, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[/", "\\]") {
+        (BlockShape::Trapezoid, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[\\", "\\]") {
+        (BlockShape::LeanLeft, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[\\", "/]") {
+        (BlockShape::TrapezoidAlt, inner)
+    } else if let Some(inner) = strip_pair(shape_part, ">", "]") {
+        (BlockShape::Odd, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "[", "]") {
+        (BlockShape::Rect, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "(", ")") {
+        (BlockShape::Round, inner)
+    } else if let Some(inner) = strip_pair(shape_part, "{", "}") {
+        (BlockShape::Rhombus, inner)
     } else {
         (BlockShape::Rect, id.to_string())
     };
@@ -169,30 +173,62 @@ pub(super) fn parse_shape(s: &str) -> (String, BlockShape, String) {
     (id.to_string(), shape, label)
 }
 
+/// If `s` starts with `open` and ends with `close` (and is long enough to hold
+/// both without overlap), return the inner text.
+fn strip_pair(s: &str, open: &str, close: &str) -> Option<String> {
+    if s.starts_with(open) && s.ends_with(close) && s.len() >= open.len() + close.len() {
+        Some(s[open.len()..s.len() - close.len()].to_string())
+    } else {
+        None
+    }
+}
+
 pub(super) fn parse_edge(line: &str) -> Option<BlockEdge> {
-    // Match: a --> b, a -- "label" --> b, a --- b
-    for arrow in ["-->", "---"] {
-        if let Some(pos) = line.find(arrow) {
+    // Link operators, longest first so `-.->` wins over `-->`/`---`, etc.
+    // Each: (operator, style, has-arrowhead).
+    const LINKS: &[(&str, BlockLinkStyle, bool)] = &[
+        ("~~~", BlockLinkStyle::Invisible, false),
+        ("-.->", BlockLinkStyle::Dotted, true),
+        ("-.-", BlockLinkStyle::Dotted, false),
+        ("==>", BlockLinkStyle::Thick, true),
+        ("===", BlockLinkStyle::Thick, false),
+        ("-->", BlockLinkStyle::Solid, true),
+        ("---", BlockLinkStyle::Solid, false),
+    ];
+    for (op, style, arrow) in LINKS {
+        if let Some(pos) = line.find(op) {
             let mut from = line[..pos].trim().to_string();
-            let to = line[pos + arrow.len()..].trim().to_string();
-            // Inline label on the tail side: `from -- "text"` / `from -- text`.
-            let mut label = None;
-            if let Some(dp) = from.find("--") {
-                let lbl = from[dp + 2..].trim().trim_matches('"').trim().to_string();
-                from = from[..dp].trim().to_string();
-                if !lbl.is_empty() {
-                    label = Some(lbl);
-                }
-            }
+            let to = line[pos + op.len()..].trim().to_string();
+            // Inline label on the tail side: `from -- "text"` / `from -. text` /
+            // `from == text`.
+            let label = extract_inline_label(&mut from);
             if from.is_empty() || to.is_empty() {
-                return None;
+                continue;
             }
             return Some(BlockEdge {
                 from,
                 to,
                 label,
-                arrow: arrow == "-->",
+                arrow: *arrow,
+                style: *style,
             });
+        }
+    }
+    None
+}
+
+/// Split a trailing inline-label opener (`--`/`-.`/`==`) off the tail side of a
+/// link's `from` text, returning the label text (if any).
+fn extract_inline_label(from: &mut String) -> Option<String> {
+    for open in ["--", "-.", "=="] {
+        if let Some(dp) = from.find(open) {
+            let lbl = from[dp + open.len()..]
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .to_string();
+            *from = from[..dp].trim().to_string();
+            return (!lbl.is_empty()).then_some(lbl);
         }
     }
     None

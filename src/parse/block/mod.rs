@@ -26,6 +26,7 @@ pub(crate) fn parse(input: &str) -> Result<BlockDiagram, ParseError> {
     let mut d = BlockDiagram::default();
     let mut ctx = Ctx::default();
     let mut header_seen = false;
+    let mut auto_cols = false;
     let lines: Vec<(usize, String)> = input
         .lines()
         .enumerate()
@@ -47,10 +48,16 @@ pub(crate) fn parse(input: &str) -> Result<BlockDiagram, ParseError> {
         }
 
         if let Some(rest) = line.strip_prefix("columns") {
-            let v: usize = rest.trim().parse().map_err(|_| {
-                ParseError::number(line_no, format!("invalid columns: '{}'", rest.trim()))
-            })?;
-            d.columns = Some(v);
+            let arg = rest.trim();
+            if arg == "auto" {
+                // Upstream `-1`: pack every top-level cell into one row.
+                auto_cols = true;
+            } else {
+                let v: usize = arg.parse().map_err(|_| {
+                    ParseError::number(line_no, format!("invalid columns: '{arg}'"))
+                })?;
+                d.columns = Some(v);
+            }
             continue;
         }
 
@@ -84,6 +91,9 @@ pub(crate) fn parse(input: &str) -> Result<BlockDiagram, ParseError> {
 
     if !header_seen {
         return Err(ParseError::Empty);
+    }
+    if auto_cols {
+        d.columns = Some(auto_column_count(&d.items).max(1));
     }
     apply_assignments(&mut d.items, &ctx);
     d.class_defs = ctx.class_defs;
@@ -132,12 +142,17 @@ fn parse_group(
 ) -> Result<BlockGroup, ParseError> {
     let mut items: Vec<BlockItem> = Vec::new();
     let mut columns: Option<usize> = None;
+    let mut auto_cols = false;
     let mut i = 0;
     while i < body.len() {
         let line = body[i].1.trim().to_string();
         i += 1;
         if let Some(rest) = line.strip_prefix("columns") {
-            columns = rest.trim().parse().ok();
+            if rest.trim() == "auto" {
+                auto_cols = true;
+            } else {
+                columns = rest.trim().parse().ok();
+            }
             continue;
         }
         if handle_style_line(&line, ctx) {
@@ -157,6 +172,9 @@ fn parse_group(
             items.push(it);
         }
     }
+    if auto_cols {
+        columns = Some(auto_column_count(&items).max(1));
+    }
     Ok(BlockGroup {
         id,
         label: None,
@@ -164,6 +182,20 @@ fn parse_group(
         items,
         span,
     })
+}
+
+/// `columns auto`: total cell width of a container's direct items — blocks and
+/// groups by span, spaces by count, edges contribute nothing.
+fn auto_column_count(items: &[BlockItem]) -> usize {
+    items
+        .iter()
+        .map(|it| match it {
+            BlockItem::Block(b) => b.span.max(1),
+            BlockItem::Group(g) => g.span.max(1),
+            BlockItem::Space(n) => *n,
+            BlockItem::Edge(_) => 0,
+        })
+        .sum()
 }
 
 fn parse_block_line(line: &str) -> Vec<BlockItem> {
@@ -182,7 +214,9 @@ fn parse_block_line(line: &str) -> Vec<BlockItem> {
         if !in_q {
             match c {
                 '[' | '(' | '{' => depth += 1,
-                ']' | ')' | '}' => depth -= 1,
+                // Floor at 0 so the unmatched `]` of an asymmetric `>text]`
+                // shape doesn't drive depth negative and glue tokens together.
+                ']' | ')' | '}' => depth = (depth - 1).max(0),
                 _ => {}
             }
         }
@@ -210,14 +244,13 @@ fn parse_one_block(tok: &str) -> Option<BlockItem> {
     if tok.is_empty() {
         return None;
     }
-    // space (count): `space:2` or just `space`
-    if let Some(rest) = tok.strip_prefix("space") {
-        let n = rest
-            .trim_start_matches(':')
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(1);
-        return Some(BlockItem::Space(n));
+    // `space` is a keyword only on its own or as `space:N` — not a prefix, so
+    // ids like `spaceship` are left intact.
+    if tok == "space" {
+        return Some(BlockItem::Space(1));
+    }
+    if let Some(rest) = tok.strip_prefix("space:") {
+        return Some(BlockItem::Space(rest.trim().parse::<usize>().unwrap_or(1)));
     }
     // `:::className` shorthand, stripped before span so it can't be parsed as one.
     let (tok, classes) = match tok.split_once(":::") {
@@ -259,6 +292,7 @@ fn parse_one_block(tok: &str) -> Option<BlockItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::ast::BlockLinkStyle;
 
     #[test]
     fn basic_grid() {
@@ -352,6 +386,84 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    fn blocks(d: &BlockDiagram) -> Vec<&Block> {
+        d.items
+            .iter()
+            .filter_map(|i| match i {
+                BlockItem::Block(b) => Some(b),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn subroutine_and_double_circle_shapes() {
+        let d = parse("block-beta\n  a[[\"subroutine\"]] b(((\"double\")))\n").unwrap();
+        let bs = blocks(&d);
+        assert_eq!(bs[0].label, "subroutine");
+        assert_eq!(bs[0].shape, BlockShape::Subroutine);
+        assert_eq!(bs[1].label, "double");
+        assert_eq!(bs[1].shape, BlockShape::DoubleCircle);
+    }
+
+    #[test]
+    fn asymmetric_and_lean_shapes_dont_mangle_line() {
+        let d = parse(
+            "block-beta\n  a>\"asym\"] b[/\"lr\"/] c[\\\"ll\"\\] d[/\"tz\"\\] e[\\\"tza\"/]\n",
+        )
+        .unwrap();
+        let bs = blocks(&d);
+        assert_eq!(bs.len(), 5);
+        assert_eq!(bs[0].shape, BlockShape::Odd);
+        assert_eq!(bs[0].label, "asym");
+        assert_eq!(bs[1].shape, BlockShape::LeanRight);
+        assert_eq!(bs[2].shape, BlockShape::LeanLeft);
+        assert_eq!(bs[3].shape, BlockShape::Trapezoid);
+        assert_eq!(bs[4].shape, BlockShape::TrapezoidAlt);
+    }
+
+    #[test]
+    fn dotted_thick_invisible_links() {
+        let d = parse("block-beta\n  a b c d\n  a -.-> b\n  b ==> c\n  c ~~~ d\n").unwrap();
+        let edges: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                BlockItem::Edge(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(edges.len(), 3);
+        assert_eq!(edges[0].style, BlockLinkStyle::Dotted);
+        assert!(edges[0].arrow);
+        assert_eq!(edges[1].style, BlockLinkStyle::Thick);
+        assert_eq!(edges[2].style, BlockLinkStyle::Invisible);
+    }
+
+    #[test]
+    fn columns_auto_packs_one_row() {
+        let d = parse("block-beta\n  columns auto\n  a b c d\n").unwrap();
+        assert_eq!(d.columns, Some(4));
+    }
+
+    #[test]
+    fn space_prefixed_id_is_not_a_space() {
+        let d = parse("block-beta\n  spaceship[\"Ship\"] space\n").unwrap();
+        let bs = blocks(&d);
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].id, "spaceship");
+        assert_eq!(bs[0].label, "Ship");
+        assert!(matches!(d.items[1], BlockItem::Space(1)));
+    }
+
+    #[test]
+    fn style_multi_id_list() {
+        let d = parse("block-beta\n  a b\n  style a,b fill:#f00\n").unwrap();
+        let bs = blocks(&d);
+        assert_eq!(bs[0].style, vec![("fill".into(), "#f00".into())]);
+        assert_eq!(bs[1].style, vec![("fill".into(), "#f00".into())]);
     }
 
     #[test]

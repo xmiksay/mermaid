@@ -44,6 +44,20 @@ pub enum BlockShape {
     Circle,
     Rhombus,
     Hexagon,
+    /// `[[text]]` — subroutine (rect with double vertical bars).
+    Subroutine,
+    /// `(((text)))` — double concentric circle.
+    DoubleCircle,
+    /// `>text]` — asymmetric flag.
+    Odd,
+    /// `[/text/]` — parallelogram leaning right.
+    LeanRight,
+    /// `[\text\]` — parallelogram leaning left.
+    LeanLeft,
+    /// `[/text\]` — trapezoid (narrow top).
+    Trapezoid,
+    /// `[\text/]` — inverted trapezoid (wide top).
+    TrapezoidAlt,
     /// Block arrow `id<["label"]>(dir)`, pointing along the set directions.
     Arrow(BlockArrow),
 }
@@ -74,4 +88,18 @@ pub struct BlockEdge {
     pub to: String,
     pub label: Option<String>,
     pub arrow: bool,
+    /// Line style of the link (`-->` solid, `-.->` dotted, `==>` thick,
+    /// `~~~` invisible).
+    pub style: BlockLinkStyle,
+}
+
+/// Line style for a block-beta link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum BlockLinkStyle {
+    #[default]
+    Solid,
+    Dotted,
+    Thick,
+    Invisible,
 }

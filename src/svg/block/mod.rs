@@ -286,6 +286,47 @@ fn draw_block(
             );
             svg.path(&d, &attrs);
         }
+        BlockShape::Subroutine => {
+            svg.rect(x, y, w, h, &format!("{attrs} rx=\"2\""));
+            svg.line(
+                x + 6.0,
+                y,
+                x + 6.0,
+                y + h,
+                &format!("stroke=\"{stroke}\" stroke-width=\"1\""),
+            );
+            svg.line(
+                x + w - 6.0,
+                y,
+                x + w - 6.0,
+                y + h,
+                &format!("stroke=\"{stroke}\" stroke-width=\"1\""),
+            );
+        }
+        BlockShape::DoubleCircle => {
+            let r = w.min(h) / 2.0;
+            svg.circle(cx, cy, r, &attrs);
+            svg.circle(cx, cy, r - 4.0, &attrs);
+        }
+        BlockShape::Odd => {
+            // `>text]` — flag pointing right.
+            let off = 12.0;
+            let d = format!(
+                "M{} {t}L{r0} {t}L{r} {cy}L{r0} {bb}L{} {bb}Z",
+                fnum(x),
+                fnum(x),
+                t = fnum(y),
+                bb = fnum(y + h),
+                cy = fnum(cy),
+                r0 = fnum(x + w - off),
+                r = fnum(x + w),
+            );
+            svg.path(&d, &attrs);
+        }
+        BlockShape::LeanRight => svg.path(&lean_path(x, y, w, h, true), &attrs),
+        BlockShape::LeanLeft => svg.path(&lean_path(x, y, w, h, false), &attrs),
+        BlockShape::Trapezoid => svg.path(&trapezoid_path(x, y, w, h, false), &attrs),
+        BlockShape::TrapezoidAlt => svg.path(&trapezoid_path(x, y, w, h, true), &attrs),
         BlockShape::Arrow(arrow) => {
             svg.path(&arrow_path(arrow, x, y, w, h), &attrs);
         }
@@ -296,6 +337,38 @@ fn draw_block(
         &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\""),
         &b.label,
     );
+}
+
+/// Parallelogram path. `right` leans `/ /` (top pushed right), else `\ \`.
+fn lean_path(x: f64, y: f64, w: f64, h: f64, right: bool) -> String {
+    let off = 12.0;
+    let pts = if right {
+        [(x + off, y), (x + w, y), (x + w - off, y + h), (x, y + h)]
+    } else {
+        [(x, y), (x + w - off, y), (x + w, y + h), (x + off, y + h)]
+    };
+    poly(&pts)
+}
+
+/// Trapezoid path. `alt` is the inverted `\ /` (wide top), else `/ \` (narrow top).
+fn trapezoid_path(x: f64, y: f64, w: f64, h: f64, alt: bool) -> String {
+    let off = 12.0;
+    let pts = if alt {
+        [(x, y), (x + w, y), (x + w - off, y + h), (x + off, y + h)]
+    } else {
+        [(x + off, y), (x + w - off, y), (x + w, y + h), (x, y + h)]
+    };
+    poly(&pts)
+}
+
+fn poly(pts: &[(f64, f64)]) -> String {
+    let mut d = String::new();
+    for (i, (px, py)) in pts.iter().enumerate() {
+        d.push_str(if i == 0 { "M" } else { "L" });
+        d.push_str(&format!("{} {}", fnum(*px), fnum(*py)));
+    }
+    d.push('Z');
+    d
 }
 
 #[cfg(test)]

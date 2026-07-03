@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::parse::{BlockArrow, BlockEdge, BlockShape};
+use crate::parse::{BlockArrow, BlockEdge, BlockLinkStyle, BlockShape};
 
 use crate::svg::builder::{fnum, SvgBuilder};
 use crate::svg::theme::Theme;
@@ -100,6 +100,10 @@ pub(super) fn draw_edge(
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
+    // An invisible link only shapes layout — draw nothing.
+    if e.style == BlockLinkStyle::Invisible {
+        return;
+    }
     let stroke = &theme.flow_edge_stroke;
     let fg = &theme.fg;
     let (Some(a), Some(b)) = (nodes.get(&e.from), nodes.get(&e.to)) else {
@@ -118,12 +122,17 @@ pub(super) fn draw_edge(
             "<marker id=\"blockarrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"#333\"/></marker>"
         );
     }
+    let (width, dash) = match e.style {
+        BlockLinkStyle::Thick => ("2.6", ""),
+        BlockLinkStyle::Dotted => ("1.5", " stroke-dasharray=\"3 3\""),
+        _ => ("1.5", ""),
+    };
     svg.line(
         ax,
         ay,
         bx,
         by,
-        &format!("stroke=\"{stroke}\" stroke-width=\"1.5\"{marker}"),
+        &format!("stroke=\"{stroke}\" stroke-width=\"{width}\"{dash}{marker}"),
     );
     if let Some(label) = &e.label {
         let (mx, my) = ((ax + bx) / 2.0, (ay + by) / 2.0);
@@ -145,7 +154,7 @@ fn clip(from: (f64, f64), n: &Geom) -> (f64, f64) {
         return center;
     }
     match n.shape {
-        Some(BlockShape::Circle) => {
+        Some(BlockShape::Circle) | Some(BlockShape::DoubleCircle) => {
             let r = n.w.min(n.h) / 2.0;
             let d = (dx * dx + dy * dy).sqrt().max(1e-9);
             (center.0 + dx * r / d, center.1 + dy * r / d)
