@@ -7,6 +7,9 @@
 //! zenuml
 //!     title <text>
 //!     @Actor Alice                    // annotator: declares Alice as an actor
+//!     @Boundary UI                    // UML stereotypes: boundary/control/
+//!     @Control Ctrl                   //   entity/database get distinct glyphs
+//!     @Entity Order
 //!     @Database DB                    // any other annotator declares a participant
 //!     @Starter(Alice)                 // sets the implicit top-level caller
 //!     <From> -> <To>: <message>       // plain messages
@@ -15,6 +18,7 @@
 //!     <From> -> <Recv>.method() {     // nesting: body runs in <Recv>'s context
 //!         ret = process()             //   assignment → dashed return arrow
 //!         return value                //   explicit return to the caller
+//!         @return value               //   `@return`/`@reply` alias the above
 //!     }
 //!     if (cond) { … } else if (c) { … } else { … }   // → alt frame
 //!     while (cond) { … }              // → loop frame
@@ -35,12 +39,13 @@ use super::ParseError;
 
 const DEFAULT_STARTER: &str = "Starter";
 
-/// A structural token: an opening/closing brace, or a logical statement string.
+/// A structural token: an opening/closing brace, or a logical statement string
+/// tagged with the 1-based source line it started on (for error reporting).
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     Open,
     Close,
-    Stmt(String),
+    Stmt(String, usize),
 }
 
 pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
@@ -65,22 +70,28 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
         return Err(ParseError::Empty);
     }
 
-    // The rest of the document is brace-structured; tokenize it whole.
+    // The rest of the document is brace-structured; tokenize it whole. The body
+    // begins on the line right after the `zenuml` header (1-based).
+    let base_line = header_line.unwrap() + 2;
     let body: String = input
         .lines()
         .skip(header_line.unwrap() + 1)
         .map(strip_line_comment)
         .collect::<Vec<_>>()
         .join("\n");
-    let toks = tokenize(&body);
+    let toks = tokenize(&body, base_line);
 
     let mut p = Parser {
         toks,
         pos: 0,
         diag: SequenceDiagram::default(),
         starter: None,
+        error: None,
     };
     let items = p.parse_items(None, None);
+    if let Some(err) = p.error {
+        return Err(err);
+    }
     p.diag.items = items;
     Ok(p.diag)
 }
@@ -99,20 +110,29 @@ fn strip_line_comment(line: &str) -> &str {
 }
 
 /// Split a body into brace/statement tokens. Braces inside parentheses or
-/// quotes are kept literal; newlines and `;` terminate statements.
-fn tokenize(body: &str) -> Vec<Tok> {
+/// quotes are kept literal; newlines and `;` terminate statements. Each
+/// statement is tagged with the 1-based source line it started on.
+fn tokenize(body: &str, base_line: usize) -> Vec<Tok> {
     let mut toks = Vec::new();
     let mut cur = String::new();
     let mut paren = 0u32;
     let mut in_quote = false;
-    let flush = |cur: &mut String, toks: &mut Vec<Tok>| {
+    let mut line = base_line;
+    let mut stmt_line = base_line;
+    let flush = |cur: &mut String, toks: &mut Vec<Tok>, stmt_line: usize| {
         let s = cur.trim();
         if !s.is_empty() {
-            toks.push(Tok::Stmt(s.to_string()));
+            toks.push(Tok::Stmt(s.to_string(), stmt_line));
         }
         cur.clear();
     };
     for ch in body.chars() {
+        if !ch.is_whitespace() && cur.trim().is_empty() {
+            stmt_line = line;
+        }
+        if ch == '\n' {
+            line += 1;
+        }
         if in_quote {
             cur.push(ch);
             if ch == '"' {
@@ -134,18 +154,18 @@ fn tokenize(body: &str) -> Vec<Tok> {
                 cur.push(ch);
             }
             '{' if paren == 0 => {
-                flush(&mut cur, &mut toks);
+                flush(&mut cur, &mut toks, stmt_line);
                 toks.push(Tok::Open);
             }
             '}' if paren == 0 => {
-                flush(&mut cur, &mut toks);
+                flush(&mut cur, &mut toks, stmt_line);
                 toks.push(Tok::Close);
             }
-            '\n' | ';' if paren == 0 => flush(&mut cur, &mut toks),
+            '\n' | ';' if paren == 0 => flush(&mut cur, &mut toks, stmt_line),
             _ => cur.push(ch),
         }
     }
-    flush(&mut cur, &mut toks);
+    flush(&mut cur, &mut toks, stmt_line);
     toks
 }
 
@@ -154,6 +174,9 @@ struct Parser {
     pos: usize,
     diag: SequenceDiagram,
     starter: Option<String>,
+    /// First syntax error hit while walking the (position-free) token stream.
+    /// Reported after the walk finishes.
+    error: Option<ParseError>,
 }
 
 impl Parser {
@@ -193,12 +216,12 @@ impl Parser {
                     let inner = self.braced(ctx, ret);
                     items.extend(inner);
                 }
-                Tok::Stmt(_) => {
-                    let s = match self.bump() {
-                        Some(Tok::Stmt(s)) => s,
+                Tok::Stmt(..) => {
+                    let (s, line) = match self.bump() {
+                        Some(Tok::Stmt(s, line)) => (s, line),
                         _ => unreachable!(),
                     };
-                    self.handle_stmt(&s, ctx, ret, &mut items);
+                    self.handle_stmt(&s, line, ctx, ret, &mut items);
                 }
             }
         }
@@ -208,13 +231,20 @@ impl Parser {
     fn handle_stmt(
         &mut self,
         s: &str,
+        line: usize,
         ctx: Option<&str>,
         ret: Option<&str>,
         items: &mut Vec<SequenceItem>,
     ) {
-        // Annotators / declarations.
+        // Annotators / declarations. `@return`/`@reply` are annotation aliases
+        // for the bare `return` keyword, not participant declarations.
         if let Some(rest) = s.strip_prefix('@') {
-            self.annotator(rest);
+            let kw = first_word(rest);
+            if kw == "return" || kw == "reply" {
+                self.emit_return(&after_kw(rest, &kw), line, ctx, ret, items);
+            } else {
+                self.annotator(rest);
+            }
             return;
         }
         if let Some(rest) = s.strip_prefix("title ") {
@@ -247,7 +277,7 @@ impl Parser {
                 let body = self.braced(ctx, ret);
                 items.extend(body);
             }
-            "return" => self.emit_return(&after_kw(s, "return"), ctx, ret, items),
+            "return" => self.emit_return(&after_kw(s, "return"), line, ctx, ret, items),
             _ => self.parse_call(s, ctx, ret, items),
         }
     }
@@ -264,7 +294,7 @@ impl Parser {
             label: strip_kw_cond(s),
             items: self.braced(ctx, ret),
         }];
-        while let Some(Tok::Stmt(next)) = self.peek() {
+        while let Some(Tok::Stmt(next, _)) = self.peek() {
             if first_word(next) != "else" {
                 break;
             }
@@ -294,7 +324,7 @@ impl Parser {
             label: String::new(),
             items: self.braced(ctx, ret),
         }];
-        while let Some(Tok::Stmt(next)) = self.peek() {
+        while let Some(Tok::Stmt(next, _)) = self.peek() {
             let fw = first_word(next);
             if fw != "catch" && fw != "finally" {
                 break;
@@ -409,12 +439,22 @@ impl Parser {
     fn emit_return(
         &mut self,
         text: &str,
+        line: usize,
         ctx: Option<&str>,
         ret: Option<&str>,
         items: &mut Vec<SequenceItem>,
     ) {
-        // A top-level `return` has no caller to reply to — ignore it.
-        let Some(target) = ret else { return };
+        // A top-level `return` has no caller to reply to — an author error.
+        let Some(target) = ret else {
+            if self.error.is_none() {
+                self.error = Some(ParseError::Syntax {
+                    message: "`return` outside of a method-call body has no caller to reply to"
+                        .into(),
+                    line,
+                });
+            }
+            return;
+        };
         let from = self.source(ctx);
         self.ensure(target);
         items.push(SequenceItem::Message(Message {
@@ -447,10 +487,13 @@ impl Parser {
         if name.is_empty() {
             return;
         }
-        let kind = if kind_word.eq_ignore_ascii_case("Actor") {
-            ParticipantKind::Actor
-        } else {
-            ParticipantKind::Participant
+        let kind = match kind_word.to_ascii_lowercase().as_str() {
+            "actor" => ParticipantKind::Actor,
+            "boundary" => ParticipantKind::Boundary,
+            "control" => ParticipantKind::Control,
+            "entity" => ParticipantKind::Entity,
+            "database" => ParticipantKind::Database,
+            _ => ParticipantKind::Participant,
         };
         self.declare(name, kind);
     }
@@ -728,6 +771,45 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn stereotype_annotators_set_participant_kind() {
+        let d = parse_ok(
+            "zenuml\n@Boundary UI\n@Control Ctrl\n@Entity Order\n@Database DB\nUI.click()\n",
+        );
+        let kind = |id: &str| d.participants.iter().find(|p| p.id == id).unwrap().kind;
+        assert_eq!(kind("UI"), ParticipantKind::Boundary);
+        assert_eq!(kind("Ctrl"), ParticipantKind::Control);
+        assert_eq!(kind("Order"), ParticipantKind::Entity);
+        assert_eq!(kind("DB"), ParticipantKind::Database);
+    }
+
+    #[test]
+    fn at_return_aliases_return_arrow() {
+        let d = parse_ok("zenuml\nA -> B.handle() {\n  @return done\n}\n");
+        let ret = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) if m.arrow == ArrowKind::DashedArrow => Some(m),
+                _ => None,
+            })
+            .find(|m| m.text == "done")
+            .unwrap();
+        assert_eq!((&*ret.from, &*ret.to), ("B", "A"));
+    }
+
+    #[test]
+    fn stray_return_is_a_syntax_error() {
+        let err = parse("zenuml\nA.b()\nreturn oops\n").unwrap_err();
+        assert!(matches!(err, ParseError::Syntax { line: 3, .. }));
+    }
+
+    #[test]
+    fn stray_at_return_is_a_syntax_error() {
+        let err = parse("zenuml\n@reply nope\n").unwrap_err();
+        assert!(matches!(err, ParseError::Syntax { line: 2, .. }));
     }
 
     #[test]

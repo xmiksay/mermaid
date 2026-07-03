@@ -594,16 +594,22 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   recursive `Parser::parse_items(ctx, ret)` walks them. `ctx` is the current
   caller (the enclosing method's *receiver*, or the top-level starter); `ret` is
   who a `return` replies to.
-  - Annotators: `@Actor X` declares an actor, any other `@Type X` a participant,
-    `@Starter(X)` sets the top-level caller. A bare/`A.method()` call with no
-    explicit `A -> B` source originates from the starter — a synthetic `Starter`
-    lane, created lazily, when none is declared.
+  - Annotators: `@Actor X` declares an actor; `@Boundary`/`@Control`/`@Entity`/
+    `@Database X` declare the matching UML stereotype (each drawn with its own
+    glyph by `draw_stereotype` in `src/svg/sequence/glyphs.rs` — boundary
+    circle-with-bar, control arrow-circle, entity underlined circle, database
+    cylinder); any other `@Type X` is a plain participant. `@Starter(X)` sets the
+    top-level caller. A bare/`A.method()` call with no explicit `A -> B` source
+    originates from the starter — a synthetic `Starter` lane, created lazily,
+    when none is declared.
   - Method calls carry a context: `Recv.method()` → `ctx -> Recv`, `method()`
     (no dot) is a self-call on `ctx`. A `{ … }` body after a call runs in the
     receiver's context and, on close, draws an implicit dashed **return** to the
     caller; an `x = call()` assignment draws a dashed return labeled `x`
     (self-calls get no return arrow).
-  - `return`/`@return <v>` emits a dashed reply from `ctx` to `ret`. Control
+  - `return <v>` (and the `@return`/`@reply <v>` annotation aliases) emits a
+    dashed reply from `ctx` to `ret`; a caller-less `return` (no enclosing
+    method-call body) is a `ParseError::Syntax`, not silently dropped. Control
     structures map onto existing `SequenceItem` frames: `if/else if/else` →
     `Alt`, `while/for/loop` → `Loop`, `opt` → `Opt`, `par` → `Par`,
     `try/catch/finally` → `Critical` (catch/finally as option branches). The
