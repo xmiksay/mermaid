@@ -12,10 +12,12 @@ use super::builder::SvgBuilder;
 use super::theme::Theme;
 
 mod blocks;
+mod glyphs;
 mod messages;
 mod participants;
 
 use blocks::*;
+use glyphs::*;
 use messages::*;
 use participants::*;
 

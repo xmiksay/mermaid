@@ -22,6 +22,14 @@ pub struct Participant {
 pub enum ParticipantKind {
     Participant,
     Actor,
+    /// ZenUML `@Boundary` — UML boundary stereotype (circle with a bar).
+    Boundary,
+    /// ZenUML `@Control` — UML control stereotype (circle with an arrow).
+    Control,
+    /// ZenUML `@Entity` — UML entity stereotype (underlined circle).
+    Entity,
+    /// ZenUML `@Database` — persistence stereotype (a cylinder).
+    Database,
 }
 
 #[derive(Debug, Clone, PartialEq)]
