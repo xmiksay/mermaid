@@ -12,6 +12,7 @@ use super::theme::Theme;
 
 mod edges;
 mod nodes;
+mod shapes;
 
 use edges::*;
 use nodes::*;

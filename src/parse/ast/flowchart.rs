@@ -94,6 +94,45 @@ pub enum NodeShape {
     TrapezoidAlt,
     /// `>text]` — asymmetric flag
     Asymmetric,
+    // ---- Mermaid v11 `@{ shape: … }` geometries -----------------------------
+    /// `notch-rect`/`card` — rectangle with a notched top-left corner.
+    NotchedRect,
+    /// `doc`/`document` — rectangle with a wavy bottom edge.
+    Document,
+    /// `docs`/`documents`/`stacked-document` — stacked wavy documents.
+    MultiDocument,
+    /// `tag-doc`/`tagged-document` — document with a folded corner tag.
+    TaggedDocument,
+    /// `bolt`/`com-link`/`lightning-bolt` — lightning bolt.
+    LightningBolt,
+    /// `hourglass`/`collate` — two apex-to-apex triangles.
+    Hourglass,
+    /// `brace`/`braces`/`comment` — curly braces around the label.
+    Comment,
+    /// `delay`/`half-rounded-rectangle` — rectangle with a rounded right end.
+    Delay,
+    /// `das`/`h-cyl`/`horizontal-cylinder` — direct-access storage.
+    DirectAccessStorage,
+    /// `lin-cyl`/`disk`/`lined-cylinder` — cylinder with an extra seam ring.
+    LinedCylinder,
+    /// `lin-rect`/`lin-proc`/`shaded-process` — rectangle with a left seam line.
+    LinedProcess,
+    /// `div-rect`/`div-proc`/`divided-process` — rectangle with a top divider.
+    DividedProcess,
+    /// `win-pane`/`window-pane`/`internal-storage` — rectangle with top+left seams.
+    WindowPane,
+    /// `tri`/`triangle`/`extract` — triangle pointing up.
+    Triangle,
+    /// `flip-tri`/`flipped-triangle`/`manual-file` — triangle pointing down.
+    FlippedTriangle,
+    /// `f-circ`/`filled-circle`/`junction` — small solid-filled circle.
+    FilledCircle,
+    /// `cross-circ`/`crossed-circle`/`summary` — circle with a diagonal cross.
+    CrossedCircle,
+    /// `flag`/`paper-tape` — rectangle with wavy top and bottom edges.
+    PaperTape,
+    /// `bow-rect`/`bow-tie-rectangle`/`stored-data` — inward-curved sides.
+    StoredData,
 }
 
 #[derive(Debug, Clone, PartialEq)]
