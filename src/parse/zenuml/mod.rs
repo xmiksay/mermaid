@@ -60,10 +60,7 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
             continue;
         }
         if line != "zenuml" {
-            return Err(ParseError::Syntax {
-                message: "expected 'zenuml' header".into(),
-                line: idx + 1,
-            });
+            return Err(ParseError::header(idx + 1, "expected 'zenuml' header"));
         }
         header_line = Some(idx);
         break;

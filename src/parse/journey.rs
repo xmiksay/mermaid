@@ -26,10 +26,7 @@ pub(crate) fn parse(input: &str) -> Result<JourneyDiagram, ParseError> {
 
         if !header_seen {
             if line != "journey" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'journey' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'journey' header"));
             }
             header_seen = true;
             continue;
@@ -68,23 +65,20 @@ fn parse_task(line: &str, line_no: usize) -> Result<JourneyTask, ParseError> {
     let mut parts = line.splitn(3, ':');
     let name = parts
         .next()
-        .ok_or_else(|| ParseError::Syntax {
-            message: format!("expected 'name: score: actors': '{line}'"),
-            line: line_no,
+        .ok_or_else(|| {
+            ParseError::malformed(line_no, format!("expected 'name: score: actors': '{line}'"))
         })?
         .trim()
         .to_string();
     let score_str = parts
         .next()
-        .ok_or_else(|| ParseError::Syntax {
-            message: format!("expected score after first ':': '{line}'"),
-            line: line_no,
+        .ok_or_else(|| {
+            ParseError::malformed(line_no, format!("expected score after first ':': '{line}'"))
         })?
         .trim();
-    let score: i32 = score_str.parse().map_err(|_| ParseError::Syntax {
-        message: format!("invalid score: '{score_str}'"),
-        line: line_no,
-    })?;
+    let score: i32 = score_str
+        .parse()
+        .map_err(|_| ParseError::number(line_no, format!("invalid score: '{score_str}'")))?;
     let actors = parts
         .next()
         .map(|s| {

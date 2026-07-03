@@ -43,11 +43,73 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum ParseError {
     #[error("parse error at line {line}: {message}")]
-    Syntax { message: String, line: usize },
+    Syntax {
+        /// The class of syntax failure, so callers can branch without
+        /// string-matching `message`.
+        kind: SyntaxKind,
+        /// A human-readable description of the specific failure.
+        message: String,
+        /// 1-based source line the error was detected on.
+        line: usize,
+    },
     #[error("unknown diagram type: {0}")]
     UnknownDiagramType(String),
     #[error("empty input")]
     Empty,
+}
+
+/// The class of a [`ParseError::Syntax`] failure. Lets callers distinguish the
+/// recurring kinds of parse error (unknown statement vs bad number vs unclosed
+/// block) without inspecting the free-form `message`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SyntaxKind {
+    /// The diagram's opening header keyword was missing or misspelled. A
+    /// defensive per-parser check: [`parse`] pre-validates the header and
+    /// reports an unrecognized one as [`ParseError::UnknownDiagramType`], so
+    /// this surfaces only when a diagram parser is driven directly.
+    MissingHeader,
+    /// A line did not match any statement in the diagram's grammar.
+    UnknownStatement,
+    /// A numeric field could not be parsed (bad integer/float, NaN, or out of
+    /// range).
+    InvalidNumber,
+    /// A bracket, brace, quote, or block delimiter was left unclosed.
+    Unclosed,
+    /// A recognized statement was otherwise malformed — a missing or empty
+    /// required field, or a value that did not fit the expected shape.
+    Malformed,
+}
+
+impl ParseError {
+    /// [`SyntaxKind::MissingHeader`] error at `line`.
+    pub(crate) fn header(line: usize, message: impl Into<String>) -> Self {
+        Self::syntax(SyntaxKind::MissingHeader, line, message)
+    }
+    /// [`SyntaxKind::UnknownStatement`] error at `line`.
+    pub(crate) fn unknown(line: usize, message: impl Into<String>) -> Self {
+        Self::syntax(SyntaxKind::UnknownStatement, line, message)
+    }
+    /// [`SyntaxKind::InvalidNumber`] error at `line`.
+    pub(crate) fn number(line: usize, message: impl Into<String>) -> Self {
+        Self::syntax(SyntaxKind::InvalidNumber, line, message)
+    }
+    /// [`SyntaxKind::Unclosed`] error at `line`.
+    pub(crate) fn unclosed(line: usize, message: impl Into<String>) -> Self {
+        Self::syntax(SyntaxKind::Unclosed, line, message)
+    }
+    /// [`SyntaxKind::Malformed`] error at `line`.
+    pub(crate) fn malformed(line: usize, message: impl Into<String>) -> Self {
+        Self::syntax(SyntaxKind::Malformed, line, message)
+    }
+
+    fn syntax(kind: SyntaxKind, line: usize, message: impl Into<String>) -> Self {
+        Self::Syntax {
+            kind,
+            message: message.into(),
+            line,
+        }
+    }
 }
 
 pub fn parse(input: &str) -> Result<Diagram, ParseError> {
@@ -180,5 +242,63 @@ pub(crate) fn strip_comment(line: &str) -> &str {
         &line[..pos]
     } else {
         line
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The class of a syntax failure is exposed on the error so callers can
+    /// branch without string-matching the human-readable `message`.
+    fn kind_of(input: &str) -> SyntaxKind {
+        match parse(input).unwrap_err() {
+            ParseError::Syntax { kind, .. } => kind,
+            e => panic!("expected Syntax error, got {e:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_missing_header() {
+        // The top-level dispatcher pre-validates the header (yielding
+        // `UnknownDiagramType`), so a per-parser header re-check only fires
+        // when that parser is called directly with the wrong opener.
+        let err = pie::parse("notpie\n").unwrap_err();
+        assert!(matches!(
+            err,
+            ParseError::Syntax {
+                kind: SyntaxKind::MissingHeader,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn classifies_unknown_statement() {
+        assert_eq!(
+            kind_of("stateDiagram-v2\n??? garbage\n"),
+            SyntaxKind::UnknownStatement
+        );
+    }
+
+    #[test]
+    fn classifies_invalid_number() {
+        assert_eq!(
+            kind_of("pie\n\"A\" : not-a-number\n"),
+            SyntaxKind::InvalidNumber
+        );
+    }
+
+    #[test]
+    fn classifies_unclosed_delimiter() {
+        assert_eq!(
+            kind_of("quadrantChart\nPoint: [0.1, 0.2\n"),
+            SyntaxKind::Unclosed
+        );
+    }
+
+    #[test]
+    fn classifies_malformed_statement() {
+        assert_eq!(kind_of("pie\n : 3\n"), SyntaxKind::Malformed);
     }
 }

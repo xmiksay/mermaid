@@ -45,10 +45,10 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
 
         if !header_seen {
             if line != "sequenceDiagram" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'sequenceDiagram' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(
+                    line_no,
+                    "expected 'sequenceDiagram' header",
+                ));
             }
             header_seen = true;
             continue;

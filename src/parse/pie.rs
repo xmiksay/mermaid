@@ -38,10 +38,7 @@ pub(crate) fn parse(input: &str) -> Result<PieDiagram, ParseError> {
         // example), so match it before falling through to the slice parse.
         if let Some(after_title) = strip_title_keyword(line) {
             if after_title.is_empty() {
-                return Err(ParseError::Syntax {
-                    message: "empty title after 'title'".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::malformed(line_no, "empty title after 'title'"));
             }
             pie.title = Some(after_title.to_string());
             continue;
@@ -58,10 +55,9 @@ pub(crate) fn parse(input: &str) -> Result<PieDiagram, ParseError> {
 }
 
 fn parse_header(line: &str, pie: &mut PieDiagram, line_no: usize) -> Result<(), ParseError> {
-    let rest = line.strip_prefix("pie").ok_or_else(|| ParseError::Syntax {
-        message: "expected 'pie' header".into(),
-        line: line_no,
-    })?;
+    let rest = line
+        .strip_prefix("pie")
+        .ok_or_else(|| ParseError::header(line_no, "expected 'pie' header"))?;
     let rest = rest.trim_start();
 
     let rest = if let Some(r) = rest.strip_prefix("showData") {
@@ -73,17 +69,14 @@ fn parse_header(line: &str, pie: &mut PieDiagram, line_no: usize) -> Result<(), 
 
     if let Some(title) = strip_title_keyword(rest) {
         if title.is_empty() {
-            return Err(ParseError::Syntax {
-                message: "empty title after 'title'".into(),
-                line: line_no,
-            });
+            return Err(ParseError::malformed(line_no, "empty title after 'title'"));
         }
         pie.title = Some(title.to_string());
     } else if !rest.is_empty() {
-        return Err(ParseError::Syntax {
-            message: format!("unexpected text after 'pie': '{rest}'"),
-            line: line_no,
-        });
+        return Err(ParseError::unknown(
+            line_no,
+            format!("unexpected text after 'pie': '{rest}'"),
+        ));
     }
     Ok(())
 }
@@ -101,26 +94,18 @@ fn strip_title_keyword(s: &str) -> Option<&str> {
 }
 
 fn parse_entry(line: &str, line_no: usize) -> Result<PieEntry, ParseError> {
-    let (label_raw, value_raw) = line.rsplit_once(':').ok_or_else(|| ParseError::Syntax {
-        message: format!("expected '<label> : <number>': '{line}'"),
-        line: line_no,
+    let (label_raw, value_raw) = line.rsplit_once(':').ok_or_else(|| {
+        ParseError::malformed(line_no, format!("expected '<label> : <number>': '{line}'"))
     })?;
     let label = unquote(label_raw).to_string();
     if label.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "empty label".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(line_no, "empty label"));
     }
-    let value: f64 = value_raw.trim().parse().map_err(|_| ParseError::Syntax {
-        message: format!("invalid number: '{}'", value_raw.trim()),
-        line: line_no,
+    let value: f64 = value_raw.trim().parse().map_err(|_| {
+        ParseError::number(line_no, format!("invalid number: '{}'", value_raw.trim()))
     })?;
     if value.is_nan() {
-        return Err(ParseError::Syntax {
-            message: "value is NaN".into(),
-            line: line_no,
-        });
+        return Err(ParseError::number(line_no, "value is NaN"));
     }
     Ok(PieEntry { label, value })
 }
@@ -165,7 +150,7 @@ mod tests {
     fn empty_standalone_title_errors() {
         let err = parse("pie\ntitle\n").unwrap_err();
         match err {
-            ParseError::Syntax { line, message } => {
+            ParseError::Syntax { line, message, .. } => {
                 assert_eq!(line, 2);
                 assert!(message.contains("empty title"));
             }
@@ -207,7 +192,7 @@ mod tests {
     fn rejects_bad_number() {
         let err = parse("pie\n\"A\" : not-a-number\n").unwrap_err();
         match err {
-            ParseError::Syntax { line, message } => {
+            ParseError::Syntax { line, message, .. } => {
                 assert_eq!(line, 2);
                 assert!(message.contains("invalid number"));
             }

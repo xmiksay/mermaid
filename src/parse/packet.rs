@@ -32,10 +32,7 @@ pub(crate) fn parse(input: &str) -> Result<PacketDiagram, ParseError> {
 
         if !header_seen {
             if line != "packet-beta" && line != "packet" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'packet-beta' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'packet-beta' header"));
             }
             header_seen = true;
             continue;
@@ -46,39 +43,38 @@ pub(crate) fn parse(input: &str) -> Result<PacketDiagram, ParseError> {
             continue;
         }
 
-        let (range, label) = line.split_once(':').ok_or_else(|| ParseError::Syntax {
-            message: format!("expected '<range>: \"label\"': '{line}'"),
-            line: line_no,
+        let (range, label) = line.split_once(':').ok_or_else(|| {
+            ParseError::malformed(line_no, format!("expected '<range>: \"label\"': '{line}'"))
         })?;
         let range = range.trim();
         let (start, end) = if let Some(count) = range.strip_prefix('+') {
             // Relative field: `+N` occupies the next N bits after the cursor.
-            let n: u32 = count.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid relative width '{}'", count.trim()),
-                line: line_no,
+            let n: u32 = count.trim().parse().map_err(|_| {
+                ParseError::number(
+                    line_no,
+                    format!("invalid relative width '{}'", count.trim()),
+                )
             })?;
             if n == 0 {
-                return Err(ParseError::Syntax {
-                    message: "relative field width must be at least 1".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::number(
+                    line_no,
+                    "relative field width must be at least 1",
+                ));
             }
             (cursor, cursor + n - 1)
         } else if let Some((s, e)) = range.split_once('-') {
-            let s: u32 = s.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid start '{}'", s.trim()),
-                line: line_no,
+            let s: u32 = s.trim().parse().map_err(|_| {
+                ParseError::number(line_no, format!("invalid start '{}'", s.trim()))
             })?;
-            let e: u32 = e.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid end '{}'", e.trim()),
-                line: line_no,
-            })?;
+            let e: u32 = e
+                .trim()
+                .parse()
+                .map_err(|_| ParseError::number(line_no, format!("invalid end '{}'", e.trim())))?;
             (s, e)
         } else {
-            let s: u32 = range.parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid bit '{range}'"),
-                line: line_no,
-            })?;
+            let s: u32 = range
+                .parse()
+                .map_err(|_| ParseError::number(line_no, format!("invalid bit '{range}'")))?;
             (s, s)
         };
         let label = label.trim().trim_matches('"').to_string();

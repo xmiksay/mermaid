@@ -29,10 +29,7 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
         if !header_seen {
             let rest = line
                 .strip_prefix("gitGraph")
-                .ok_or_else(|| ParseError::Syntax {
-                    message: "expected 'gitGraph' header".into(),
-                    line: line_no,
-                })?;
+                .ok_or_else(|| ParseError::header(line_no, "expected 'gitGraph' header"))?;
             let rest = rest.trim().trim_matches(':').trim();
             d.direction = match rest {
                 "" | "LR" => GitDirection::LeftRight,
@@ -74,10 +71,10 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
                 tag,
             });
         } else {
-            return Err(ParseError::Syntax {
-                message: format!("unknown gitGraph statement: '{line}'"),
-                line: line_no,
-            });
+            return Err(ParseError::unknown(
+                line_no,
+                format!("unknown gitGraph statement: '{line}'"),
+            ));
         }
     }
 

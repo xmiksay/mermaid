@@ -51,10 +51,10 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
                 "C4Dynamic" => C4Kind::Dynamic,
                 "C4Deployment" => C4Kind::Deployment,
                 _ => {
-                    return Err(ParseError::Syntax {
-                        message: "expected 'C4Context' or similar header".into(),
-                        line: line_no,
-                    })
+                    return Err(ParseError::header(
+                        line_no,
+                        "expected 'C4Context' or similar header",
+                    ))
                 }
             };
             header_seen = true;

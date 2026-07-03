@@ -40,19 +40,15 @@ pub(crate) fn parse(input: &str) -> Result<BlockDiagram, ParseError> {
 
         if !header_seen {
             if line != "block-beta" && line != "block" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'block-beta' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'block-beta' header"));
             }
             header_seen = true;
             continue;
         }
 
         if let Some(rest) = line.strip_prefix("columns") {
-            let v: usize = rest.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid columns: '{}'", rest.trim()),
-                line: line_no,
+            let v: usize = rest.trim().parse().map_err(|_| {
+                ParseError::number(line_no, format!("invalid columns: '{}'", rest.trim()))
             })?;
             d.columns = Some(v);
             continue;

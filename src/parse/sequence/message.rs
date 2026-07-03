@@ -174,10 +174,7 @@ fn parse_participant(
 ) -> Result<Participant, ParseError> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "missing participant id".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(line_no, "missing participant id"));
     }
     if let Some((id, alias)) = s.split_once(" as ") {
         Ok(Participant {
@@ -202,16 +199,12 @@ enum Activation {
 }
 
 fn parse_message(line: &str, line_no: usize) -> Result<(Message, Activation), ParseError> {
-    let (arrow_pos, token, kind) = find_arrow(line).ok_or_else(|| ParseError::Syntax {
-        message: format!("not a recognized statement: '{line}'"),
-        line: line_no,
+    let (arrow_pos, token, kind) = find_arrow(line).ok_or_else(|| {
+        ParseError::unknown(line_no, format!("not a recognized statement: '{line}'"))
     })?;
     let from = line[..arrow_pos].trim().to_string();
     if from.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "empty sender".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(line_no, "empty sender"));
     }
     let after = &line[arrow_pos + token.len()..];
     let (target_part, text) = match after.find(':') {
@@ -229,10 +222,7 @@ fn parse_message(line: &str, line_no: usize) -> Result<(Message, Activation), Pa
     };
     let to = target_part.to_string();
     if to.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "empty receiver".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(line_no, "empty receiver"));
     }
     Ok((
         Message {

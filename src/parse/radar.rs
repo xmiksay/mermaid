@@ -38,10 +38,7 @@ pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
 
         if !header_seen {
             if line != "radar-beta" && line != "radar" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'radar-beta' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'radar-beta' header"));
             }
             header_seen = true;
             continue;
@@ -61,26 +58,25 @@ pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix("max") {
             d.max = Some(parse_num(rest.trim(), "max", line_no)?);
         } else if let Some(rest) = line.strip_prefix("ticks") {
-            d.ticks = Some(rest.trim().parse().map_err(|_| ParseError::Syntax {
-                message: format!("invalid ticks: '{}'", rest.trim()),
-                line: line_no,
+            d.ticks = Some(rest.trim().parse().map_err(|_| {
+                ParseError::number(line_no, format!("invalid ticks: '{}'", rest.trim()))
             })?);
         } else if let Some(rest) = line.strip_prefix("graticule") {
             d.graticule = match rest.trim() {
                 "polygon" => RadarGraticule::Polygon,
                 "circle" | "" => RadarGraticule::Circle,
                 other => {
-                    return Err(ParseError::Syntax {
-                        message: format!("invalid graticule: '{other}'"),
-                        line: line_no,
-                    })
+                    return Err(ParseError::malformed(
+                        line_no,
+                        format!("invalid graticule: '{other}'"),
+                    ))
                 }
             };
         } else {
-            return Err(ParseError::Syntax {
-                message: format!("unknown radar line: '{line}'"),
-                line: line_no,
-            });
+            return Err(ParseError::unknown(
+                line_no,
+                format!("unknown radar line: '{line}'"),
+            ));
         }
     }
 
@@ -99,9 +95,8 @@ fn parse_axis_list(s: &str, line_no: usize) -> Result<Vec<RadarAxis>, ParseError
         }
         let (id, label) = if let Some(open) = item.find('[') {
             let id = item[..open].trim().to_string();
-            let close = item.rfind(']').ok_or_else(|| ParseError::Syntax {
-                message: format!("missing ']' in axis '{item}'"),
-                line: line_no,
+            let close = item.rfind(']').ok_or_else(|| {
+                ParseError::unclosed(line_no, format!("missing ']' in axis '{item}'"))
             })?;
             let label = unquote(item[open + 1..close].trim()).to_string();
             (id, label)
@@ -116,18 +111,16 @@ fn parse_axis_list(s: &str, line_no: usize) -> Result<Vec<RadarAxis>, ParseError
 fn parse_curve(s: &str, axes: &[RadarAxis], line_no: usize) -> Result<RadarCurve, ParseError> {
     let s = s.trim();
     // form: id["label"]{v1, v2, ...} or id{v1, v2, ...} or id{ name: v, ... }
-    let brace = s.find('{').ok_or_else(|| ParseError::Syntax {
-        message: format!("expected '{{values}}' in curve '{s}'"),
-        line: line_no,
+    let brace = s.find('{').ok_or_else(|| {
+        ParseError::unclosed(line_no, format!("expected '{{values}}' in curve '{s}'"))
     })?;
     let head = &s[..brace];
     let body = s[brace + 1..].trim_end_matches('}').trim();
     let (id, label) = if let Some(open) = head.find('[') {
         let id = head[..open].trim().to_string();
-        let close = head.rfind(']').ok_or_else(|| ParseError::Syntax {
-            message: format!("missing ']' in curve '{s}'"),
-            line: line_no,
-        })?;
+        let close = head
+            .rfind(']')
+            .ok_or_else(|| ParseError::unclosed(line_no, format!("missing ']' in curve '{s}'")))?;
         let label = unquote(head[open + 1..close].trim()).to_string();
         (id, label)
     } else {
@@ -151,9 +144,8 @@ fn parse_curve_values(
             .map(|v| v.trim())
             .filter(|v| !v.is_empty())
             .map(|v| {
-                v.parse::<f64>().map_err(|_| ParseError::Syntax {
-                    message: format!("invalid value list: '{body}'"),
-                    line: line_no,
+                v.parse::<f64>().map_err(|_| {
+                    ParseError::number(line_no, format!("invalid value list: '{body}'"))
                 })
             })
             .collect();
@@ -165,14 +157,15 @@ fn parse_curve_values(
         if pair.is_empty() {
             continue;
         }
-        let (name, val) = pair.split_once(':').ok_or_else(|| ParseError::Syntax {
-            message: format!("expected 'name: value' in curve entry '{pair}'"),
-            line: line_no,
+        let (name, val) = pair.split_once(':').ok_or_else(|| {
+            ParseError::malformed(
+                line_no,
+                format!("expected 'name: value' in curve entry '{pair}'"),
+            )
         })?;
         let name = unquote(name.trim()).to_string();
-        let val = val.trim().parse::<f64>().map_err(|_| ParseError::Syntax {
-            message: format!("invalid curve value: '{}'", val.trim()),
-            line: line_no,
+        let val = val.trim().parse::<f64>().map_err(|_| {
+            ParseError::number(line_no, format!("invalid curve value: '{}'", val.trim()))
         })?;
         map.insert(name, val);
     }
@@ -188,10 +181,8 @@ fn parse_curve_values(
 }
 
 fn parse_num(s: &str, what: &str, line_no: usize) -> Result<f64, ParseError> {
-    s.parse().map_err(|_| ParseError::Syntax {
-        message: format!("invalid {what}: '{s}'"),
-        line: line_no,
-    })
+    s.parse()
+        .map_err(|_| ParseError::number(line_no, format!("invalid {what}: '{s}'")))
 }
 
 fn parse_bool(s: &str) -> bool {

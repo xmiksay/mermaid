@@ -31,10 +31,7 @@ pub(crate) fn parse(input: &str) -> Result<KanbanDiagram, ParseError> {
         }
         if !header_seen {
             if content.trim() != "kanban" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'kanban' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'kanban' header"));
             }
             header_seen = true;
             continue;

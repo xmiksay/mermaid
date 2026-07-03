@@ -50,8 +50,6 @@ mod xychart;
 pub enum RenderError {
     #[error("parse error: {0}")]
     Parse(#[from] ParseError),
-    #[error("diagram type not yet supported by SVG renderer")]
-    Unsupported,
 }
 
 pub fn render(input: &str) -> Result<String, RenderError> {

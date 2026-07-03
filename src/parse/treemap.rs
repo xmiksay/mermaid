@@ -29,10 +29,7 @@ pub(crate) fn parse(input: &str) -> Result<TreemapDiagram, ParseError> {
         if !header_seen {
             let trimmed = content.trim();
             if trimmed != "treemap" && trimmed != "treemap-beta" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'treemap' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'treemap' header"));
             }
             header_seen = true;
             continue;

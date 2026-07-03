@@ -47,10 +47,10 @@ pub(super) fn parse_statement(
             edge_ids.insert(eid.clone());
         }
         let Some((line_style, tail, head, label)) = parse_arrow(&mut sc, line_no)? else {
-            return Err(ParseError::Syntax {
-                message: format!("unexpected text: '{}'", sc.remaining()),
-                line: line_no,
-            });
+            return Err(ParseError::unknown(
+                line_no,
+                format!("unexpected text: '{}'", sc.remaining()),
+            ));
         };
         sc.skip_ws();
         let next = parse_node_group(&mut sc, line_no)?;
@@ -98,9 +98,11 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
     sc.skip_ws();
     // The asymmetric `>` flag opens BEFORE an id appears, but Mermaid actually
     // requires an id first. The shape opener is detected after the id.
-    let id = sc.read_ident().ok_or_else(|| ParseError::Syntax {
-        message: format!("expected node identifier at: '{}'", sc.remaining()),
-        line: line_no,
+    let id = sc.read_ident().ok_or_else(|| {
+        ParseError::malformed(
+            line_no,
+            format!("expected node identifier at: '{}'", sc.remaining()),
+        )
     })?;
 
     // Mermaid v11 attribute syntax: `id@{ shape: …, label: … }`.
@@ -133,11 +135,9 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
         sc.advance(2);
         let opener_was_slash = sc.s.as_bytes()[sc.i - 1] == b'/';
         // Scan text until we hit `/]` or `\]`.
-        let (text, used_close) =
-            read_until_either(sc, "/]", "\\]").ok_or_else(|| ParseError::Syntax {
-                message: format!("missing closing for node '{id}'"),
-                line: line_no,
-            })?;
+        let (text, used_close) = read_until_either(sc, "/]", "\\]").ok_or_else(|| {
+            ParseError::unclosed(line_no, format!("missing closing for node '{id}'"))
+        })?;
         let shape = match (opener_was_slash, used_close) {
             (true, "/]") => NodeShape::Parallelogram,
             (true, "\\]") => NodeShape::Trapezoid,
@@ -149,9 +149,11 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
     }
     for (open, close, shape) in SHAPES {
         if sc.try_consume(open) {
-            let text = sc.read_until(close).ok_or_else(|| ParseError::Syntax {
-                message: format!("missing closing '{close}' for node '{id}'"),
-                line: line_no,
+            let text = sc.read_until(close).ok_or_else(|| {
+                ParseError::unclosed(
+                    line_no,
+                    format!("missing closing '{close}' for node '{id}'"),
+                )
             })?;
             let _ = sc.try_consume(close);
             return Ok(finish_node(
@@ -172,9 +174,8 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
 /// scope — dropped, but any `label` is still honored so content is never lost.
 fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, ParseError> {
     sc.advance(2); // consume `@{`
-    let body = sc.read_until("}").ok_or_else(|| ParseError::Syntax {
-        message: format!("missing closing '}}' for node '{id}'"),
-        line: line_no,
+    let body = sc.read_until("}").ok_or_else(|| {
+        ParseError::unclosed(line_no, format!("missing closing '}}' for node '{id}'"))
     })?;
     sc.try_consume("}");
 

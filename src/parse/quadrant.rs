@@ -33,10 +33,10 @@ pub(crate) fn parse(input: &str) -> Result<QuadrantDiagram, ParseError> {
 
         if !header_seen {
             if line != "quadrantChart" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'quadrantChart' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(
+                    line_no,
+                    "expected 'quadrantChart' header",
+                ));
             }
             header_seen = true;
             continue;
@@ -61,13 +61,12 @@ pub(crate) fn parse(input: &str) -> Result<QuadrantDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix("quadrant-4") {
             d.q4 = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("classDef") {
-            let (name, style) = rest
-                .trim()
-                .split_once(' ')
-                .ok_or_else(|| ParseError::Syntax {
-                    message: format!("expected 'classDef <name> <style>': '{line}'"),
-                    line: line_no,
-                })?;
+            let (name, style) = rest.trim().split_once(' ').ok_or_else(|| {
+                ParseError::malformed(
+                    line_no,
+                    format!("expected 'classDef <name> <style>': '{line}'"),
+                )
+            })?;
             d.classes
                 .insert(name.trim().to_string(), parse_style(style));
         } else {
@@ -84,17 +83,12 @@ pub(crate) fn parse(input: &str) -> Result<QuadrantDiagram, ParseError> {
 /// `label: [x, y]`, `label: [x, y, r]`, or
 /// `label:::class: [x, y] radius: 8, color: #ff0000`.
 fn parse_point(line: &str, line_no: usize) -> Result<QuadrantPoint, ParseError> {
-    let open = line.find('[').ok_or_else(|| ParseError::Syntax {
-        message: format!("expected 'label: [x, y]': '{line}'"),
-        line: line_no,
+    let open = line.find('[').ok_or_else(|| {
+        ParseError::unclosed(line_no, format!("expected 'label: [x, y]': '{line}'"))
     })?;
-    let close = line[open..]
-        .find(']')
-        .map(|i| open + i)
-        .ok_or_else(|| ParseError::Syntax {
-            message: format!("unterminated coordinate list: '{line}'"),
-            line: line_no,
-        })?;
+    let close = line[open..].find(']').map(|i| open + i).ok_or_else(|| {
+        ParseError::unclosed(line_no, format!("unterminated coordinate list: '{line}'"))
+    })?;
 
     // Prefix is "<label>:" or "<label>:::<class>:"; the trailing ':' separates it
     // from the coordinate list.
@@ -108,13 +102,13 @@ fn parse_point(line: &str, line_no: usize) -> Result<QuadrantPoint, ParseError> 
     let mut parts = coords.split(',');
     let x = parse_coord(parts.next(), "x", coords, line_no)?;
     let y = parse_coord(parts.next(), "y", coords, line_no)?;
-    let radius = match parts.next().map(str::trim) {
-        Some(r) if !r.is_empty() => Some(r.parse().map_err(|_| ParseError::Syntax {
-            message: format!("invalid radius in '{coords}'"),
-            line: line_no,
-        })?),
-        _ => None,
-    };
+    let radius =
+        match parts.next().map(str::trim) {
+            Some(r) if !r.is_empty() => Some(r.parse().map_err(|_| {
+                ParseError::number(line_no, format!("invalid radius in '{coords}'"))
+            })?),
+            _ => None,
+        };
 
     // Inline styling after the coordinate list, e.g. "radius: 8, color: #f00".
     let style = parse_style(line[close + 1..].trim());
@@ -139,10 +133,7 @@ fn parse_coord(
     part.unwrap_or("")
         .trim()
         .parse()
-        .map_err(|_| ParseError::Syntax {
-            message: format!("invalid {which} in '{coords}'"),
-            line: line_no,
-        })
+        .map_err(|_| ParseError::number(line_no, format!("invalid {which} in '{coords}'")))
 }
 
 /// Comma-separated `key: value` styling attributes.
