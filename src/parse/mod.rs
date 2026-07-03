@@ -139,6 +139,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
             s.node_alignment = meta.sankey_node_alignment.clone();
         }
     }
+    if let (Diagram::Timeline(t), Some(true)) = (&mut diagram, meta.timeline_disable_multicolor) {
+        t.disable_multicolor = true;
+    }
     if let Diagram::GitGraph(g) = &mut diagram {
         apply_git_graph_config(&mut g.config, &meta.git_graph);
     }

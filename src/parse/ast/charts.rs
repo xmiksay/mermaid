@@ -30,6 +30,12 @@ pub struct JourneyTask {
 pub struct TimelineDiagram {
     pub title: Option<String>,
     pub sections: Vec<TimelineSection>,
+    /// `timeline <dir>` header direction (v11.14+, e.g. `LR`/`TD`). Parsed and
+    /// validated; the horizontal renderer treats it as a no-op.
+    pub direction: Option<String>,
+    /// `config.timeline.disableMulticolor` — when `true`, a sectionless
+    /// timeline stays one flat color instead of advancing per time-period.
+    pub disable_multicolor: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
