@@ -294,6 +294,8 @@ fn handle_subgraph_open(
     //   subgraph X
     //   subgraph X [Label]
     //   subgraph "Just a label"   (auto id)
+    //   subgraph one two three    (whole text is the id, per upstream
+    //                              `subgraph SPACE textNoTags`)
     let rest = rest.trim();
     let (id, label) = if rest.is_empty() {
         *auto += 1;
@@ -302,15 +304,20 @@ fn handle_subgraph_open(
         *auto += 1;
         let label = rest.trim_matches('"').to_string();
         (format!("sg{auto}"), label)
-    } else if let Some((id, label)) = rest.split_once(' ') {
-        let label_clean = label
+    } else if let Some(open) = rest.find('[') {
+        // `id [Label]`: id is the text before the bracket, label inside it.
+        let id = rest[..open].trim().to_string();
+        let label = rest[open + 1..]
             .trim()
-            .trim_start_matches('[')
             .trim_end_matches(']')
+            .trim()
             .trim_matches('"')
             .to_string();
-        (id.trim().to_string(), label_clean)
+        (id, label)
     } else {
+        // A bracket-less title keeps all its words as the id; the renderer
+        // shows the id when no label was given, so a multi-word title is not
+        // truncated at the first space.
         (rest.to_string(), String::new())
     };
 
@@ -408,6 +415,17 @@ mod tests {
         assert!(!d.nodes.iter().any(|n| n.id == "S"));
         let s = d.subgraphs.iter().find(|s| s.id == "S").unwrap();
         assert_eq!(s.classes, vec!["hot".to_string()]);
+    }
+
+    #[test]
+    fn multiword_subgraph_title_is_not_truncated() {
+        // A bracket-less multi-word title keeps every word (upstream renders
+        // the whole text), so the id/label is not cut at the first space.
+        let d = parse("flowchart TD\nsubgraph one two three\nA --> B\nend\n").unwrap();
+        assert_eq!(d.subgraphs.len(), 1);
+        assert_eq!(d.subgraphs[0].id, "one two three");
+        // With no bracket label the renderer shows the id verbatim.
+        assert!(d.subgraphs[0].label.is_empty());
     }
 
     #[test]

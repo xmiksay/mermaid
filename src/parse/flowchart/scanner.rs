@@ -4,6 +4,8 @@
 //! scanners in the sibling submodules. Fields and methods are `pub(super)` so
 //! those siblings can advance and inspect it directly.
 
+use super::super::token::find_unquoted;
+
 pub(super) struct Scanner<'a> {
     pub(super) s: &'a str,
     pub(super) i: usize,
@@ -42,25 +44,52 @@ impl<'a> Scanner<'a> {
             }
         }
     }
+    /// Read a node/edge identifier. Beyond alphanumerics, `_` and `.`, a `-` or
+    /// `/` is part of the id when it does *not* begin an edge connector —
+    /// upstream's NODE_STRING allows `a-node`/`a/b` but stops the dash before an
+    /// arrow (`-->`, `-.->`). So a `-`/`/` is consumed only when the next char
+    /// continues the id (alphanumeric / `_` / `.`); a following `-`/`/`/`>`/`.`,
+    /// whitespace, or end-of-input leaves it for the arrow scanner.
     pub(super) fn read_ident(&mut self) -> Option<String> {
+        let rem = self.remaining();
+        let chars: Vec<(usize, char)> = rem.char_indices().collect();
         let mut end = 0;
-        for c in self.remaining().chars() {
+        let mut k = 0;
+        while k < chars.len() {
+            let (idx, c) = chars[k];
             if c.is_alphanumeric() || c == '_' || c == '.' {
-                end += c.len_utf8();
+                end = idx + c.len_utf8();
+            } else if c == '-' || c == '/' {
+                match chars.get(k + 1).map(|&(_, n)| n) {
+                    Some(n) if n.is_alphanumeric() || n == '_' => {
+                        end = idx + c.len_utf8();
+                    }
+                    _ => break,
+                }
             } else {
                 break;
             }
+            k += 1;
         }
         if end == 0 {
             return None;
         }
-        let s = self.remaining()[..end].to_string();
+        let s = rem[..end].to_string();
         self.i += end;
         Some(s)
     }
     pub(super) fn read_until(&mut self, terminator: &str) -> Option<String> {
         let rem = self.remaining();
         let pos = rem.find(terminator)?;
+        let s = rem[..pos].to_string();
+        self.i += pos;
+        Some(s)
+    }
+    /// Like [`read_until`] but the terminator is matched only outside a `"…"`
+    /// quoted run, so a shape/label may embed its own closer (`A["a ] b"]`).
+    pub(super) fn read_until_unquoted(&mut self, terminator: &str) -> Option<String> {
+        let rem = self.remaining();
+        let pos = find_unquoted(rem, terminator)?;
         let s = rem[..pos].to_string();
         self.i += pos;
         Some(s)

@@ -387,7 +387,9 @@ fn dispatch(input: &str) -> Result<Diagram, ParseError> {
 }
 
 pub(crate) fn strip_comment(line: &str) -> &str {
-    if let Some(pos) = line.find("%%") {
+    // A `%%` inside a `"…"` quoted label is content, not a comment start
+    // (`A["100%% sure"]`), so scan for the marker only outside quoted runs.
+    if let Some(pos) = token::find_unquoted(line, "%%") {
         &line[..pos]
     } else {
         line

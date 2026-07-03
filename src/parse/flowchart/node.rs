@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::super::ast::{FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style};
-use super::super::token::{split_unquoted, unquote};
+use super::super::token::{find_unquoted, split_unquoted, unquote};
 use super::super::ParseError;
 use super::edge::{consume_edge_id, parse_arrow};
 use super::scanner::Scanner;
@@ -149,7 +149,7 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
     }
     for (open, close, shape) in SHAPES {
         if sc.try_consume(open) {
-            let text = sc.read_until(close).ok_or_else(|| {
+            let text = sc.read_until_unquoted(close).ok_or_else(|| {
                 ParseError::unclosed(
                     line_no,
                     format!("missing closing '{close}' for node '{id}'"),
@@ -174,7 +174,7 @@ fn parse_node_spec(sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, Par
 /// scope — dropped, but any `label` is still honored so content is never lost.
 fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<FlowNode, ParseError> {
     sc.advance(2); // consume `@{`
-    let body = sc.read_until("}").ok_or_else(|| {
+    let body = sc.read_until_unquoted("}").ok_or_else(|| {
         ParseError::unclosed(line_no, format!("missing closing '}}' for node '{id}'"))
     })?;
     sc.try_consume("}");
@@ -277,8 +277,8 @@ fn read_until_either<'a>(
     b: &'static str,
 ) -> Option<(String, &'static str)> {
     let rem = sc.remaining();
-    let pa = rem.find(a);
-    let pb = rem.find(b);
+    let pa = find_unquoted(rem, a);
+    let pb = find_unquoted(rem, b);
     let (pos, tok) = match (pa, pb) {
         (Some(x), Some(y)) => {
             if x <= y {
@@ -476,6 +476,36 @@ mod tests {
         let a = node(&d, "A");
         assert_eq!(a.shape, NodeShape::Circle);
         assert_eq!(a.text, "hi");
+    }
+
+    #[test]
+    fn dashed_node_ids_parse() {
+        // Upstream NODE_STRING allows `-`/`/` inside an id; the dash only stops
+        // the id when it begins an arrow.
+        let d = parse("flowchart LR\na-node --> b-node\nx/y --> z\n").unwrap();
+        for id in ["a-node", "b-node", "x/y", "z"] {
+            assert!(d.nodes.iter().any(|n| n.id == id), "missing node {id}");
+        }
+        assert!(d
+            .edges
+            .iter()
+            .any(|e| e.from == "a-node" && e.to == "b-node"));
+        assert!(d.edges.iter().any(|e| e.from == "x/y" && e.to == "z"));
+    }
+
+    #[test]
+    fn quoted_label_may_contain_shape_closer() {
+        let d = parse("flowchart LR\nA[\"a ] b\"] --> B(\"call (x)\")\n").unwrap();
+        assert_eq!(node(&d, "A").text, "a ] b");
+        assert_eq!(node(&d, "B").text, "call (x)");
+        assert_eq!(d.edges.len(), 1);
+    }
+
+    #[test]
+    fn percent_in_quoted_label_is_not_a_comment() {
+        let d = parse("flowchart LR\nA[\"100%% sure\"] --> B\n").unwrap();
+        assert_eq!(node(&d, "A").text, "100%% sure");
+        assert_eq!(d.edges.len(), 1);
     }
 
     #[test]

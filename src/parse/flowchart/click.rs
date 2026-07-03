@@ -86,8 +86,19 @@ fn click_tokens(s: &str) -> Vec<ClickToken> {
                 i += 1; // closing quote
             }
         } else {
+            // A bare token runs to the next whitespace, except that a `(…)`
+            // argument list stays part of the token even when it embeds spaces
+            // or commas — upstream's CALLBACKARGS is `[^)]*`, so
+            // `call handler(arg one, arg two)` keeps its whole argument list.
             let start = i;
-            while i < bytes.len() && bytes[i] != b' ' && bytes[i] != b'\t' {
+            let mut depth = 0usize;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'(' => depth += 1,
+                    b')' => depth = depth.saturating_sub(1),
+                    b' ' | b'\t' if depth == 0 => break,
+                    _ => {}
+                }
                 i += 1;
             }
             tokens.push(ClickToken {
@@ -172,6 +183,32 @@ mod tests {
             Some(ClickAction::Callback {
                 function: "handler()".into(),
                 tooltip: None,
+            })
+        );
+    }
+
+    #[test]
+    fn click_callback_args_keep_whitespace() {
+        // Upstream CALLBACKARGS is `[^)]*`, so spaces and commas inside the
+        // argument list stay part of the callback (not truncated at the space).
+        let d = parse("flowchart TD\nA-->B\nclick A call handler(arg one, arg two)\n").unwrap();
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Callback {
+                function: "handler(arg one, arg two)".into(),
+                tooltip: None,
+            })
+        );
+    }
+
+    #[test]
+    fn click_callback_args_with_tooltip() {
+        let d = parse("flowchart TD\nA-->B\nclick A call handler(a, b) \"a tip\"\n").unwrap();
+        assert_eq!(
+            node(&d, "A").click,
+            Some(ClickAction::Callback {
+                function: "handler(a, b)".into(),
+                tooltip: Some("a tip".into()),
             })
         );
     }
