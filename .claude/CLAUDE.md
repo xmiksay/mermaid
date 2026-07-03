@@ -231,8 +231,22 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   node. A head-less solid/thick closer needs ≥3 connectors so a plain
   `A -- B -- C` chain is left untouched.
 - `A & B --> C & D` produces 4 edges (cross product) — multi-source/target.
+- Flowchart node `(text)` (round) renders as a small `rx="5"` rounded rect;
+  only stadium `([text])` is a full pill (`rx = h/2`) — the two shapes are
+  visually distinct (`draw_node`).
 - Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
-  nesting. The renderer draws a dashed bounding rect around the group.
+  nesting. The renderer draws a solid rounded cluster frame with the themed
+  `flow_cluster_fill`/`flow_cluster_stroke` and a centered bold top label
+  (`draw_subgraphs`).
+  - `style <id>`/`class <id> <name>` naming a subgraph id styles the cluster
+    frame: the directive lands on the phantom node dropped during subgraph-id
+    cleanup, so the parser moves its `style`/`classes` onto `Subgraph.style`/
+    `Subgraph.classes` first; the renderer resolves them through the shared
+    `resolve_style` (fill/stroke override the theme cluster colors).
+  - Mermaid v11 edge ids parse and are ignored: the `e1@` prefix in
+    `A e1@--> B` (`consume_edge_id`, recorded in an `edge_ids` set) and a
+    standalone `e1@{ … }` edge-attribute statement (`edge_attr_stmt_id`, dropped
+    when the id is a known edge) — so v11 documents render instead of erroring.
   - `direction X` inside a subgraph body fills `Subgraph.direction`. The
     renderer works in screen space and, for a cluster whose flow axis differs
     from the diagram's, transposes just that cluster's members (and their

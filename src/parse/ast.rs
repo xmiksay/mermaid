@@ -359,6 +359,11 @@ pub struct Subgraph {
     pub direction: Option<FlowDirection>,
     pub node_ids: Vec<String>,
     pub child_subgraph_ids: Vec<String>,
+    /// Class names applied to the cluster via `class <id> …`/`:::` — resolved
+    /// against `FlowchartDiagram::class_defs` when styling the frame.
+    pub classes: Vec<String>,
+    /// Inline `style <id> …` properties applied to the cluster frame.
+    pub style: Style,
 }
 
 // ---- state diagram ---------------------------------------------------------

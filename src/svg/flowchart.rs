@@ -309,7 +309,11 @@ fn draw_node(
         NodeShape::Rect => {
             svg.rect(x, y, w, h, &format!("{fill_attr} rx=\"4\""));
         }
-        NodeShape::Round | NodeShape::Stadium => {
+        NodeShape::Round => {
+            // Small corner radius — a rounded rect, not a pill (upstream `()`).
+            svg.rect(x, y, w, h, &format!("{fill_attr} rx=\"5\""));
+        }
+        NodeShape::Stadium => {
             svg.rect(x, y, w, h, &format!("{fill_attr} rx=\"{}\"", h / 2.0));
         }
         NodeShape::Subroutine => {
@@ -582,22 +586,21 @@ fn draw_subgraphs(
         let Some(&(x0, y0, x1, y1)) = boxes.get(&sub.id) else {
             continue;
         };
-        svg.rect(
-            x0,
-            y0,
-            x1 - x0,
-            y1 - y0,
-            "fill=\"#F8F8FF\" stroke=\"#666\" stroke-width=\"1\" stroke-dasharray=\"6 4\" rx=\"4\"",
-        );
+        // Themed cluster fill + solid border, overridable by a `style`/`class`
+        // on the subgraph id (upstream styles the cluster rect).
+        let rs = resolve_style(&d.class_defs, &sub.classes, &sub.style);
+        let frame = rs.shape_attrs(theme.flow_cluster_fill, theme.flow_cluster_stroke, "1");
+        svg.rect(x0, y0, x1 - x0, y1 - y0, &format!("{frame} rx=\"6\""));
         let label = if sub.label.is_empty() {
             sub.id.as_str()
         } else {
             sub.label.as_str()
         };
+        let label_fill = rs.label_fill(fg);
         svg.text(
-            x0 + 10.0,
-            y0 + 12.0,
-            &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
+            (x0 + x1) / 2.0,
+            y0 + 15.0,
+            &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\" font-weight=\"bold\""),
             label,
         );
     }
@@ -842,8 +845,9 @@ mod tests {
             &parse_flow("flowchart TD\nA --> B\nsubgraph S [Group]\nB --> C\nend\n"),
             &Theme::default(),
         );
-        // Dashed rect for subgraph + italic label
-        assert!(svg.contains("stroke-dasharray=\"6 4\""));
+        // Themed cluster frame + centered bold label.
+        assert!(svg.contains("fill=\"#ffffde\""));
+        assert!(svg.contains("font-weight=\"bold\""));
         assert!(svg.contains(">Group<"));
     }
 
@@ -893,10 +897,46 @@ mod tests {
         );
         // Cluster frame titled by its label, no phantom `SG` node, and the C→SG
         // edge is drawn (an arrow-headed path) rather than silently dropped.
-        assert!(svg.contains("stroke-dasharray=\"6 4\""));
+        assert!(svg.contains("fill=\"#ffffde\""));
         assert!(svg.contains(">Group</text>"));
         assert!(!svg.contains(">SG</text>"));
         assert!(svg.contains("marker-end=\"url(#arrow-filled)\""));
+    }
+
+    /// Grab the `rx` value of the first `<rect>` whose text label is `id`.
+    fn node_rect_rx(svg: &str, id: &str) -> f64 {
+        // The node rect is emitted just before its label; find the label, then
+        // the nearest preceding `rx="…"`.
+        let label = format!(">{id}</text>");
+        let end = svg.find(&label).unwrap_or_else(|| panic!("no label {id}"));
+        let rx_at = svg[..end].rfind("rx=\"").unwrap() + 4;
+        let e = rx_at + svg[rx_at..].find('"').unwrap();
+        svg[rx_at..e].parse::<f64>().unwrap()
+    }
+
+    #[test]
+    fn round_and_stadium_render_differently() {
+        // Round `()` is a small-radius rect; stadium `([])` is a full pill.
+        let svg = render(
+            &parse_flow("flowchart LR\nR(round) --> S([stadium])\n"),
+            &Theme::default(),
+        );
+        let round_rx = node_rect_rx(&svg, "round");
+        let stadium_rx = node_rect_rx(&svg, "stadium");
+        assert_eq!(round_rx, 5.0, "round is a small-radius rect");
+        assert!(stadium_rx > round_rx, "stadium is a pill (rx = h/2)");
+    }
+
+    #[test]
+    fn subgraph_style_directive_colors_frame() {
+        let svg = render(
+            &parse_flow(
+                "flowchart TD\nsubgraph S [Group]\nA --> B\nend\nstyle S fill:#f9f,stroke:#111\n",
+            ),
+            &Theme::default(),
+        );
+        assert!(svg.contains("fill=\"#f9f\""));
+        assert!(svg.contains("stroke=\"#111\""));
     }
 
     #[test]
