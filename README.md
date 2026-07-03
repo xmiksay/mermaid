@@ -67,6 +67,9 @@ let svg = render_with(source, &custom)?;
 The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
 `Theme::forest()`, and `Theme::neutral()`; `Theme::with_font(family)` and
 `Theme::with_font_size(px)` return a copy with the font overridden.
+`Theme::by_name(name)` selects a built-in by string, accepting `base` as an
+alias for `default` (matching upstream Mermaid); the `mermaid-svg --theme`
+flag uses the same lookup.
 
 ## Supported diagrams
 
@@ -86,16 +89,16 @@ The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
 | Sankey | `sankey-beta`, `sankey` | weighted source→target flows |
 | Quadrant | `quadrantChart` | axes, labelled quadrants, plotted points |
 | XY chart | `xychart-beta`, `xychart` | bar and line series, x/y axes |
-| Radar | `radar-beta`, `radar` | multiple axes and curves |
+| Radar | `radar-beta`, `radar` | multiple axes and curves, `min`/`max`/`ticks`/`graticule`/`showLegend` options |
 | Packet | `packet-beta`, `packet` | byte/bit field ranges |
 | Mindmap | `mindmap` | nested nodes, node shapes |
 | Git graph | `gitGraph` | commits, branches, merges, checkouts |
-| Requirement | `requirementDiagram` | requirements, elements, relationships |
+| Requirement | `requirementDiagram` | requirements, elements, relationships, `direction`, `classDef`/`class`/`style` styling |
 | C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems (`Db`/`Queue`/`_Ext` variants), boundaries, relations, `Update*Style` overrides |
 | Block | `block-beta`, `block` | grid layout, spanning blocks, edges |
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
-| Kanban | `kanban` | columns and cards |
-| Treemap | `treemap-beta`, `treemap` | nested weighted rectangles |
+| Kanban | `kanban` | columns and cards, `id[Label]` form, `@{…}` metadata (assigned/priority/ticket), priority-colored borders, hyperlinked tickets |
+| Treemap | `treemap-beta`, `treemap` | nested weighted rectangles, `classDef` + `:::class` fill/stroke overrides |
 | ZenUML | `zenuml` | annotators, method calls, nesting braces, `return`, if/while/opt/par/try; rendered via the sequence renderer |
 
 ### Cross-cutting features
@@ -116,7 +119,7 @@ These work on every diagram type:
 
 Note: pie charts drop slices under 1% of the total, matching upstream.
 
-### Styling (flowchart, class, state)
+### Styling (flowchart, class, state, quadrant, block, requirement, treemap)
 
 Inline CSS-style overrides are supported and resolved into concrete SVG
 attributes (`fill`, `stroke`, `stroke-width`, `stroke-dasharray`, text `color`,

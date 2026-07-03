@@ -1,10 +1,15 @@
-//! Class diagram parser (v0.1 subset).
+//! Class diagram parser.
 //!
 //! Supports:
 //!   * Header: `classDiagram` (or the `classDiagram-v2` alias).
 //!   * Class blocks: `class X { ... }` with member lines inside.
 //!   * Member shorthand: `X : +method()`, `X : -attr int`.
 //!   * Stereotype: `class X { <<interface>> ... }` or `X <<abstract>>`.
+//!   * Namespaces: `namespace X { class A; class B }`.
+//!   * `direction` directive (TD/BT/LR/RL).
+//!   * Notes (`note "…"`, `note for X "…"`), standalone annotations
+//!     (either order), `Name["label"]`, and `click`/`link`/`callback`.
+//!   * Generics `~T~` rendered as `<T>`.
 //!   * Relationships:
 //!     `<|--` `<|..`  inheritance / realization
 //!     `*--`         composition
