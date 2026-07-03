@@ -5,12 +5,16 @@
 //!   * `[*]` start/end pseudo-states (each occurrence gets a unique id).
 //!   * `[H]`/`[H*]` history pseudo-states (shallow/deep, unique id each).
 //!   * Transitions `A --> B[: label]`.
-//!   * `state X`, `state X : description`, and `state "description" as X`
-//!     declarations.
-//!   * Stereotypes via `state X <<choice/fork/join/history>>`.
+//!   * `state X`, `state X : description`, `state "description" as X`, and the
+//!     bare id form `X` on its own line.
+//!   * Stereotypes via `state X <<choice/fork/join/history>>` and the
+//!     `[[fork]]`/`[[join]]`/`[[choice]]` bracket alternates.
 //!   * `direction TB|TD|BT|LR|RL`.
 //!   * Composite states `state X { ... }` (potentially nested), with
-//!     parallel regions separated by `--`.
+//!     parallel regions separated by `--`; the composite header accepts the
+//!     `state "label" as X {` aliasing form.
+//!   * `click X href "url"` / `click X call fn()` interactions (reuses the
+//!     flowchart `ClickAction`), and the `hide empty description` no-op.
 //!   * Notes: `note right of X: text`, `note left of X: text`,
 //!     `note over X: text` (consumed across following lines until `end note`).
 
@@ -20,6 +24,7 @@ use super::ast::{
     CompositeState, FlowDirection, NotePosition, StateDiagram, StateKind, StateNote,
     StateTransition,
 };
+use super::flowchart::click::parse_click;
 use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
@@ -112,13 +117,28 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
                 .unwrap()
                 .trim_end_matches('{')
                 .trim();
-            let id_part = inner
-                .split_once("<<")
-                .map(|(a, _)| a.trim())
-                .unwrap_or(inner);
-            ensure_state(&mut diag, &mut existing, id_part, "", StateKind::Normal);
+            // `state "Composite label" as C {` aliases the composite id `C` to a
+            // display label; otherwise the id is the text before any `<<…>>`.
+            let (id_part, label) = match parse_quoted_as(inner) {
+                Some((id, desc)) => (id, desc),
+                None => (
+                    inner
+                        .split_once("<<")
+                        .map(|(a, _)| a.trim())
+                        .unwrap_or(inner)
+                        .to_string(),
+                    String::new(),
+                ),
+            };
+            ensure_state(
+                &mut diag,
+                &mut existing,
+                &id_part,
+                &label,
+                StateKind::Normal,
+            );
             composite_stack.push(CompositeFrame {
-                id: id_part.to_string(),
+                id: id_part,
                 regions: vec![Vec::new()],
             });
             continue;
@@ -150,6 +170,26 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
         }
         if let Some(rest) = line.strip_prefix("style ") {
             handle_style(rest, &mut diag, &mut existing);
+            continue;
+        }
+
+        // `hide empty description` toggles rendering of empty state descriptions
+        // upstream; the static renderer always draws the id, so it is a no-op.
+        if line == "hide empty description" {
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("click ") {
+            let Some((id, action)) = parse_click(rest) else {
+                return Err(ParseError::malformed(
+                    line_no,
+                    format!("malformed click directive: '{line}'"),
+                ));
+            };
+            ensure_state(&mut diag, &mut existing, &id, "", StateKind::Normal);
+            if let Some(&i) = existing.get(&id) {
+                diag.states[i].click = Some(action);
+            }
             continue;
         }
 
@@ -189,6 +229,20 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
             continue;
         }
 
+        // Bare state-id declaration: `s1` on its own line (upstream's
+        // `statement: idStatement`), common inside concurrency examples.
+        if is_bare_id(line) {
+            ensure_state(&mut diag, &mut existing, line, "", StateKind::Normal);
+            if let Some(top) = composite_stack.last_mut() {
+                if let Some(region) = top.regions.last_mut() {
+                    if !region.contains(&line.to_string()) {
+                        region.push(line.to_string());
+                    }
+                }
+            }
+            continue;
+        }
+
         return Err(ParseError::unknown(
             line_no,
             format!("unrecognized state statement: '{line}'"),
@@ -204,6 +258,16 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
 struct CompositeFrame {
     id: String,
     regions: Vec<Vec<String>>,
+}
+
+/// A bare state-id declaration is a single identifier token — no whitespace and
+/// only identifier characters — so a genuinely unknown multi-word statement
+/// still hard-errors rather than silently becoming a phantom state.
+fn is_bare_id(line: &str) -> bool {
+    !line.is_empty()
+        && line
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 fn try_note_oneline(line: &str) -> Option<StateNote> {
@@ -428,6 +492,80 @@ mod tests {
             state(&d, "A").style,
             vec![("stroke".to_string(), "#333".to_string())]
         );
+    }
+
+    #[test]
+    fn bare_id_declaration() {
+        let d = parse("stateDiagram-v2\ns1\ns2\ns1 --> s2\n").unwrap();
+        // s1 + s2, no phantom states.
+        assert_eq!(d.states.len(), 2);
+        assert!(d.states.iter().any(|s| s.id == "s1"));
+        assert!(d.states.iter().any(|s| s.id == "s2"));
+        assert_eq!(d.transitions.len(), 1);
+    }
+
+    #[test]
+    fn bare_id_in_composite_region() {
+        let d = parse("stateDiagram-v2\nstate Fork {\nc1\nc2\n}\n").unwrap();
+        let regions = &d.composites[0].regions;
+        assert!(regions[0].contains(&"c1".to_string()));
+        assert!(regions[0].contains(&"c2".to_string()));
+    }
+
+    #[test]
+    fn multiword_statement_still_errors() {
+        assert!(parse("stateDiagram-v2\nthis is garbage\n").is_err());
+    }
+
+    #[test]
+    fn bracket_fork_join_choice() {
+        let d = parse(
+            "stateDiagram-v2\nstate f [[fork]]\nstate j [[join]]\nstate c [[choice]]\nf --> j\n",
+        )
+        .unwrap();
+        assert_eq!(state(&d, "f").kind, StateKind::Fork);
+        assert_eq!(state(&d, "j").kind, StateKind::Join);
+        assert_eq!(state(&d, "c").kind, StateKind::Choice);
+        // No garbage `f [[fork]]` state.
+        assert!(!d.states.iter().any(|s| s.id.contains('[')));
+        assert_eq!(d.states.len(), 3);
+    }
+
+    #[test]
+    fn click_href_on_state() {
+        let d =
+            parse("stateDiagram-v2\n[*] --> A\nclick A href \"https://example.com\" \"open\"\n")
+                .unwrap();
+        assert_eq!(
+            state(&d, "A").click,
+            Some(crate::parse::ClickAction::Href {
+                url: "https://example.com".into(),
+                tooltip: Some("open".into()),
+                target: None,
+            })
+        );
+        // No phantom `//example.com"` state.
+        assert!(!d.states.iter().any(|s| s.id.contains("example.com")));
+    }
+
+    #[test]
+    fn composite_quoted_alias() {
+        let d = parse(
+            "stateDiagram-v2\nstate \"Composite label\" as C {\n[*] --> Inner\n}\nC --> [*]\n",
+        )
+        .unwrap();
+        // Composite id is `C`, labelled with the quoted text — no raw-text box.
+        assert_eq!(d.composites[0].id, "C");
+        assert_eq!(state(&d, "C").label, "Composite label");
+        assert!(!d.states.iter().any(|s| s.id.contains('"')));
+        // Transition to C resolves to the composite, not a separate state.
+        assert!(d.transitions.iter().any(|t| t.from == "C"));
+    }
+
+    #[test]
+    fn hide_empty_description_ignored() {
+        let d = parse("stateDiagram-v2\nhide empty description\n[*] --> A\n").unwrap();
+        assert!(d.states.iter().any(|s| s.id == "A"));
     }
 
     #[test]

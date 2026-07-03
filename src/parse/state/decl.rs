@@ -37,8 +37,40 @@ pub(super) fn apply_state_class(
     }
 }
 
+/// Split a state id off its stereotype marker, mapping the marker to a
+/// [`StateKind`]. Handles the `<<choice/fork/join/history>>` stereotype form and
+/// the `[[fork]]`/`[[join]]`/`[[choice]]` bracket alternates (upstream lexes the
+/// bracket forms as exact aliases of the matching `<<…>>` stereotypes).
+pub(super) fn parse_stereotype(id_part: &str) -> (String, StateKind) {
+    if let Some(idx) = id_part.find("<<") {
+        let id = id_part[..idx].trim().to_string();
+        let stereo = id_part[idx + 2..].trim_end_matches(">>").trim();
+        let k = match stereo {
+            "choice" => StateKind::Choice,
+            "fork" => StateKind::Fork,
+            "join" => StateKind::Join,
+            "history" => StateKind::History { deep: false },
+            _ => StateKind::Normal,
+        };
+        return (id, k);
+    }
+    if let Some(idx) = id_part.find("[[") {
+        let stereo = id_part[idx + 2..].trim_end_matches("]]").trim();
+        let k = match stereo {
+            "choice" => Some(StateKind::Choice),
+            "fork" => Some(StateKind::Fork),
+            "join" => Some(StateKind::Join),
+            _ => None,
+        };
+        if let Some(k) = k {
+            return (id_part[..idx].trim().to_string(), k);
+        }
+    }
+    (id_part.to_string(), StateKind::Normal)
+}
+
 /// Parse the aliasing form `"description" as id`, returning `(id, description)`.
-fn parse_quoted_as(rest: &str) -> Option<(String, String)> {
+pub(super) fn parse_quoted_as(rest: &str) -> Option<(String, String)> {
     let inner = rest.trim().strip_prefix('"')?;
     let end = inner.find('"')?;
     let desc = inner[..end].to_string();
@@ -68,20 +100,7 @@ pub(super) fn parse_state_decl(
         Some((a, b)) => (a.trim(), b.trim().to_string()),
         None => (rest.as_str(), String::new()),
     };
-    let (id, kind) = if let Some(idx) = id_part.find("<<") {
-        let id = id_part[..idx].trim().to_string();
-        let stereo = id_part[idx + 2..].trim_end_matches(">>").trim();
-        let k = match stereo {
-            "choice" => StateKind::Choice,
-            "fork" => StateKind::Fork,
-            "join" => StateKind::Join,
-            "history" => StateKind::History { deep: false },
-            _ => StateKind::Normal,
-        };
-        (id, k)
-    } else {
-        (id_part.to_string(), StateKind::Normal)
-    };
+    let (id, kind) = parse_stereotype(id_part);
     ensure_state(diag, existing, &id, &label_part, kind);
     if let Some(cls) = inline_class {
         apply_state_class(diag, existing, &id, &cls);
@@ -138,6 +157,7 @@ fn push_pseudo(
         kind,
         classes: Vec::new(),
         style: Style::new(),
+        click: None,
     });
 }
 
@@ -169,5 +189,6 @@ pub(super) fn ensure_state(
         kind,
         classes: Vec::new(),
         style: Style::new(),
+        click: None,
     });
 }

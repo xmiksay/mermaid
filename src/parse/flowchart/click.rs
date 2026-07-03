@@ -13,7 +13,7 @@ use super::super::ast::ClickAction;
 ///   `click A href "url" "tooltip"`      → hyperlink
 ///   `click A callback "tooltip"`        → JS callback
 ///   `click A call callback() "tooltip"` → JS callback
-pub(super) fn parse_click(rest: &str) -> Option<(String, ClickAction)> {
+pub(crate) fn parse_click(rest: &str) -> Option<(String, ClickAction)> {
     let toks = click_tokens(rest);
     let (id_tok, args) = toks.split_first()?;
     let id = id_tok.value.clone();

@@ -8,6 +8,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, fnum, SvgBuilder};
 use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
+use super::interact::{close_click, open_click};
 use super::metrics::text_width;
 use super::style::resolve_style;
 use super::theme::Theme;
@@ -169,7 +170,13 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         let Some(&center) = pos.get(&(i as NodeId)) else {
             continue;
         };
+        if let Some(action) = &state.click {
+            open_click(&mut svg, action);
+        }
         draw_state(&mut svg, center, sizes[i], state, &d.class_defs, theme);
+        if let Some(action) = &state.click {
+            close_click(&mut svg, action);
+        }
     }
 
     // Notes attached to states.
@@ -428,6 +435,13 @@ mod tests {
         let d = build("stateDiagram-v2\n[*] --> A\nclassDef foo fill:#abc\nclass A foo\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("fill=\"#abc\""));
+    }
+
+    #[test]
+    fn click_wraps_state_in_anchor() {
+        let d = build("stateDiagram-v2\n[*] --> A\nclick A href \"https://x.test\"\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("<a href=\"https://x.test\">"));
     }
 
     /// Bounds `(x, y, w, h)` of the dashed composite frame rect.
