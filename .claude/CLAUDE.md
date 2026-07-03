@@ -294,7 +294,15 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   that message). Actor menus (`link X: … @ url`, `links X: {json}`) are consumed
   by `is_actor_menu` (not rendered) so they don't hard-error.
 - State `state X { ... }` is stored in `composites`; parallel regions are
-  separated by `--`. Renderer draws a dashed rounded outline with a label.
+  separated by `--`. Composites are **clusters, not nodes** (like flowchart
+  subgraphs): the composite id is excluded from the sugiyama graph, its members
+  (gathered recursively through nested composites in `compute_composite_boxes`)
+  lay out inside a dashed rounded frame, and an external transition naming the
+  composite id clips to the frame box via `endpoint_clip` (a `StateEndClip` with
+  `kind: None` → rect clip). Synthesized `__start_N`/`__end_N`/`__hist_N` ids are
+  registered in `existing` by `push_pseudo` so region-tracking counts them as
+  members and their circles render inside the frame. Pseudo-state (start/end/
+  fork/join) fills use `theme.fg` so they stay visible on the dark theme.
 - State aliasing `state "description" as X` binds `X`'s display label to the
   quoted text (`parse_quoted_as` in `parse_state_decl`), so the id stays clean
   and a later transition referencing `X` reuses the same state — no phantom box
