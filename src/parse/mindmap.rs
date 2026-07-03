@@ -5,6 +5,7 @@
 
 use super::ast::{MindmapDiagram, MindmapNode, MindmapShape};
 use super::style::parse_style_props;
+use super::token::unquote_any;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
@@ -142,6 +143,10 @@ fn parse_node(body: &str) -> MindmapNode {
     };
     let text = label.trim();
     let text = if !text.is_empty() { text } else { id.trim() };
+    // Strip the surrounding string delimiters (upstream's NSTR): `"quoted"` →
+    // `quoted`, and a markdown string `"` `` `**bold**` `` `"` → `` `**bold**` ``
+    // so the backtick-fence machinery in svg/markup.rs styles it.
+    let text = unquote_any(text);
     MindmapNode {
         text: text.to_string(),
         shape,
@@ -181,6 +186,22 @@ mod tests {
         let d = parse("mindmap\nroot\n  A\n  ::icon(fa fa-book)\n").unwrap();
         let r = d.root.unwrap();
         assert_eq!(r.children[0].icon.as_deref(), Some("fa fa-book"));
+    }
+
+    #[test]
+    fn quoted_label_strips_delimiters() {
+        let d = parse("mindmap\nroot\n  A[\"quoted label\"]\n").unwrap();
+        let r = d.root.unwrap();
+        assert_eq!(r.children[0].text, "quoted label");
+        assert_eq!(r.children[0].shape, MindmapShape::Square);
+    }
+
+    #[test]
+    fn markdown_string_keeps_fence_drops_quotes() {
+        let d = parse("mindmap\nroot\n  id1[\"`**Bold** and *italic*`\"]\n").unwrap();
+        let r = d.root.unwrap();
+        // Quotes stripped, backtick fence preserved for the markup layer.
+        assert_eq!(r.children[0].text, "`**Bold** and *italic*`");
     }
 
     #[test]
