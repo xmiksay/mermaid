@@ -50,10 +50,8 @@ pub struct Theme {
     /// override it with their own `font-size`.
     pub font_size: f64,
     /// Emit the responsive `width="100%"` + `max-width` envelope (upstream
-    /// default). `config.useMaxWidth: false` clears this so [`SvgBuilder`]
+    /// default). `config.useMaxWidth: false` clears this so the SVG builder
     /// emits a fixed pixel `width`/`height` instead.
-    ///
-    /// [`SvgBuilder`]: crate::svg::builder::SvgBuilder
     pub responsive: bool,
 }
 
