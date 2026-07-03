@@ -10,6 +10,7 @@ use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
+use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -369,34 +370,6 @@ fn polyline_path(pts: &[(f64, f64)]) -> String {
         let _ = write!(s, "{cmd}{} {}", fnum(*x), fnum(*y));
     }
     s
-}
-
-fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts.first().copied().unwrap_or((0.0, 0.0));
-    }
-    let mut segs = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
 }
 
 fn draw_arch_icon(svg: &mut SvgBuilder, kind: &str, x: f64, y: f64, stroke: &str, fill: &str) {

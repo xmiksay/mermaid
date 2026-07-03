@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use crate::parse::PieDiagram;
 
-use super::builder::{escape, fnum, SvgBuilder};
+use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const RADIUS: f64 = 150.0;
@@ -187,12 +187,6 @@ fn truncate(s: &str, n: usize) -> String {
         out.push('…');
         out
     }
-}
-
-// escape is re-exported in case callers want it; suppress unused warning.
-#[allow(dead_code)]
-fn _use_escape(s: &str) -> String {
-    escape(s)
 }
 
 #[cfg(test)]

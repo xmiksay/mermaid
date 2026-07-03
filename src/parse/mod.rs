@@ -30,6 +30,7 @@ mod sequence;
 mod state;
 mod style;
 mod timeline;
+mod token;
 mod treemap;
 mod xychart;
 mod zenuml;

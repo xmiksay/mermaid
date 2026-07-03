@@ -16,12 +16,14 @@ src/
 │   ├── ast.rs       all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
 │   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing
+│   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted
 │   └── {pie,sequence,flowchart,state,class,er,gantt,
 │        journey,timeline,sankey,quadrant,xychart,radar,packet,mindmap,
 │        gitgraph,requirement,c4,block,architecture,kanban,treemap,zenuml}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
+│   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
 │   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
 │   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*

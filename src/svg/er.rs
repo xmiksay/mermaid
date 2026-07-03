@@ -7,6 +7,7 @@ use crate::parse::{Cardinality, Entity, ErDiagram, ErRelation, FlowDirection};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
+use super::geometry::{clip_rect, polyline_midpoint};
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -274,7 +275,7 @@ fn draw_relation(
     draw_cardinality(svg, clipped[n - 1], clipped[n - 2], rel.right_card, theme);
 
     if !rel.label.is_empty() {
-        let mid = midpoint(&clipped);
+        let mid = polyline_midpoint(&clipped);
         let chars = rel.label.chars().count() as f64;
         let w = chars * 7.0 + 8.0;
         let h = 16.0;
@@ -399,56 +400,6 @@ fn draw_crowfoot(
     svg.line(ax, ay, tip_x + px * spread, tip_y + py * spread, stroke);
     svg.line(ax, ay, tip_x - px * spread, tip_y - py * spread, stroke);
     let _ = len;
-}
-
-fn clip_rect(from: (f64, f64), c: (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
-    let dx = from.0 - c.0;
-    let dy = from.1 - c.1;
-    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return c;
-    }
-    let hw = w / 2.0;
-    let hh = h / 2.0;
-    let tx = if dx.abs() > 1e-9 {
-        hw / dx.abs()
-    } else {
-        f64::INFINITY
-    };
-    let ty = if dy.abs() > 1e-9 {
-        hh / dy.abs()
-    } else {
-        f64::INFINITY
-    };
-    let t = tx.min(ty);
-    (c.0 + dx * t, c.1 + dy * t)
-}
-
-fn midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
-    if pts.len() < 2 {
-        return pts[0];
-    }
-    let mut segs = Vec::with_capacity(pts.len() - 1);
-    let mut total = 0.0;
-    for w in pts.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dy = w[1].1 - w[0].1;
-        let l = (dx * dx + dy * dy).sqrt();
-        segs.push(l);
-        total += l;
-    }
-    let half = total / 2.0;
-    let mut walked = 0.0;
-    for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
-            return (
-                w[0].0 + t * (w[1].0 - w[0].0),
-                w[0].1 + t * (w[1].1 - w[0].1),
-            );
-        }
-        walked += segs[i];
-    }
-    pts[pts.len() / 2]
 }
 
 #[cfg(test)]

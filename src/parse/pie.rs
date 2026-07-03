@@ -14,6 +14,7 @@
 //! `%%` comments are skipped.
 
 use super::ast::{PieDiagram, PieEntry};
+use super::token::unquote;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<PieDiagram, ParseError> {
@@ -104,12 +105,7 @@ fn parse_entry(line: &str, line_no: usize) -> Result<PieEntry, ParseError> {
         message: format!("expected '<label> : <number>': '{line}'"),
         line: line_no,
     })?;
-    let label_raw = label_raw.trim();
-    let label = if label_raw.starts_with('"') && label_raw.ends_with('"') && label_raw.len() >= 2 {
-        label_raw[1..label_raw.len() - 1].to_string()
-    } else {
-        label_raw.to_string()
-    };
+    let label = unquote(label_raw).to_string();
     if label.is_empty() {
         return Err(ParseError::Syntax {
             message: "empty label".into(),
