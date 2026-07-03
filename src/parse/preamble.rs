@@ -312,6 +312,9 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.sankey_height = get("sankey.height").as_deref().and_then(parse_dim);
     meta.sankey_node_width = get("sankey.nodeWidth").as_deref().and_then(parse_dim);
     meta.sankey_node_padding = get("sankey.nodePadding").as_deref().and_then(parse_dim);
+    meta.pie_text_position = get("pie.textPosition").as_deref().and_then(parse_number);
+    meta.pie_donut_hole = get("pie.donutHole").as_deref().and_then(parse_number);
+    meta.pie_legend_position = get("pie.legendPosition");
 
     for (k, v) in &meta.config {
         if let Some(name) = k.strip_prefix("themeVariables.") {
@@ -358,6 +361,11 @@ fn parse_dim(s: &str) -> Option<f64> {
         .parse::<f64>()
         .ok()
         .filter(|n| n.is_finite() && *n > 0.0)
+}
+
+/// Parse a finite floating-point config value.
+fn parse_number(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
 /// Parse a boolean flag value (`true`/`false`, plus common aliases).
@@ -497,6 +505,15 @@ mod tests {
         let src = "---\nconfig:\n  treemap:\n    showValues: false\n---\ntreemap-beta\n\"A\": 5\n";
         let (m, _) = strip(src);
         assert_eq!(m.show_values, Some(false));
+    }
+
+    #[test]
+    fn init_directive_pie_config() {
+        let src = "%%{init: {\"pie\": {\"textPosition\": 0.2, \"donutHole\": 0.5, \"legendPosition\": \"bottom\"}}}%%\npie\n\"A\": 1\n";
+        let (m, _) = strip(src);
+        assert_eq!(m.pie_text_position, Some(0.2));
+        assert_eq!(m.pie_donut_hole, Some(0.5));
+        assert_eq!(m.pie_legend_position.as_deref(), Some("bottom"));
     }
 
     #[test]
