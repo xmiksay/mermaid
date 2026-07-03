@@ -35,6 +35,12 @@ const MSG_BOTTOM_GAP: f64 = 30.0;
 const ARROW_HEAD: f64 = 8.0;
 const TEXT_OFFSET: f64 = 6.0;
 const NOTE_HEIGHT: f64 = 40.0;
+const NOTE_SIDE_W: f64 = 140.0; // fixed width of a left/right-of note box
+const NOTE_MIN_W: f64 = 100.0; // minimum width of an `over` note box
+const NOTE_CHAR_W: f64 = 6.5; // per-glyph width estimate for note text (12px)
+const NOTE_PAD_X: f64 = 8.0; // horizontal inner padding when wrapping note text
+const NOTE_PAD_Y: f64 = 8.0; // vertical inner padding of a note box
+const NOTE_LINE_H: f64 = 16.0; // baseline spacing between wrapped note lines
 const BLOCK_TOP_GAP: f64 = 24.0;
 const BLOCK_BOTTOM_GAP: f64 = 12.0;
 const BLOCK_LABEL_W: f64 = 60.0;
@@ -161,7 +167,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     }
 
     // Activation bands (computed from activate/deactivate events).
-    draw_activations(&mut svg, &events, &x_of, lifeline_bottom);
+    draw_activations(&mut svg, &events, &x_of, lifeline_bottom, theme);
 
     // Block frames
     draw_block_frames(&mut svg, &events, &x_of, theme);

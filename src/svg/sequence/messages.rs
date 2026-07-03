@@ -77,6 +77,78 @@ pub(super) fn draw_message(
     }
 }
 
+/// Box geometry for a note: its rectangle plus the text wrapped to fit inside.
+pub(super) struct NoteGeom {
+    pub rect_x: f64,
+    pub rect_w: f64,
+    pub height: f64,
+    pub lines: Vec<String>,
+}
+
+/// Compute a note's box position, width, wrapped text lines, and height.
+/// `over` notes span their participants (with a sensible minimum); `left/right
+/// of` notes keep a fixed width. Text is word-wrapped to the box interior so
+/// long notes grow taller instead of overflowing (issue #123).
+pub(super) fn note_geometry(note: &SequenceNote, x_of: &HashMap<String, f64>) -> Option<NoteGeom> {
+    if note.participants.is_empty() {
+        return None;
+    }
+    let xs: Vec<f64> = note
+        .participants
+        .iter()
+        .filter_map(|id| x_of.get(id).copied())
+        .collect();
+    if xs.is_empty() {
+        return None;
+    }
+    let (rect_x, rect_w) = match note.position {
+        NotePosition::Over => {
+            let min_x = xs.iter().copied().fold(f64::INFINITY, f64::min);
+            let max_x = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let pad = 20.0;
+            let w = ((max_x - min_x) + pad * 2.0).max(NOTE_MIN_W);
+            let cx = (min_x + max_x) / 2.0;
+            (cx - w / 2.0, w)
+        }
+        NotePosition::RightOf => (xs[0] + 12.0, NOTE_SIDE_W),
+        NotePosition::LeftOf => (xs[0] - 12.0 - NOTE_SIDE_W, NOTE_SIDE_W),
+    };
+    let lines = wrap_note_text(&note.text, rect_w - NOTE_PAD_X * 2.0);
+    let height = (lines.len() as f64 * NOTE_LINE_H + NOTE_PAD_Y * 2.0).max(NOTE_HEIGHT);
+    Some(NoteGeom {
+        rect_x,
+        rect_w,
+        height,
+        lines,
+    })
+}
+
+/// Greedy word-wrap `text` to `max_w` pixels, honoring existing `<br>`/`\n`
+/// breaks first. Always returns at least one (possibly empty) line.
+fn wrap_note_text(text: &str, max_w: f64) -> Vec<String> {
+    let max_chars = ((max_w / NOTE_CHAR_W).floor() as usize).max(1);
+    let mut out = Vec::new();
+    for seg in crate::svg::builder::split_label_lines(text) {
+        let mut cur = String::new();
+        for word in seg.split_whitespace() {
+            if cur.is_empty() {
+                cur.push_str(word);
+            } else if cur.chars().count() + 1 + word.chars().count() <= max_chars {
+                cur.push(' ');
+                cur.push_str(word);
+            } else {
+                out.push(std::mem::take(&mut cur));
+                cur.push_str(word);
+            }
+        }
+        out.push(cur);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
 pub(super) fn draw_note(
     svg: &mut SvgBuilder,
     note: &SequenceNote,
@@ -85,48 +157,30 @@ pub(super) fn draw_note(
     theme: &Theme,
 ) {
     let fg = theme.fg;
-    if note.participants.is_empty() {
+    let note_fill = theme.note_fill;
+    let note_stroke = theme.note_stroke;
+    let Some(g) = note_geometry(note, x_of) else {
         return;
-    }
-    let xs: Vec<f64> = note
-        .participants
-        .iter()
-        .filter_map(|id| x_of.get(id).copied())
-        .collect();
-    if xs.is_empty() {
-        return;
-    }
-    let (rect_x, rect_w) = match note.position {
-        NotePosition::Over => {
-            let min_x = xs.iter().copied().fold(f64::INFINITY, f64::min);
-            let max_x = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            let pad = 20.0;
-            (min_x - pad, (max_x - min_x) + pad * 2.0)
-        }
-        NotePosition::RightOf => {
-            let x = xs[0];
-            (x + 12.0, 140.0)
-        }
-        NotePosition::LeftOf => {
-            let x = xs[0];
-            (x - 12.0 - 140.0, 140.0)
-        }
     };
-    let h = NOTE_HEIGHT;
-    let yy = y - h / 2.0;
+    let yy = y - g.height / 2.0;
     svg.rect(
-        rect_x,
+        g.rect_x,
         yy,
-        rect_w,
-        h,
-        "fill=\"#FFF5AD\" stroke=\"#aaaa33\" stroke-width=\"1\"",
+        g.rect_w,
+        g.height,
+        &format!("fill=\"{note_fill}\" stroke=\"{note_stroke}\" stroke-width=\"1\""),
     );
-    svg.text(
-        rect_x + rect_w / 2.0,
-        y + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-        &note.text,
-    );
+    let cx = g.rect_x + g.rect_w / 2.0;
+    let n = g.lines.len() as f64;
+    let y0 = y - (n - 1.0) * NOTE_LINE_H / 2.0 + 4.0;
+    for (i, line) in g.lines.iter().enumerate() {
+        svg.text(
+            cx,
+            y0 + i as f64 * NOTE_LINE_H,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+            line,
+        );
+    }
 }
 
 /// Returns `(dash, start_marker, end_marker)` for an arrow kind. Plain `->`/`-->`
@@ -189,6 +243,62 @@ mod tests {
             crate::parse::Diagram::Sequence(d) => d,
             _ => panic!("not sequence"),
         }
+    }
+
+    #[test]
+    fn short_note_stays_single_line_at_default_height() {
+        let mut x_of = HashMap::new();
+        x_of.insert("B".to_string(), 100.0);
+        let note = SequenceNote {
+            position: NotePosition::RightOf,
+            participants: vec!["B".into()],
+            text: "hi".into(),
+        };
+        let g = note_geometry(&note, &x_of).unwrap();
+        assert_eq!(g.lines, vec!["hi".to_string()]);
+        assert_eq!(g.height, NOTE_HEIGHT);
+    }
+
+    #[test]
+    fn long_note_wraps_and_grows_taller() {
+        let mut x_of = HashMap::new();
+        x_of.insert("B".to_string(), 100.0);
+        let note = SequenceNote {
+            position: NotePosition::RightOf,
+            participants: vec!["B".into()],
+            text: "the quick brown fox jumps over the lazy dog again and again".into(),
+        };
+        let g = note_geometry(&note, &x_of).unwrap();
+        assert!(g.lines.len() > 1, "long note must wrap: {:?}", g.lines);
+        assert!(g.height > NOTE_HEIGHT, "wrapped note grows taller");
+        // No wrapped line exceeds the box interior width.
+        let max_chars = ((g.rect_w - NOTE_PAD_X * 2.0) / NOTE_CHAR_W).floor() as usize;
+        assert!(g.lines.iter().all(|l| l.chars().count() <= max_chars));
+    }
+
+    #[test]
+    fn note_honors_explicit_line_breaks() {
+        let mut x_of = HashMap::new();
+        x_of.insert("A".to_string(), 100.0);
+        x_of.insert("B".to_string(), 300.0);
+        let note = SequenceNote {
+            position: NotePosition::Over,
+            participants: vec!["A".into(), "B".into()],
+            text: "first<br/>second".into(),
+        };
+        let g = note_geometry(&note, &x_of).unwrap();
+        assert_eq!(g.lines, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn note_uses_theme_fill() {
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: hi\nNote over A,B: shared\n"),
+            &Theme::dark(),
+        );
+        // Dark theme must not emit the light-yellow default note fill.
+        assert!(!svg.contains("#FFF5AD"));
+        assert!(svg.contains(Theme::dark().note_fill));
     }
 
     #[test]
