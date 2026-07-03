@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use super::super::ast::{EdgeCurve, FlowNode, FlowchartDiagram, NodeShape, Style};
 use super::super::style::parse_style_props;
+use super::super::ParseError;
 
 /// Index of the node with `id`, creating a bare rectangle placeholder if a
 /// directive references it before it is declared.
@@ -35,20 +36,28 @@ pub(super) fn handle_style(
     rest: &str,
     diag: &mut FlowchartDiagram,
     nodes_by_id: &mut HashMap<String, usize>,
-) {
-    let Some((id, props)) = rest.trim().split_once(char::is_whitespace) else {
-        return;
-    };
+    line_no: usize,
+) -> Result<(), ParseError> {
+    let (id, props) = rest
+        .trim()
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| malformed("style", line_no))?;
     let style = parse_style_props(props);
     let idx = node_index(diag, nodes_by_id, id.trim());
     diag.nodes[idx].style = style;
+    Ok(())
 }
 
 /// `classDef <name>[,<name2>] <props>` — define one or more style classes.
-pub(super) fn handle_class_def(rest: &str, diag: &mut FlowchartDiagram) {
-    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
-        return;
-    };
+pub(super) fn handle_class_def(
+    rest: &str,
+    diag: &mut FlowchartDiagram,
+    line_no: usize,
+) -> Result<(), ParseError> {
+    let (names, props) = rest
+        .trim()
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| malformed("classDef", line_no))?;
     let style = parse_style_props(props);
     for name in names.split(',') {
         let name = name.trim();
@@ -56,6 +65,7 @@ pub(super) fn handle_class_def(rest: &str, diag: &mut FlowchartDiagram) {
             diag.class_defs.insert(name.to_string(), style.clone());
         }
     }
+    Ok(())
 }
 
 /// `class <id1>,<id2> <className>` — apply a class to nodes.
@@ -63,13 +73,15 @@ pub(super) fn handle_class_apply(
     rest: &str,
     diag: &mut FlowchartDiagram,
     nodes_by_id: &mut HashMap<String, usize>,
-) {
-    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
-        return;
-    };
+    line_no: usize,
+) -> Result<(), ParseError> {
+    let (ids, class_name) = rest
+        .trim()
+        .rsplit_once(char::is_whitespace)
+        .ok_or_else(|| malformed("class", line_no))?;
     let class_name = class_name.trim();
     if class_name.is_empty() {
-        return;
+        return Err(malformed("class", line_no));
     }
     for id in ids.split(',') {
         let id = id.trim();
@@ -82,15 +94,21 @@ pub(super) fn handle_class_apply(
             classes.push(class_name.to_string());
         }
     }
+    Ok(())
 }
 
 /// `linkStyle <default|idx-list> [interpolate <curve>] <props>` — style edges
 /// by their definition index. The optional `interpolate <curve>` clause sets the
 /// edge interpolation (`linear`/`step`/…); the remaining tokens are real props.
-pub(super) fn handle_link_style(rest: &str, diag: &mut FlowchartDiagram) {
-    let Some((selector, props)) = rest.trim().split_once(char::is_whitespace) else {
-        return;
-    };
+pub(super) fn handle_link_style(
+    rest: &str,
+    diag: &mut FlowchartDiagram,
+    line_no: usize,
+) -> Result<(), ParseError> {
+    let (selector, props) = rest
+        .trim()
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| malformed("linkStyle", line_no))?;
     let mut props = props.trim();
     let mut curve = None;
     if let Some(after) = props.strip_prefix("interpolate ") {
@@ -107,7 +125,7 @@ pub(super) fn handle_link_style(rest: &str, diag: &mut FlowchartDiagram) {
         if let Some(c) = curve {
             diag.default_interpolate = Some(c);
         }
-        return;
+        return Ok(());
     }
     for idx in selector.split(',') {
         if let Ok(i) = idx.trim().parse::<usize>() {
@@ -116,6 +134,16 @@ pub(super) fn handle_link_style(rest: &str, diag: &mut FlowchartDiagram) {
                 diag.edge_interpolate.insert(i, c);
             }
         }
+    }
+    Ok(())
+}
+
+/// A `ParseError::Syntax` for a directive keyword that was recognized but whose
+/// body could not be parsed (e.g. `style` / `classDef` with no properties).
+fn malformed(keyword: &str, line_no: usize) -> ParseError {
+    ParseError::Syntax {
+        message: format!("malformed '{keyword}' statement"),
+        line: line_no,
     }
 }
 

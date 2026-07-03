@@ -245,6 +245,16 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `DiagramMeta.value_format` → `TreemapDiagram.value_format` and formats leaf
   values via `format_value`: `$` prefix, `,` thousands, `.N` decimals, `%`
   percent (the common d3-format subset).
+- **Parser unknown-line policy is hard-error everywhere.** Every diagram
+  parser (flowchart included) returns `ParseError::Syntax { line }` on an
+  unparseable statement — the honest library equivalent of upstream rendering
+  its error diagram — rather than silently dropping it, so a typo can't vanish.
+  Flowchart also errors on a recognized keyword with an incomplete body (bare
+  `style`/`classDef`/`class`/`linkStyle`/`click`, unknown `direction` token).
+  Two deliberate tolerances remain (documented in
+  `src/parse/flowchart/mod.rs`): a top-level `direction` is a validated no-op,
+  and unknown keys / `shape:` names inside a v11 `id@{ … }` block fall back to
+  `Rect` for forward compatibility.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `;` is a **statement terminator/separator** anywhere a newline is
