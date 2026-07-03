@@ -190,8 +190,7 @@ fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
 fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme: &Theme) {
     let fg = theme.fg;
     let flow_label_bg = theme.flow_label_bg;
-    let chars = text.chars().count() as f64;
-    let w = chars * 7.0 + 8.0;
+    let w = crate::svg::metrics::text_width(text, 7.0, theme.font_size) + 8.0;
     let h = 18.0;
     svg.rect(
         mx - w / 2.0,

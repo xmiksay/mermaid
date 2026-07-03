@@ -277,7 +277,7 @@ fn sibling_boundaries_do_not_overlap() {
         ),
     ];
 
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW);
+    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
     let mut pos = HashMap::new();
     let mut boundaries = Vec::new();
     let mut leaves = Vec::new();
@@ -304,7 +304,7 @@ fn boundary_contains_its_members() {
         C4BoundaryKind::Deployment,
         vec![person("x", "X"), person("y", "Y")],
     )];
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW);
+    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
     let mut pos = HashMap::new();
     let mut boundaries = Vec::new();
     let mut leaves = Vec::new();
@@ -418,7 +418,7 @@ fn layout_config_controls_shapes_per_row() {
     // With shape_in_row = 1 the two shapes stack vertically; default (4)
     // would place them on the same row. Verify the override changes layout.
     let elements = vec![person("a", "A"), person("b", "B")];
-    let (nodes, _, _) = flow_layout(&elements, 1, BOUNDARY_IN_ROW);
+    let (nodes, _, _) = flow_layout(&elements, 1, BOUNDARY_IN_ROW, 14.0);
     assert_eq!(nodes.len(), 2);
     assert!(
         nodes[1].y > nodes[0].y,

@@ -67,7 +67,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let sizes: Vec<(f64, f64)> = d
         .participants
         .iter()
-        .map(|p| actor_size(&p.display))
+        .map(|p| actor_size(&p.display, theme.font_size))
         .collect();
     let actor_h = sizes.iter().map(|s| s.1).fold(ACTOR_H, f64::max);
 

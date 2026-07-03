@@ -8,6 +8,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, fnum, SvgBuilder};
 use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
+use super::metrics::text_width;
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -31,7 +32,11 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     }
 
     let dir = d.direction;
-    let sizes: Vec<(f64, f64)> = d.states.iter().map(state_size).collect();
+    let sizes: Vec<(f64, f64)> = d
+        .states
+        .iter()
+        .map(|s| state_size(s, theme.font_size))
+        .collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .states
         .iter()
@@ -178,7 +183,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 const CHOICE_W: f64 = 60.0;
 const CHOICE_H: f64 = 40.0;
 
-fn state_size(s: &State) -> (f64, f64) {
+fn state_size(s: &State, font_size: f64) -> (f64, f64) {
     match s.kind {
         StateKind::Start | StateKind::End | StateKind::History { .. } => {
             (PSEUDO_R * 2.0, PSEUDO_R * 2.0)
@@ -186,8 +191,7 @@ fn state_size(s: &State) -> (f64, f64) {
         StateKind::Choice => (CHOICE_W, CHOICE_H),
         StateKind::Fork | StateKind::Join => (80.0, 12.0),
         StateKind::Normal => {
-            let n = s.label.chars().count() as f64;
-            let w = (n * CHAR_W + PAD_X * 2.0).max(MIN_W);
+            let w = (text_width(&s.label, CHAR_W, font_size) + PAD_X * 2.0).max(MIN_W);
             let h = (LINE_H + PAD_Y * 2.0).max(MIN_H);
             (w, h)
         }
@@ -325,8 +329,7 @@ fn draw_transition(
     );
     if let Some(label) = &tr.label {
         let mid = polyline_midpoint(&clipped);
-        let chars = label.chars().count() as f64;
-        let w = chars * 7.0 + 8.0;
+        let w = text_width(label, 7.0, theme.font_size) + 8.0;
         let h = 18.0;
         svg.rect(
             mid.0 - w / 2.0,

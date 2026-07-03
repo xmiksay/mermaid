@@ -6,6 +6,7 @@ use crate::parse::{FlowNode, FlowchartDiagram, NodeShape, Style, Subgraph};
 
 use crate::svg::builder::{fnum, split_label_lines, SvgBuilder};
 use crate::svg::interact::{close_click, open_click};
+use crate::svg::metrics::{font_scale, text_width};
 use crate::svg::style::resolve_style;
 use crate::svg::theme::Theme;
 
@@ -13,11 +14,14 @@ use super::{CHAR_W, LINE_H, MIN_H, MIN_W, PAD_X, PAD_Y, SUBGRAPH_PAD};
 
 // ---- node sizing & drawing -------------------------------------------------
 
-pub(super) fn node_size(n: &FlowNode) -> (f64, f64) {
+pub(super) fn node_size(n: &FlowNode, font_size: f64) -> (f64, f64) {
     let lines = split_label_lines(&n.text);
-    let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    let w = (max_chars as f64 * CHAR_W + PAD_X * 2.0).max(MIN_W);
-    let h = (lines.len() as f64 * LINE_H + PAD_Y * 2.0).max(MIN_H);
+    let widest = lines
+        .iter()
+        .map(|l| text_width(l, CHAR_W, font_size))
+        .fold(0.0_f64, f64::max);
+    let w = (widest + PAD_X * 2.0).max(MIN_W);
+    let h = (lines.len() as f64 * LINE_H * font_scale(font_size) + PAD_Y * 2.0).max(MIN_H);
     match n.shape {
         NodeShape::Circle | NodeShape::DoubleCircle => {
             let d = w.max(h);

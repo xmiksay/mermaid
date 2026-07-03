@@ -74,8 +74,7 @@ pub(super) fn draw_relation(
 
     if let Some(label) = &rel.label {
         let mid = polyline_midpoint(&clipped);
-        let chars = label.chars().count() as f64;
-        let w = chars * 7.0 + 8.0;
+        let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
         let h = 16.0;
         svg.rect(
             mid.0 - w / 2.0,

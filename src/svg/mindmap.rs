@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 use crate::parse::{MindmapDiagram, MindmapNode, MindmapShape};
 
 use super::builder::{fnum, SvgBuilder};
+use super::metrics::text_width;
 use super::theme::Theme;
 
 const NODE_PAD_X: f64 = 12.0;
@@ -40,7 +41,7 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     };
 
     // Layout: assign each subtree a vertical band, then root.x = 0, children to the right.
-    let mut laid = layout(&root, 0);
+    let mut laid = layout(&root, 0, theme.font_size);
     let total_h = laid.subtree_h;
     shift(&mut laid, 30.0, 30.0 + total_h / 2.0);
 
@@ -56,10 +57,14 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-fn layout(n: &MindmapNode, depth: usize) -> Laid {
-    let w = (n.text.chars().count() as f64) * TEXT_PX + NODE_PAD_X * 2.0;
+fn layout(n: &MindmapNode, depth: usize, font_size: f64) -> Laid {
+    let w = text_width(&n.text, TEXT_PX, font_size) + NODE_PAD_X * 2.0;
     let w = w.max(40.0);
-    let mut children: Vec<Laid> = n.children.iter().map(|c| layout(c, depth + 1)).collect();
+    let mut children: Vec<Laid> = n
+        .children
+        .iter()
+        .map(|c| layout(c, depth + 1, font_size))
+        .collect();
     let mut total = 0.0;
     for (i, c) in children.iter().enumerate() {
         total += c.subtree_h;
