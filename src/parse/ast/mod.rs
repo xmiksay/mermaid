@@ -80,6 +80,12 @@ pub struct DiagramMeta {
     /// `config.treemap.valueFormat` from frontmatter — copied onto a
     /// [`TreemapDiagram`] to format leaf values.
     pub value_format: Option<String>,
+    /// `config.sankey.linkColor` from frontmatter — copied onto a
+    /// [`SankeyDiagram`] to tint links.
+    pub sankey_link_color: Option<String>,
+    /// `config.sankey.nodeAlignment` from frontmatter — copied onto a
+    /// [`SankeyDiagram`] to drive column alignment.
+    pub sankey_node_alignment: Option<String>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
     /// The whole `config:` tree flattened to dotted `key → value` entries

@@ -299,6 +299,8 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.security_level = get("securityLevel");
     meta.ticket_base_url = get("kanban.ticketBaseUrl");
     meta.value_format = get("treemap.valueFormat");
+    meta.sankey_link_color = get("sankey.linkColor");
+    meta.sankey_node_alignment = get("sankey.nodeAlignment");
 
     for (k, v) in &meta.config {
         if let Some(name) = k.strip_prefix("themeVariables.") {
