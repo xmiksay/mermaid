@@ -96,7 +96,7 @@ The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards |
 | Treemap | `treemap-beta`, `treemap` | nested weighted rectangles |
-| ZenUML | `zenuml` | rendered via the sequence renderer |
+| ZenUML | `zenuml` | annotators, method calls, nesting braces, `return`, if/while/opt/par/try; rendered via the sequence renderer |
 
 ### Cross-cutting features
 

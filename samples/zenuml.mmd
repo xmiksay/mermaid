@@ -1,8 +1,17 @@
 zenuml
-    title Auth flow
-    Browser -> Server: GET /login
-    Server ->> Browser: 200 OK
-    Browser -> Server: POST /login
-    Server -> DB: SELECT user
-    DB ->> Server: row
-    Server ->> Browser: 200 OK with cookie
+    title Login flow
+    @Actor User
+    @Boundary Page
+    @Control Auth
+    @Database DB
+    User -> Page.login(name, pass) {
+        Auth.verify(name, pass) {
+            found = DB.query(name)
+            if (found) {
+                return token
+            } else {
+                return denied
+            }
+        }
+        Page.render()
+    }

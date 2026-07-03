@@ -502,3 +502,24 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   raw Font Awesome class string — `draw_mindmap_icon` maps `icon_name()` (the last
   `fa-`-prefixed token) onto a small builtin glyph set (book/star/clock/user/cog/
   cloud/database/check/heart), unknown names falling back to a generic tag glyph.
+- zenuml (`src/parse/zenuml.rs`) is a **brace-structured** translation to a
+  `SequenceDiagram` (reuses the sequence renderer). After the `zenuml` header the
+  body is `tokenize`d into `{`/`}`/statement `Tok`s (braces inside `(…)`/quotes
+  stay literal; `\n`/`;` end statements; `//` and `%%` are comments), then a
+  recursive `Parser::parse_items(ctx, ret)` walks them. `ctx` is the current
+  caller (the enclosing method's *receiver*, or the top-level starter); `ret` is
+  who a `return` replies to.
+  - Annotators: `@Actor X` declares an actor, any other `@Type X` a participant,
+    `@Starter(X)` sets the top-level caller. A bare/`A.method()` call with no
+    explicit `A -> B` source originates from the starter — a synthetic `Starter`
+    lane, created lazily, when none is declared.
+  - Method calls carry a context: `Recv.method()` → `ctx -> Recv`, `method()`
+    (no dot) is a self-call on `ctx`. A `{ … }` body after a call runs in the
+    receiver's context and, on close, draws an implicit dashed **return** to the
+    caller; an `x = call()` assignment draws a dashed return labeled `x`
+    (self-calls get no return arrow).
+  - `return`/`@return <v>` emits a dashed reply from `ctx` to `ret`. Control
+    structures map onto existing `SequenceItem` frames: `if/else if/else` →
+    `Alt`, `while/for/loop` → `Loop`, `opt` → `Opt`, `par` → `Par`,
+    `try/catch/finally` → `Critical` (catch/finally as option branches). The
+    `else`/`catch`/`finally` chain tokens are consumed by their opener's handler.
