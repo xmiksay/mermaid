@@ -160,10 +160,9 @@ pub(super) fn parse_arrow(
 
     sc.skip_ws();
     let label = if sc.try_consume("|") {
-        let txt = sc.read_until("|").ok_or_else(|| ParseError::Syntax {
-            message: "unclosed edge label".into(),
-            line: line_no,
-        })?;
+        let txt = sc
+            .read_until("|")
+            .ok_or_else(|| ParseError::unclosed(line_no, "unclosed edge label"))?;
         sc.try_consume("|");
         Some(unquote(txt.trim()).to_string())
     } else if head == EdgeHead::None && opener_len == 2 {

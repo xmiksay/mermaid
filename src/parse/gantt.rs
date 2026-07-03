@@ -33,10 +33,7 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
 
         if !header_seen {
             if line != "gantt" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'gantt' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'gantt' header"));
             }
             header_seen = true;
             continue;
@@ -101,10 +98,10 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
         let (name, fields) = match line.split_once(':') {
             Some(t) => t,
             None => {
-                return Err(ParseError::Syntax {
-                    message: format!("unrecognized gantt line: '{line}'"),
-                    line: line_no,
-                });
+                return Err(ParseError::unknown(
+                    line_no,
+                    format!("unrecognized gantt line: '{line}'"),
+                ));
             }
         };
 
@@ -142,10 +139,10 @@ fn parse_task(
 ) -> Result<GanttTask, ParseError> {
     let parts: Vec<&str> = fields.split(',').map(str::trim).collect();
     if parts.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "task needs at least an end (<duration>/<end date>/until <id>)".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(
+            line_no,
+            "task needs at least an end (<duration>/<end date>/until <id>)",
+        ));
     }
 
     let mut status = TaskStatus::Normal;
@@ -198,10 +195,10 @@ fn parse_task(
         // previous task's end.
         [only] => (TaskStart::AfterPrevious, parse_end(only, line_no)?),
         [] => {
-            return Err(ParseError::Syntax {
-                message: "missing task end (<duration>/<end date>/until <id>)".into(),
-                line: line_no,
-            });
+            return Err(ParseError::malformed(
+                line_no,
+                "missing task end (<duration>/<end date>/until <id>)",
+            ));
         }
     };
 
@@ -246,10 +243,10 @@ fn parse_end(s: &str, line_no: usize) -> Result<TaskEnd, ParseError> {
     } else if looks_like_date(s) {
         Ok(TaskEnd::Date(s.to_string()))
     } else {
-        Err(ParseError::Syntax {
-            message: format!("cannot parse task end: '{s}'"),
-            line: line_no,
-        })
+        Err(ParseError::number(
+            line_no,
+            format!("cannot parse task end: '{s}'"),
+        ))
     }
 }
 

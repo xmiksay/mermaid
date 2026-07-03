@@ -19,10 +19,7 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
         }
         if !header_seen {
             if content.trim() != "mindmap" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'mindmap' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'mindmap' header"));
             }
             header_seen = true;
             continue;

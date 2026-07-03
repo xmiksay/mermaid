@@ -128,10 +128,8 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("click ") {
-            let (id, action) = parse_click(rest).ok_or_else(|| ParseError::Syntax {
-                message: "malformed 'click' statement".into(),
-                line: line_no,
-            })?;
+            let (id, action) = parse_click(rest)
+                .ok_or_else(|| ParseError::malformed(line_no, "malformed 'click' statement"))?;
             let idx = node_index(&mut diag, &mut nodes_by_id, &id);
             diag.nodes[idx].click = Some(action);
             continue;
@@ -141,9 +139,8 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
             // report), but a `direction X` only takes effect inside a subgraph
             // body — at top level the header already set the diagram direction,
             // so upstream treats it as a no-op.
-            let dir = parse_direction(rest.trim()).ok_or_else(|| ParseError::Syntax {
-                message: format!("unknown direction: '{}'", rest.trim()),
-                line: line_no,
+            let dir = parse_direction(rest.trim()).ok_or_else(|| {
+                ParseError::unknown(line_no, format!("unknown direction: '{}'", rest.trim()))
             })?;
             if let Some(&parent) = subgraph_stack.last() {
                 diag.subgraphs[parent].direction = Some(dir);
@@ -258,22 +255,21 @@ fn parse_header(line: &str, diag: &mut FlowchartDiagram, line_no: usize) -> Resu
     } else if let Some(r) = line.strip_prefix("graph") {
         r
     } else {
-        return Err(ParseError::Syntax {
-            message: "expected 'flowchart' or 'graph' header".into(),
-            line: line_no,
-        });
+        return Err(ParseError::header(
+            line_no,
+            "expected 'flowchart' or 'graph' header",
+        ));
     };
     if let Some(c) = rest.chars().next() {
         if !c.is_whitespace() {
-            return Err(ParseError::Syntax {
-                message: "expected 'flowchart' or 'graph' header".into(),
-                line: line_no,
-            });
+            return Err(ParseError::header(
+                line_no,
+                "expected 'flowchart' or 'graph' header",
+            ));
         }
     }
-    diag.direction = parse_direction(rest.trim()).ok_or_else(|| ParseError::Syntax {
-        message: format!("unknown direction: '{}'", rest.trim()),
-        line: line_no,
+    diag.direction = parse_direction(rest.trim()).ok_or_else(|| {
+        ParseError::unknown(line_no, format!("unknown direction: '{}'", rest.trim()))
     })?;
     Ok(())
 }

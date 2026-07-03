@@ -35,10 +35,7 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
 
         if !header_seen {
             if line != "timeline" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'timeline' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'timeline' header"));
             }
             header_seen = true;
             continue;
@@ -57,10 +54,10 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix(':') {
             let events = parse_events(rest);
             if events.is_empty() {
-                return Err(ParseError::Syntax {
-                    message: "continuation line has no events".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::malformed(
+                    line_no,
+                    "continuation line has no events",
+                ));
             }
             let periods = match &mut current {
                 Some(s) => &mut s.periods,
@@ -69,10 +66,10 @@ pub(crate) fn parse(input: &str) -> Result<TimelineDiagram, ParseError> {
             match periods.last_mut() {
                 Some(period) => period.events.extend(events),
                 None => {
-                    return Err(ParseError::Syntax {
-                        message: "continuation line before any period".into(),
-                        line: line_no,
-                    });
+                    return Err(ParseError::malformed(
+                        line_no,
+                        "continuation line before any period",
+                    ));
                 }
             }
         } else {
@@ -102,17 +99,14 @@ fn parse_period(line: &str, line_no: usize) -> Result<TimelinePeriod, ParseError
         None => (line.trim().to_string(), ""),
     };
     if label.is_empty() {
-        return Err(ParseError::Syntax {
-            message: "empty period label".into(),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(line_no, "empty period label"));
     }
     let events = parse_events(rest);
     if events.is_empty() {
-        return Err(ParseError::Syntax {
-            message: format!("period '{label}' has no events"),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(
+            line_no,
+            format!("period '{label}' has no events"),
+        ));
     }
     Ok(TimelinePeriod { label, events })
 }

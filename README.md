@@ -167,6 +167,11 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
 pub use ast;  // all AST types: ArrowKind, FlowNode, ClassMember, DiagramMeta, ...
 ```
 
+`ParseError::Syntax` carries a `kind: SyntaxKind` (`MissingHeader`,
+`UnknownStatement`, `InvalidNumber`, `Unclosed`, `Malformed`) alongside the
+human-readable `message`, so callers can branch on the class of failure without
+string-matching. Both `ParseError` and `RenderError` are `#[non_exhaustive]`.
+
 ## Implementation notes
 
 - Layered diagrams (flowchart, state, class, ER) go through a built-in

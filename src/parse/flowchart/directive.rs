@@ -141,10 +141,7 @@ pub(super) fn handle_link_style(
 /// A `ParseError::Syntax` for a directive keyword that was recognized but whose
 /// body could not be parsed (e.g. `style` / `classDef` with no properties).
 fn malformed(keyword: &str, line_no: usize) -> ParseError {
-    ParseError::Syntax {
-        message: format!("malformed '{keyword}' statement"),
-        line: line_no,
-    }
+    ParseError::malformed(line_no, format!("malformed '{keyword}' statement"))
 }
 
 #[cfg(test)]

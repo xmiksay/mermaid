@@ -31,10 +31,7 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
 
         if !header_seen {
             if line != "erDiagram" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'erDiagram' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'erDiagram' header"));
             }
             header_seen = true;
             continue;
@@ -59,10 +56,10 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
                 "LR" => FlowDirection::LeftRight,
                 "RL" => FlowDirection::RightLeft,
                 other => {
-                    return Err(ParseError::Syntax {
-                        message: format!("unknown direction: '{other}'"),
-                        line: line_no,
-                    })
+                    return Err(ParseError::unknown(
+                        line_no,
+                        format!("unknown direction: '{other}'"),
+                    ))
                 }
             };
             continue;
@@ -91,10 +88,10 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
             continue;
         }
 
-        return Err(ParseError::Syntax {
-            message: format!("unrecognized ER statement: '{line}'"),
-            line: line_no,
-        });
+        return Err(ParseError::unknown(
+            line_no,
+            format!("unrecognized ER statement: '{line}'"),
+        ));
     }
 
     if !header_seen {

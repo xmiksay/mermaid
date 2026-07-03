@@ -31,10 +31,7 @@ pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
             let rest = line
                 .strip_prefix("xychart-beta")
                 .or_else(|| line.strip_prefix("xychart"))
-                .ok_or_else(|| ParseError::Syntax {
-                    message: "expected 'xychart-beta' header".into(),
-                    line: line_no,
-                })?;
+                .ok_or_else(|| ParseError::header(line_no, "expected 'xychart-beta' header"))?;
             d.horizontal = rest.trim() == "horizontal";
             header_seen = true;
             continue;
@@ -61,10 +58,10 @@ pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
                 values,
             });
         } else {
-            return Err(ParseError::Syntax {
-                message: format!("unknown xychart line: '{line}'"),
-                line: line_no,
-            });
+            return Err(ParseError::unknown(
+                line_no,
+                format!("unknown xychart line: '{line}'"),
+            ));
         }
     }
 
@@ -77,23 +74,20 @@ pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
 fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
     let rest = rest.trim();
     let (title, body) = if let Some(after) = rest.strip_prefix('"') {
-        let end = after.find('"').ok_or_else(|| ParseError::Syntax {
-            message: "unterminated string in axis".into(),
-            line: line_no,
-        })?;
+        let end = after
+            .find('"')
+            .ok_or_else(|| ParseError::unclosed(line_no, "unterminated string in axis"))?;
         (Some(after[..end].to_string()), after[end + 1..].trim())
     } else {
         (None, rest)
     };
     let kind = if body.contains("-->") {
         let (lo, hi) = body.split_once("-->").unwrap();
-        let min: f64 = lo.trim().parse().map_err(|_| ParseError::Syntax {
-            message: format!("invalid axis min: '{}'", lo.trim()),
-            line: line_no,
+        let min: f64 = lo.trim().parse().map_err(|_| {
+            ParseError::number(line_no, format!("invalid axis min: '{}'", lo.trim()))
         })?;
-        let max: f64 = hi.trim().parse().map_err(|_| ParseError::Syntax {
-            message: format!("invalid axis max: '{}'", hi.trim()),
-            line: line_no,
+        let max: f64 = hi.trim().parse().map_err(|_| {
+            ParseError::number(line_no, format!("invalid axis max: '{}'", hi.trim()))
         })?;
         XyAxisKind::Range { min, max }
     } else if body.starts_with('[') {
@@ -108,10 +102,10 @@ fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
     } else if body.is_empty() {
         XyAxisKind::Categories(Vec::new())
     } else {
-        return Err(ParseError::Syntax {
-            message: format!("invalid axis body: '{body}'"),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(
+            line_no,
+            format!("invalid axis body: '{body}'"),
+        ));
     };
     Ok(XyAxis { title, kind })
 }
@@ -121,10 +115,9 @@ fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
 fn parse_series(rest: &str, line_no: usize) -> Result<(Option<String>, Vec<f64>), ParseError> {
     let rest = rest.trim();
     let (title, list) = if let Some(after) = rest.strip_prefix('"') {
-        let end = after.find('"').ok_or_else(|| ParseError::Syntax {
-            message: "unterminated string in series title".into(),
-            line: line_no,
-        })?;
+        let end = after
+            .find('"')
+            .ok_or_else(|| ParseError::unclosed(line_no, "unterminated string in series title"))?;
         (Some(after[..end].to_string()), after[end + 1..].trim())
     } else {
         (None, rest)
@@ -140,10 +133,9 @@ fn parse_value_list(rest: &str, line_no: usize) -> Result<Vec<f64>, ParseError> 
         if s.is_empty() {
             continue;
         }
-        let v: f64 = s.parse().map_err(|_| ParseError::Syntax {
-            message: format!("invalid value: '{s}'"),
-            line: line_no,
-        })?;
+        let v: f64 = s
+            .parse()
+            .map_err(|_| ParseError::number(line_no, format!("invalid value: '{s}'")))?;
         out.push(v);
     }
     Ok(out)

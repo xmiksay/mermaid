@@ -28,10 +28,10 @@ pub(crate) fn parse(input: &str) -> Result<ArchitectureDiagram, ParseError> {
 
         if !header_seen {
             if line != "architecture-beta" && line != "architecture" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'architecture-beta' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(
+                    line_no,
+                    "expected 'architecture-beta' header",
+                ));
             }
             header_seen = true;
             continue;
@@ -125,10 +125,10 @@ fn parse_edge(line: &str, line_no: usize) -> Result<ArchEdge, ParseError> {
     let pat = if line.contains("--") {
         "--"
     } else {
-        return Err(ParseError::Syntax {
-            message: format!("expected '--' edge: '{line}'"),
-            line: line_no,
-        });
+        return Err(ParseError::malformed(
+            line_no,
+            format!("expected '--' edge: '{line}'"),
+        ));
     };
     let (left, right) = line.split_once(pat).unwrap();
     let mut left = left.trim();

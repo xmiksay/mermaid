@@ -46,10 +46,10 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
 
         if !header_seen {
             if line != "requirementDiagram" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'requirementDiagram' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(
+                    line_no,
+                    "expected 'requirementDiagram' header",
+                ));
             }
             header_seen = true;
             continue;
@@ -58,9 +58,8 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
         // v11 statements: consume them instead of falling through to the
         // relation parser (which would hard-error the whole diagram).
         if let Some(rest) = line.strip_prefix("direction ") {
-            d.direction = parse_direction(rest.trim()).ok_or_else(|| ParseError::Syntax {
-                message: format!("unknown direction: '{}'", rest.trim()),
-                line: line_no,
+            d.direction = parse_direction(rest.trim()).ok_or_else(|| {
+                ParseError::unknown(line_no, format!("unknown direction: '{}'", rest.trim()))
             })?;
             continue;
         }
@@ -81,9 +80,8 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
             let after_kind = &line[kind_token_len(line)..].trim_start();
             let rest = after_kind;
             // <name> {
-            let open = rest.find('{').ok_or_else(|| ParseError::Syntax {
-                message: format!("expected '{{' in '{line}'"),
-                line: line_no,
+            let open = rest.find('{').ok_or_else(|| {
+                ParseError::unclosed(line_no, format!("expected '{{' in '{line}'"))
             })?;
             let name = rest[..open].trim().to_string();
             let mut req = Requirement {
@@ -98,9 +96,8 @@ pub(crate) fn parse(input: &str) -> Result<RequirementDiagram, ParseError> {
             d.requirements.push(req);
         } else if let Some(rest) = line.strip_prefix("element") {
             let rest = rest.trim_start();
-            let open = rest.find('{').ok_or_else(|| ParseError::Syntax {
-                message: format!("expected '{{' in '{line}'"),
-                line: line_no,
+            let open = rest.find('{').ok_or_else(|| {
+                ParseError::unclosed(line_no, format!("expected '{{' in '{line}'"))
             })?;
             let name = rest[..open].trim().to_string();
             let mut el = ReqElement {
@@ -265,9 +262,8 @@ fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError>
     //   forward: {src} - {kind} -> {dst}
     //   reverse: {dst} <- {kind} - {src}
     if let Some((dst, rest)) = line.split_once("<-") {
-        let (kind_str, src) = rest.rsplit_once('-').ok_or_else(|| ParseError::Syntax {
-            message: format!("expected 'b <- kind - a': '{line}'"),
-            line: line_no,
+        let (kind_str, src) = rest.rsplit_once('-').ok_or_else(|| {
+            ParseError::malformed(line_no, format!("expected 'b <- kind - a': '{line}'"))
         })?;
         let kind = parse_relation_kind(kind_str, line_no)?;
         return Ok(ReqRelation {
@@ -277,13 +273,11 @@ fn parse_relation(line: &str, line_no: usize) -> Result<ReqRelation, ParseError>
         });
     }
 
-    let (left, to) = line.split_once("->").ok_or_else(|| ParseError::Syntax {
-        message: format!("expected 'a - kind -> b': '{line}'"),
-        line: line_no,
+    let (left, to) = line.split_once("->").ok_or_else(|| {
+        ParseError::malformed(line_no, format!("expected 'a - kind -> b': '{line}'"))
     })?;
-    let (from, kind_str) = left.rsplit_once('-').ok_or_else(|| ParseError::Syntax {
-        message: format!("expected 'a - kind -> b': '{line}'"),
-        line: line_no,
+    let (from, kind_str) = left.rsplit_once('-').ok_or_else(|| {
+        ParseError::malformed(line_no, format!("expected 'a - kind -> b': '{line}'"))
     })?;
     let from = from.trim().trim_end_matches('-').trim().to_string();
     let kind = parse_relation_kind(kind_str, line_no)?;
@@ -304,10 +298,10 @@ fn parse_relation_kind(kind_str: &str, line_no: usize) -> Result<ReqRelationKind
         "refines" => ReqRelationKind::Refines,
         "traces" => ReqRelationKind::Traces,
         k => {
-            return Err(ParseError::Syntax {
-                message: format!("unknown relation kind '{k}'"),
-                line: line_no,
-            })
+            return Err(ParseError::unknown(
+                line_no,
+                format!("unknown relation kind '{k}'"),
+            ))
         }
     })
 }

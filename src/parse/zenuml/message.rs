@@ -113,11 +113,10 @@ impl Parser {
         // A top-level `return` has no caller to reply to — an author error.
         let Some(target) = ret else {
             if self.error.is_none() {
-                self.error = Some(ParseError::Syntax {
-                    message: "`return` outside of a method-call body has no caller to reply to"
-                        .into(),
+                self.error = Some(ParseError::malformed(
                     line,
-                });
+                    "`return` outside of a method-call body has no caller to reply to",
+                ));
             }
             return;
         };

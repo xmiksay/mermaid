@@ -45,10 +45,10 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
 
         if !header_seen {
             if !(line == "stateDiagram" || line == "stateDiagram-v2") {
-                return Err(ParseError::Syntax {
-                    message: "expected 'stateDiagram' or 'stateDiagram-v2' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(
+                    line_no,
+                    "expected 'stateDiagram' or 'stateDiagram-v2' header",
+                ));
             }
             header_seen = true;
             continue;
@@ -131,10 +131,10 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
                 "LR" => FlowDirection::LeftRight,
                 "RL" => FlowDirection::RightLeft,
                 other => {
-                    return Err(ParseError::Syntax {
-                        message: format!("unknown direction: '{other}'"),
-                        line: line_no,
-                    })
+                    return Err(ParseError::unknown(
+                        line_no,
+                        format!("unknown direction: '{other}'"),
+                    ))
                 }
             };
             continue;
@@ -189,10 +189,10 @@ pub(crate) fn parse(input: &str) -> Result<StateDiagram, ParseError> {
             continue;
         }
 
-        return Err(ParseError::Syntax {
-            message: format!("unrecognized state statement: '{line}'"),
-            line: line_no,
-        });
+        return Err(ParseError::unknown(
+            line_no,
+            format!("unrecognized state statement: '{line}'"),
+        ));
     }
 
     if !header_seen {

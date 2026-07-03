@@ -26,10 +26,7 @@ pub(crate) fn parse(input: &str) -> Result<SankeyDiagram, ParseError> {
 
         if !header_seen {
             if line != "sankey-beta" && line != "sankey" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'sankey-beta' header".into(),
-                    line: line_no,
-                });
+                return Err(ParseError::header(line_no, "expected 'sankey-beta' header"));
             }
             header_seen = true;
             continue;
@@ -45,15 +42,14 @@ pub(crate) fn parse(input: &str) -> Result<SankeyDiagram, ParseError> {
 
         let fields: Vec<String> = split_csv(line);
         if fields.len() < 3 {
-            return Err(ParseError::Syntax {
-                message: format!("expected 'source,target,value': '{line}'"),
-                line: line_no,
-            });
+            return Err(ParseError::malformed(
+                line_no,
+                format!("expected 'source,target,value': '{line}'"),
+            ));
         }
-        let value: f64 = fields[2].parse().map_err(|_| ParseError::Syntax {
-            message: format!("invalid value: '{}'", fields[2]),
-            line: line_no,
-        })?;
+        let value: f64 = fields[2]
+            .parse()
+            .map_err(|_| ParseError::number(line_no, format!("invalid value: '{}'", fields[2])))?;
         d.links.push(SankeyLink {
             source: fields[0].clone(),
             target: fields[1].clone(),

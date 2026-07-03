@@ -12,7 +12,7 @@ src/
 ├── bin/
 │   └── mermaid-svg.rs   CLI (stdin/file → stdout/file, --theme/-f|--font/--font-size flags)
 ├── parse/           Mermaid source → Diagram AST (line-oriented scanners)
-│   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError, ast re-export
+│   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError + SyntaxKind, ast re-export
 │   ├── ast/         all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta —
 │   │                mod + block/c4/charts/class/er/flowchart/gantt/sequence/state/structure
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
@@ -94,7 +94,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (472 tests: 458 lib + 13 integration + 1 doctest)
+cargo test               # unit + integration + doctest (555 tests: 539 lib + 15 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -162,7 +162,12 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
 - Tests: unit tests in `#[cfg(test)] mod tests` at the end of each file;
   end-to-end tests in `tests/integration.rs`; private-API sugiyama tests in
   `src/sugiyama/tests.rs`.
-- Errors via `thiserror`. No stringly-typed errors.
+- Errors via `thiserror`. No stringly-typed errors. `ParseError::Syntax`
+  carries a typed `kind: SyntaxKind` (`MissingHeader`/`UnknownStatement`/
+  `InvalidNumber`/`Unclosed`/`Malformed`) beside the free-form `message`;
+  construct it through the `ParseError::{header,unknown,number,unclosed,
+  malformed}(line, msg)` helpers rather than the raw struct literal so the
+  classification stays consistent.
 - Every public `ast::*` enum is `#[non_exhaustive]` so adding a diagram kind,
   shape, or variant stays a minor release. Keep new public AST enums marked
   the same way; downstream `match`es must carry a `_` arm.
