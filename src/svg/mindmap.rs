@@ -1,4 +1,4 @@
-//! Mindmap renderer. Radial layout from a central root.
+//! Mindmap renderer. Two-sided layout fanning out from a central root.
 
 use std::fmt::Write as _;
 
@@ -23,6 +23,8 @@ struct Laid {
     h: f64,
     children: Vec<Laid>,
     subtree_h: f64,
+    /// +1 for a branch growing to the right of the root, -1 for the left.
+    dir: f64,
 }
 
 pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
@@ -40,14 +42,46 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
         return svg.finish();
     };
 
-    // Layout: assign each subtree a vertical band, then root.x = 0, children to the right.
-    let mut laid = layout(&root, 0, theme.font_size);
-    let total_h = laid.subtree_h;
-    shift(&mut laid, 30.0, 30.0 + total_h / 2.0);
+    // Lay out each first-level branch as a canonical right-growing subtree, then
+    // alternate them onto the right and left of the root (a back-to-back pair of
+    // half-trees) so the map fans out on both sides instead of only rightward.
+    let font_size = theme.font_size;
+    let root_w = node_width(&root.text, font_size);
+    let mut right: Vec<Laid> = Vec::new();
+    let mut left: Vec<Laid> = Vec::new();
+    for (i, c) in root.children.iter().enumerate() {
+        let branch = layout(c, 1, font_size);
+        if i % 2 == 0 {
+            right.push(branch);
+        } else {
+            left.push(branch);
+        }
+    }
+    stack_group(&mut right);
+    for l in &mut left {
+        mirror(l, root_w);
+    }
+    stack_group(&mut left);
 
-    let (max_x, max_y) = bbox(&laid);
-    let width = max_x + 30.0;
-    let height = (max_y + 30.0).max(total_h + 60.0);
+    let mut children = right;
+    children.extend(left);
+    let mut laid = Laid {
+        node: root.clone(),
+        x: 0.0,
+        y: 0.0,
+        w: root_w,
+        h: NODE_H,
+        children,
+        subtree_h: 0.0,
+        dir: 1.0,
+    };
+
+    // Frame the whole tree (both sides plus icons) and shift into positive space.
+    let margin = 30.0;
+    let (min_x, min_y, max_x, max_y) = bounds(&laid);
+    shift(&mut laid, margin - min_x, margin - min_y);
+    let width = (max_x - min_x) + margin * 2.0;
+    let height = (max_y - min_y) + margin * 2.0;
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
@@ -57,28 +91,18 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
+fn node_width(text: &str, font_size: f64) -> f64 {
+    (text_width(text, TEXT_PX, font_size) + NODE_PAD_X * 2.0).max(40.0)
+}
+
 fn layout(n: &MindmapNode, depth: usize, font_size: f64) -> Laid {
-    let w = text_width(&n.text, TEXT_PX, font_size) + NODE_PAD_X * 2.0;
-    let w = w.max(40.0);
+    let w = node_width(&n.text, font_size);
     let mut children: Vec<Laid> = n
         .children
         .iter()
         .map(|c| layout(c, depth + 1, font_size))
         .collect();
-    let mut total = 0.0;
-    for (i, c) in children.iter().enumerate() {
-        total += c.subtree_h;
-        if i + 1 < n.children.len() {
-            total += SIBLING_GAP;
-        }
-    }
-    let subtree_h = total.max(NODE_H);
-    let mut cursor = -subtree_h / 2.0;
-    for c in &mut children {
-        let dy = cursor + c.subtree_h / 2.0;
-        shift(c, depth as f64 * 0.0, dy);
-        cursor += c.subtree_h + SIBLING_GAP;
-    }
+    let subtree_h = stack_group(&mut children);
     Laid {
         node: n.clone(),
         x: depth as f64 * LEVEL_GAP,
@@ -87,6 +111,37 @@ fn layout(n: &MindmapNode, depth: usize, font_size: f64) -> Laid {
         h: NODE_H,
         children,
         subtree_h,
+        dir: 1.0,
+    }
+}
+
+/// Distribute `children` into vertical bands centered on y=0, returning the
+/// total band height (clamped to a single node).
+fn stack_group(children: &mut [Laid]) -> f64 {
+    let mut total = 0.0;
+    for (i, c) in children.iter().enumerate() {
+        total += c.subtree_h;
+        if i + 1 < children.len() {
+            total += SIBLING_GAP;
+        }
+    }
+    let subtree_h = total.max(NODE_H);
+    let mut cursor = -subtree_h / 2.0;
+    for c in children.iter_mut() {
+        let dy = cursor + c.subtree_h / 2.0;
+        shift(c, 0.0, dy);
+        cursor += c.subtree_h + SIBLING_GAP;
+    }
+    subtree_h
+}
+
+/// Reflect a canonical (right-growing) subtree horizontally about the root
+/// centre so it grows leftward, and mark every node as a left-side branch.
+fn mirror(laid: &mut Laid, root_w: f64) {
+    laid.x = root_w - (laid.x + laid.w);
+    laid.dir = -1.0;
+    for c in &mut laid.children {
+        mirror(c, root_w);
     }
 }
 
@@ -98,23 +153,35 @@ fn shift(laid: &mut Laid, dx: f64, dy: f64) {
     }
 }
 
-fn bbox(laid: &Laid) -> (f64, f64) {
-    let mut mx = laid.x + laid.w;
-    let mut my = laid.y + laid.h / 2.0;
-    for c in &laid.children {
-        let (cx, cy) = bbox(c);
-        mx = mx.max(cx);
-        my = my.max(cy);
+fn bounds(laid: &Laid) -> (f64, f64, f64, f64) {
+    let mut min_x = laid.x;
+    let mut max_x = laid.x + laid.w;
+    let mut min_y = laid.y - laid.h / 2.0;
+    let mut max_y = laid.y + laid.h / 2.0;
+    if laid.node.icon.is_some() {
+        max_y = max_y.max(laid.y + laid.h / 2.0 + 12.0 + ICON_SIZE);
     }
-    (mx, my)
+    for c in &laid.children {
+        let (a, b, cc, d) = bounds(c);
+        min_x = min_x.min(a);
+        min_y = min_y.min(b);
+        max_x = max_x.max(cc);
+        max_y = max_y.max(d);
+    }
+    (min_x, min_y, max_x, max_y)
 }
 
 fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
     let stroke = theme.flow_edge_stroke;
     for c in &laid.children {
-        let x1 = laid.x + laid.w;
+        // A right branch leaves the parent's right edge for the child's left
+        // edge; a left branch is mirrored, so leave the left edge for the right.
+        let (x1, x2) = if c.dir >= 0.0 {
+            (laid.x + laid.w, c.x)
+        } else {
+            (laid.x, c.x + c.w)
+        };
         let y1 = laid.y;
-        let x2 = c.x;
         let y2 = c.y;
         let mx = (x1 + x2) / 2.0;
         let mut path = String::new();
@@ -329,6 +396,42 @@ mod tests {
         // The raw Font Awesome class string must not leak into the output as text.
         assert!(!svg.contains("fa fa-book"));
         assert!(!svg.contains("fa-book"));
+    }
+
+    #[test]
+    fn first_level_branches_split_left_and_right() {
+        let leaf = |t: &str| MindmapNode {
+            text: t.into(),
+            shape: MindmapShape::Default,
+            icon: None,
+            classes: vec![],
+            children: vec![],
+        };
+        let d = MindmapDiagram {
+            root: Some(MindmapNode {
+                text: "root".into(),
+                shape: MindmapShape::Circle,
+                icon: None,
+                classes: vec![],
+                children: vec![leaf("Right"), leaf("Left")],
+            }),
+        };
+        // Build the laid-out tree directly so we can inspect the sides.
+        let root = d.root.clone().unwrap();
+        let font_size = 14.0;
+        let root_w = node_width(&root.text, font_size);
+        let right = layout(&root.children[0], 1, font_size);
+        let mut left = layout(&root.children[1], 1, font_size);
+        mirror(&mut left, root_w);
+        // The even-index branch grows right (dir +1, to the right of the root);
+        // the odd-index branch is mirrored to the left (dir -1).
+        assert_eq!(right.dir, 1.0);
+        assert_eq!(left.dir, -1.0);
+        assert!(right.x >= root_w, "right branch starts past the root");
+        assert!(left.x + left.w <= 0.0, "left branch ends before the root");
+        // Both labels still make it into the rendered document.
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Right<") && svg.contains(">Left<"));
     }
 
     #[test]

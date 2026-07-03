@@ -57,6 +57,11 @@ struct Style {
 /// Parse one already-line-split label into styled runs. Adjacent runs sharing
 /// the same style are merged so a tag-free label yields exactly one span.
 pub(crate) fn parse_spans(line: &str) -> Vec<Span> {
+    // Backtick-fenced markdown strings carry `**bold**`/`*italic*` emphasis
+    // rather than HTML tags — parse those into styled runs instead.
+    if let Some(inner) = fenced_markdown(line) {
+        return parse_markdown_spans(inner);
+    }
     let b = line.as_bytes();
     let mut spans: Vec<Span> = Vec::new();
     let mut buf = String::new();
@@ -75,6 +80,43 @@ pub(crate) fn parse_spans(line: &str) -> Vec<Span> {
         let ch = line[i..].chars().next().unwrap();
         buf.push(ch);
         i += ch.len_utf8();
+    }
+    flush(&mut spans, &mut buf, &cur);
+    if spans.is_empty() {
+        spans.push(Span::default());
+    }
+    spans
+}
+
+/// If `line` (trimmed) is a backtick-fenced markdown *string*, return its inner
+/// text. Mermaid marks markdown-string labels by wrapping them in backticks.
+fn fenced_markdown(line: &str) -> Option<&str> {
+    line.trim().strip_prefix('`')?.strip_suffix('`')
+}
+
+/// Parse a markdown-string body into styled runs: `**`/`__` toggle bold, `*`/`_`
+/// toggle italic. Marker-free text yields a single plain run, so a fenced label
+/// with no emphasis still renders as bare `<text>`.
+fn parse_markdown_spans(inner: &str) -> Vec<Span> {
+    let b = inner.as_bytes();
+    let mut spans: Vec<Span> = Vec::new();
+    let mut buf = String::new();
+    let mut cur = Style::default();
+    let mut i = 0;
+    while i < b.len() {
+        if (b[i] == b'*' || b[i] == b'_') && i + 1 < b.len() && b[i + 1] == b[i] {
+            flush(&mut spans, &mut buf, &cur);
+            cur.bold = !cur.bold;
+            i += 2;
+        } else if b[i] == b'*' || b[i] == b'_' {
+            flush(&mut spans, &mut buf, &cur);
+            cur.italic = !cur.italic;
+            i += 1;
+        } else {
+            let ch = inner[i..].chars().next().unwrap();
+            buf.push(ch);
+            i += ch.len_utf8();
+        }
     }
     flush(&mut spans, &mut buf, &cur);
     if spans.is_empty() {
@@ -362,6 +404,47 @@ mod tests {
         assert_eq!(strip_tags("hello #gt; world"), "hello #gt; world");
         assert_eq!(strip_tags("a < b"), "a < b");
         assert_eq!(strip_tags("<b>bold</b> and <i>it</i>"), "bold and it");
+    }
+
+    #[test]
+    fn markdown_string_emphasis_becomes_styled_spans() {
+        let bold = parse_spans("`**bold**`");
+        assert_eq!(
+            bold,
+            vec![Span {
+                text: "bold".into(),
+                bold: true,
+                ..Span::default()
+            }]
+        );
+        let italic = parse_spans("`*it*`");
+        assert!(italic[0].italic && !italic[0].bold);
+        // Underscore forms toggle the same way.
+        assert!(parse_spans("`__b__`")[0].bold);
+        assert!(parse_spans("`_i_`")[0].italic);
+    }
+
+    #[test]
+    fn markdown_string_mixes_plain_and_emphasis() {
+        let spans = parse_spans("`a **b** c`");
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0], plain("a "));
+        assert!(spans[1].bold && spans[1].text == "b");
+        assert_eq!(spans[2], plain(" c"));
+    }
+
+    #[test]
+    fn markdown_string_nests_bold_and_italic() {
+        let spans = parse_spans("`**b _bi_**`");
+        assert!(spans[0].bold && !spans[0].italic);
+        let bi = spans.iter().find(|s| s.text == "bi").unwrap();
+        assert!(bi.bold && bi.italic);
+    }
+
+    #[test]
+    fn plain_fenced_string_is_single_span() {
+        // No emphasis markers → one plain run, so the bare-<text> fast path holds.
+        assert_eq!(parse_spans("`plain`"), vec![plain("plain")]);
     }
 
     #[test]

@@ -25,7 +25,7 @@ src/
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
-│   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
+│   ├── label.rs     decode_label: `#…;` entity codes (markdown emphasis → markup.rs)
 │   ├── markup.rs    inline-HTML labels → styled tspans (b/i/u/span/a); strip_tags
 │   ├── metrics.rs   shared text_width/font_scale (per-glyph widths track font_size)
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
@@ -197,10 +197,14 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `style="max-width: {w}px;"` + `viewBox` and **no fixed height** (upstream
   shape). Tests must not assert a root `height="…"`.
 - **Label text is decoded** in `SvgBuilder::text()` via `decode_label`
-  (`src/svg/label.rs`):
-  `#…;` entity codes (`#quot;`→`"`, `#35;`→`#`, `#9829;`/`#x2665;`→`♥`, named
-  set) and backtick-fenced markdown *strings* have their `**`/`*`/`_` emphasis
-  stripped. Bare labels with `_`/`*` (e.g. `snake_case`) are left untouched.
+  (`src/svg/label.rs`), which now only resolves `#…;` entity codes
+  (`#quot;`→`"`, `#35;`→`#`, `#9829;`/`#x2665;`→`♥`, named set). Backtick-fenced
+  markdown *strings* and their `**bold**`/`*italic*`/`__`/`_` emphasis are
+  handled one layer up by `parse_spans` (`src/svg/markup.rs`): a fenced line is
+  routed to `parse_markdown_spans`, which toggles bold/italic into styled
+  `<tspan>`s instead of flattening the markers to plain text. A marker-free
+  fenced label still collapses to one plain run (bare `<text>` fast path). Bare
+  labels with `_`/`*` (e.g. `snake_case`) are never touched.
 - **Inline HTML labels** (`htmlLabels`, `src/svg/markup.rs`): `SvgBuilder::text`
   first line-splits, then `parse_spans` walks each line into styled runs mapped
   onto `<tspan>`s — `<b>`/`<strong>`→`font-weight="bold"`, `<i>`/`<em>`→italic,
@@ -636,6 +640,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   raw Font Awesome class string — `draw_mindmap_icon` maps `icon_name()` (the last
   `fa-`-prefixed token) onto a small builtin glyph set (book/star/clock/user/cog/
   cloud/database/check/heart), unknown names falling back to a generic tag glyph.
+  The layout (`src/svg/mindmap.rs`) is **two-sided**: first-level branches are
+  dealt alternately onto the right and left of a centred root (`layout` builds a
+  canonical right-growing subtree, `mirror` reflects the left ones about the root
+  centre and flags them `dir = -1`), so the map fans out on both sides instead of
+  only rightward. `draw_edges` picks the parent's right or left edge by the
+  child's `dir`; `bounds` frames both halves (plus icon glyphs) into positive
+  space.
 - zenuml (`src/parse/zenuml/`: `mod.rs` header/tokenize/dispatch + declarations,
   `message.rs` calls/returns/assignment, `blocks.rs` if/try chains) is a
   **brace-structured** translation to a
