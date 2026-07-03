@@ -138,7 +138,11 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         draw_class(&mut svg, center, sizes[i], c, &d.class_defs, theme);
     }
 
-    // Namespace frames around their member classes.
+    // Namespace frames around their member classes. A nested namespace's
+    // classes count toward its ancestors' bounds too (the parser registers each
+    // class with every enclosing namespace), so a deeper namespace draws a
+    // smaller frame nested inside its parent's.
+    let max_depth = d.namespaces.iter().map(|n| n.depth).max().unwrap_or(0);
     for ns in &d.namespaces {
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
@@ -158,7 +162,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         if !min_x.is_finite() {
             continue;
         }
-        let pad = 12.0;
+        let pad = 12.0 + (max_depth - ns.depth) as f64 * 10.0;
         let header_h = 18.0;
         let x = min_x - pad;
         let y = min_y - pad - header_h;
@@ -175,7 +179,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
             x + 8.0,
             y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
-            &ns.name,
+            ns.label.as_deref().unwrap_or(&ns.name),
         );
     }
 
@@ -436,6 +440,26 @@ mod tests {
         let d = build("classDiagram\nclass Shape\nclick Shape href \"https://example.com\"\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("<a href=\"https://example.com\">"));
+    }
+
+    #[test]
+    fn nested_namespace_draws_both_frames_with_labels() {
+        let d = build(
+            "classDiagram\n\
+             namespace Outer[\"Outer Label\"] {\n\
+             class A\n\
+             namespace Inner {\n\
+             class B\n\
+             }\n\
+             }\n",
+        );
+        let svg = render(&d, &Theme::default());
+        // Both frames render; the outer shows its bracket label, not raw text.
+        assert!(svg.contains("Outer Label"));
+        assert!(svg.contains(">Inner<"));
+        assert!(!svg.contains('['));
+        // Two dashed namespace frames are drawn.
+        assert!(svg.matches("stroke-dasharray=\"4 3\"").count() >= 2);
     }
 
     #[test]

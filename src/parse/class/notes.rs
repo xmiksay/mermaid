@@ -31,24 +31,54 @@ pub(super) fn parse_note(rest: &str) -> ClassNote {
     }
 }
 
-/// Strip the first matching prefix from `line`, returning the remainder.
-pub(super) fn strip_any_prefix<'a>(line: &'a str, prefixes: &[&str]) -> Option<&'a str> {
-    prefixes.iter().find_map(|p| line.strip_prefix(p))
+/// Split an interaction statement into its keyword (`click`/`link`/`callback`)
+/// and the remaining body. The keyword decides how the body is interpreted.
+pub(super) fn split_interaction(line: &str) -> Option<(&'static str, &str)> {
+    for kw in ["callback", "link", "click"] {
+        if let Some(rest) = line
+            .strip_prefix(kw)
+            .and_then(|r| r.strip_prefix(char::is_whitespace))
+        {
+            return Some((kw, rest.trim_start()));
+        }
+    }
+    None
 }
 
 /// Parse the body of a `click`/`link`/`callback` statement (text after the
-/// keyword) into `(class name, action)`. Modeled on the flowchart `click`
-/// support:
-///   `Shape "url" "tooltip"`         → hyperlink
-///   `Shape href "url" "tooltip"`    → hyperlink
-///   `Shape call fn() "tooltip"`     → callback
-///   `Shape callbackFn "tooltip"`    → callback
-pub(super) fn parse_interaction(rest: &str) -> Option<(String, ClickAction)> {
+/// keyword) into `(class name, action)`. The keyword drives the shape:
+///   `callback X "fn" "tip"` / `callback X fn "tip"`  → callback (always)
+///   `link X "url" "tip"`                              → hyperlink (always)
+///   `click X "url" "tip"` / `click X href "url"`      → hyperlink
+///   `click X call fn() "tip"` / `click X fn "tip"`    → callback
+///
+/// Upstream binds `callback` to a JS click handler unconditionally, so a quoted
+/// first argument is the function name — never a URL.
+pub(super) fn parse_interaction(kind: &str, rest: &str) -> Option<(String, ClickAction)> {
     let toks = quote_tokens(rest);
     let (id_tok, args) = toks.split_first()?;
     let id = id_tok.value.clone();
     let head = args.first()?;
 
+    if kind == "callback" {
+        let function = head.value.clone();
+        let tooltip = args.get(1).map(|t| t.value.clone());
+        return Some((id, ClickAction::Callback { function, tooltip }));
+    }
+    if kind == "link" {
+        let url = head.value.clone();
+        let tooltip = args.get(1).map(|t| t.value.clone());
+        return Some((
+            id,
+            ClickAction::Href {
+                url,
+                tooltip,
+                target: None,
+            },
+        ));
+    }
+
+    // `click`: URL vs callback decided by the argument shape.
     if !head.quoted && head.value == "href" {
         let url = args.get(1)?.value.clone();
         let tooltip = args.get(2).map(|t| t.value.clone());
@@ -211,6 +241,21 @@ mod tests {
                 assert_eq!(tooltip.as_deref(), Some("a tip"));
             }
             _ => panic!("expected callback"),
+        }
+    }
+
+    #[test]
+    fn callback_with_quoted_function_is_not_a_hyperlink() {
+        // Upstream always binds `callback` to a JS handler; a quoted first arg
+        // is the function name, never a URL.
+        let d = parse("classDiagram\nclass Dog\ncallback Dog \"callbackFunction\" \"Tooltip\"\n")
+            .unwrap();
+        match class(&d, "Dog").click.as_ref().unwrap() {
+            ClickAction::Callback { function, tooltip } => {
+                assert_eq!(function, "callbackFunction");
+                assert_eq!(tooltip.as_deref(), Some("Tooltip"));
+            }
+            _ => panic!("expected callback, not a hyperlink"),
         }
     }
 }

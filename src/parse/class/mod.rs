@@ -33,9 +33,9 @@ use super::{strip_comment, ParseError};
 mod notes;
 mod relation;
 
-use notes::{parse_interaction, parse_note, parse_standalone_annotation, strip_any_prefix};
+use notes::{parse_interaction, parse_note, parse_standalone_annotation, split_interaction};
 use relation::{
-    find_relation, is_reversed_token, split_leading_card, split_leading_lollipop,
+    detect_two_way, find_relation, is_reversed_token, split_leading_card, split_leading_lollipop,
     split_trailing_card, split_trailing_lollipop,
 };
 
@@ -82,9 +82,13 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
 
         if let Some(rest) = line.strip_prefix("namespace ") {
             let inner = rest.trim().trim_end_matches('{').trim();
-            namespace_stack.push(inner.to_string());
+            let (name, label) = extract_class_label(inner);
+            let depth = namespace_stack.len();
+            namespace_stack.push(name.clone());
             diag.namespaces.push(Namespace {
-                name: inner.to_string(),
+                name,
+                label,
+                depth,
                 class_names: Vec::new(),
             });
             continue;
@@ -101,14 +105,7 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
                 continue;
             }
             // Member of the open block.
-            if let Some(stereo) = take_stereotype(line) {
-                let cls = get_class(&mut diag, &mut by_name, class_name);
-                cls.stereotype = Some(stereo);
-            } else {
-                let member = parse_member(line);
-                let cls = get_class(&mut diag, &mut by_name, class_name);
-                cls.members.push(member);
-            }
+            add_member_line(&mut diag, &mut by_name, class_name, line);
             continue;
         }
 
@@ -127,10 +124,12 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
 
         if let Some(rest) = line.strip_prefix("class ") {
             let added_name = handle_class_decl(rest, &mut diag, &mut by_name, &mut in_block);
-            if let Some(ns_name) = namespace_stack.last() {
+            // Register the class with every namespace on the stack so a nested
+            // namespace's classes also count toward its ancestors' frame bounds.
+            for ns_name in &namespace_stack {
                 if let Some(ns) = diag.namespaces.iter_mut().find(|n| n.name == *ns_name) {
                     if !ns.class_names.contains(&added_name) {
-                        ns.class_names.push(added_name);
+                        ns.class_names.push(added_name.clone());
                     }
                 }
             }
@@ -146,8 +145,8 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         // Interactivity: `click`/`link`/`callback` bind a hyperlink or JS
         // callback to a class. Handled before the `:`-shorthand split so a URL's
         // `https://` colon can't route the line down the member path.
-        if let Some(rest) = strip_any_prefix(line, &["click ", "link ", "callback "]) {
-            if let Some((name, action)) = parse_interaction(rest) {
+        if let Some((kind, rest)) = split_interaction(line) {
+            if let Some((name, action)) = parse_interaction(kind, rest) {
                 get_class(&mut diag, &mut by_name, &name).click = Some(action);
                 continue;
             }
@@ -167,6 +166,12 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if let Some((tok_pos, tok, kind)) = find_relation(line) {
+            let reversed = is_reversed_token(tok);
+            // Two-way relations glue a mirror marker (`|>`/`>`/`*`/`o`) onto the
+            // token; consume it here so it doesn't leak into the right class.
+            let (to_kind, two_way_len) =
+                detect_two_way(&line[tok_pos + tok.len()..], tok, reversed);
+            let after_tok = tok_pos + tok.len() + two_way_len;
             // Left end: `Class[:::style] ["card"] [()]`. The lollipop `()` sits
             // right against the token, so strip it before the multiplicity.
             let (left, lollipop_from) = split_trailing_lollipop(line[..tok_pos].trim());
@@ -175,7 +180,7 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
             // Right end: `[()] ["card"] Class[:::style] [: label]`. Strip the
             // lollipop, then the leading multiplicity and any `:::style` before
             // splitting the `: label`, so none collides with the `:` separator.
-            let (right, lollipop_to) = split_leading_lollipop(line[tok_pos + tok.len()..].trim());
+            let (right, lollipop_to) = split_leading_lollipop(line[after_tok..].trim());
             let (right, to_card) = split_leading_card(&right);
             let (right, to_class) = extract_inline_class(right.trim());
             let (to_clean, label) = match right.split_once(':') {
@@ -203,7 +208,8 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
                 label,
                 from_card,
                 to_card,
-                reversed: is_reversed_token(tok),
+                reversed,
+                to_kind,
                 lollipop_from,
                 lollipop_to,
             });
@@ -262,10 +268,37 @@ fn handle_class_decl(
             cls.classes.push(c);
         }
     }
-    if after_brace.is_some() {
-        *in_block = Some(name.to_string());
+    if let Some(after) = after_brace {
+        match after.find('}') {
+            // One-line body `class Duck { +swim() }`: the block opens and closes
+            // on the same line, so parse the inline members and keep it closed —
+            // otherwise the block swallows every following statement.
+            Some(close) => {
+                let body = after[..close].trim();
+                if !body.is_empty() {
+                    add_member_line(diag, by_name, name, body);
+                }
+            }
+            None => *in_block = Some(name.to_string()),
+        }
     }
     name.to_string()
+}
+
+/// Add one member line to a class — either a `<<stereotype>>` or a member row.
+/// Shared by the multi-line block body and the one-line `{ … }` body.
+fn add_member_line(
+    diag: &mut ClassDiagram,
+    by_name: &mut HashMap<String, usize>,
+    class_name: &str,
+    line: &str,
+) {
+    if let Some(stereo) = take_stereotype(line) {
+        get_class(diag, by_name, class_name).stereotype = Some(stereo);
+    } else {
+        let member = parse_member(line);
+        get_class(diag, by_name, class_name).members.push(member);
+    }
 }
 
 /// `classDef <name>[,<name2>] <props>` — define style classes.
@@ -480,6 +513,53 @@ mod tests {
         assert_eq!(d.classes[0].name, "Animal");
         assert_eq!(d.classes[0].label.as_deref(), Some("A label"));
         assert_eq!(d.classes[0].members.len(), 1);
+    }
+
+    #[test]
+    fn namespace_label_and_nesting() {
+        let d = parse(
+            "classDiagram\n\
+             namespace Auth[\"Authentication Service\"] {\n\
+             class Login\n\
+             namespace Inner {\n\
+             class Token\n\
+             }\n\
+             }\n",
+        )
+        .unwrap();
+        let auth = d.namespaces.iter().find(|n| n.name == "Auth").unwrap();
+        // Bracket text is the display label; the id stays clean.
+        assert_eq!(auth.label.as_deref(), Some("Authentication Service"));
+        assert_eq!(auth.depth, 0);
+        // The outer namespace encloses the nested namespace's class too.
+        assert!(auth.class_names.contains(&"Login".to_string()));
+        assert!(auth.class_names.contains(&"Token".to_string()));
+
+        let inner = d.namespaces.iter().find(|n| n.name == "Inner").unwrap();
+        assert_eq!(inner.depth, 1);
+        assert_eq!(inner.class_names, vec!["Token".to_string()]);
+    }
+
+    #[test]
+    fn one_line_body_closes_and_does_not_swallow() {
+        // `class Duck { +swim() }` opens and closes on one line; the following
+        // relation must not become a member row of Duck.
+        let d = parse("classDiagram\nclass Duck { +swim() }\nDuck <|-- Goose\n").unwrap();
+        let duck = class(&d, "Duck");
+        assert_eq!(duck.members.len(), 1);
+        assert_eq!(duck.members[0].text, "swim()");
+        assert_eq!(d.relations.len(), 1);
+        assert_eq!(d.relations[0].from, "Duck");
+        assert_eq!(d.relations[0].to, "Goose");
+        // Goose is a real class, not a phantom member.
+        assert!(d.classes.iter().any(|c| c.name == "Goose"));
+    }
+
+    #[test]
+    fn empty_one_line_body_closes() {
+        let d = parse("classDiagram\nclass Foo {}\nFoo --> Bar\n").unwrap();
+        assert!(class(&d, "Foo").members.is_empty());
+        assert_eq!(d.relations.len(), 1);
     }
 
     #[test]

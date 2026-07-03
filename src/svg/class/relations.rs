@@ -36,6 +36,12 @@ pub(super) fn draw_relation(
     clipped.push(last);
 
     let (dash, mut marker_end, mut marker_start) = style_for(rel.kind, rel.reversed);
+    // Two-way relation: `kind` marked the `from` end (reversed), so the mirror
+    // marker decorates the `to` end.
+    if let Some(to_kind) = rel.to_kind {
+        let (_, to_marker, _) = style_for(to_kind, false);
+        marker_end = to_marker;
+    }
     // A lollipop-interface `()` end draws a socket circle, overriding any
     // kind marker at that end.
     if rel.lollipop_from {
@@ -258,6 +264,17 @@ mod tests {
         let d = build("classDiagram\nfoo --() baz\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("marker-end=\"url(#cls-lollipop)\""));
+    }
+
+    #[test]
+    fn two_way_relation_marks_both_ends() {
+        // `Animal <|--|> Zebra`: triangle at both ends, no phantom class.
+        let d = build("classDiagram\nAnimal <|--|> Zebra\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Animal<"));
+        assert!(svg.contains(">Zebra<"));
+        assert!(svg.contains("marker-start=\"url(#cls-triangle)\""));
+        assert!(svg.contains("marker-end=\"url(#cls-triangle)\""));
     }
 
     #[test]

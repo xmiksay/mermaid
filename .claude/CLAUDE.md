@@ -457,7 +457,25 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - State `note right of X: text` (one-liner) and `note left of X\n…\nend note`
   (multi-line) both land in `notes`.
 - Class `namespace X { class A; class B }` is stored in `namespaces`; the
-  renderer draws a dashed rect around the members.
+  renderer draws a dashed rect around the members. `namespace Name["label"]`
+  splits into a clean id + display `Namespace.label` (via `extract_class_label`,
+  like `class Name["label"]`), the renderer showing the label. Nested
+  namespaces work: each class is registered with **every** namespace on the
+  stack, so an outer frame's bounds enclose the inner one's classes;
+  `Namespace.depth` (0 = outermost) makes the renderer draw shallower frames
+  with more padding so the outer visibly wraps the inner.
+- Class **two-way relations** (`relationType lineType relationType`, e.g.
+  `<|--|>`, `*--*`, `o--o`, `<-->`, `<..>`) glue a mirror marker onto the base
+  token; `detect_two_way` (`src/parse/class/relation.rs`) consumes that trailing
+  `|>`/`>`/`*`/`o` (only when the base is left-decorated/reversed) so it can't
+  leak into the right class name, and fills `ClassRelation.to_kind`. `kind`
+  marks the `from` end (reversed), `to_kind` the `to` end; the renderer draws
+  its marker as `marker-end`.
+- Class **one-line body** `class Duck { +swim() }` opens and closes on the same
+  line: `handle_class_decl` parses the inline members (shared `add_member_line`
+  helper) and keeps the block **closed** instead of leaving `in_block` set — so
+  the block no longer swallows every following statement. An empty `{}` closes
+  with no members.
 - Class `direction` (TD/BT/LR/RL) drives the transpose the same way the
   flowchart does.
 - Class relation multiplicities (`A "1" --> "*" B`) parse into
@@ -496,8 +514,12 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   (the display text), keeping `name` clean — no phantom duplicate box.
   `click`/`link`/`callback` lines bind a `UmlClass.click` (reusing the flowchart
   `ClickAction`), parsed before the `:`-shorthand split so a URL's `https://`
-  colon can't misroute the line. The shared `open_click`/`close_click` wrappers
-  live in `src/svg/interact.rs` (used by both the flowchart and class renderers).
+  colon can't misroute the line. The **keyword drives the shape** (`split_interaction`
+  keeps it): `callback` **always** binds a JS callback (a quoted first arg is the
+  function name, never a URL), `link` always a hyperlink, `click` decides by the
+  argument (`href`/`call`/quoted-URL/bare-name). The shared `open_click`/
+  `close_click` wrappers live in `src/svg/interact.rs` (used by both the
+  flowchart and class renderers).
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`) and rendered as a fourth
   attribute column (type · name · key · comment). `EntityAttribute.key` holds

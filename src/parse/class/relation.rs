@@ -95,6 +95,34 @@ pub(super) fn is_reversed_token(tok: &str) -> bool {
     tok.starts_with(['<', '*', 'o'])
 }
 
+/// Detect a **two-way** relation (`relationType lineType relationType`, e.g.
+/// `<|--|>`, `*--*`, `o--o`, `<-->`, `<..>`): a right-side marker glued to the
+/// base token with no separating whitespace. `after` is the source right after
+/// the base token; `base` is the matched token (its `..` telling solid from
+/// dotted line). Only a left-decorated (reversed) base can carry a mirror
+/// marker. Returns the `to`-end kind and the byte length the marker consumed,
+/// so the caller can skip past it before reading the right class name.
+pub(super) fn detect_two_way(
+    after: &str,
+    base: &str,
+    reversed: bool,
+) -> (Option<ClassRelationKind>, usize) {
+    use ClassRelationKind::*;
+    if !reversed {
+        return (None, 0);
+    }
+    let dotted = base.contains("..");
+    if after.starts_with("|>") {
+        return (Some(if dotted { Realization } else { Inheritance }), 2);
+    }
+    match after.as_bytes().first() {
+        Some(b'>') => (Some(if dotted { Dependency } else { Association }), 1),
+        Some(b'*') => (Some(Composition), 1),
+        Some(b'o') => (Some(Aggregation), 1),
+        _ => (None, 0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::parse;
@@ -210,6 +238,46 @@ mod tests {
         assert_eq!(r2.to, "classB");
         assert!(r2.lollipop_from);
         assert_eq!(r2.kind, ClassRelationKind::Inheritance);
+    }
+
+    #[test]
+    fn two_way_relations_do_not_spawn_phantom_class() {
+        // `relationType lineType relationType` decorates both ends; the mirror
+        // marker must not glue onto the right class name.
+        let d = parse(
+            "classDiagram\n\
+             Animal <|--|> Zebra\n\
+             A *--* B\n\
+             C o--o D\n\
+             E <--> F\n\
+             G <..> H\n",
+        )
+        .unwrap();
+        // Exactly the ten real classes, no `|> Zebra` / `* B` phantoms.
+        assert_eq!(d.classes.len(), 10);
+        assert!(!d
+            .classes
+            .iter()
+            .any(|c| c.name.contains(['<', '>', '*', 'o', '|'])));
+
+        let r = &d.relations[0]; // Animal <|--|> Zebra
+        assert_eq!(r.from, "Animal");
+        assert_eq!(r.to, "Zebra");
+        assert_eq!(r.kind, ClassRelationKind::Inheritance);
+        assert!(r.reversed);
+        assert_eq!(r.to_kind, Some(ClassRelationKind::Inheritance));
+
+        assert_eq!(d.relations[1].to_kind, Some(ClassRelationKind::Composition));
+        assert_eq!(d.relations[2].to_kind, Some(ClassRelationKind::Aggregation));
+        assert_eq!(d.relations[3].to_kind, Some(ClassRelationKind::Association));
+        assert_eq!(d.relations[4].to_kind, Some(ClassRelationKind::Dependency));
+    }
+
+    #[test]
+    fn single_ended_relation_has_no_second_marker() {
+        let d = parse("classDiagram\nAnimal <|-- Dog\nA --* B\n").unwrap();
+        assert_eq!(d.relations[0].to_kind, None);
+        assert_eq!(d.relations[1].to_kind, None);
     }
 
     #[test]

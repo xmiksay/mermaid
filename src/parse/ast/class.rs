@@ -80,6 +80,11 @@ pub struct ClassRelation {
     /// `o--`, `<--`, `<..`. The renderer then draws the marker at the `from`
     /// end. Layout order (`from` → `to`) is preserved either way.
     pub reversed: bool,
+    /// A second decorated marker on the `to` end for two-way relations
+    /// (`relationType lineType relationType`, e.g. `<|--|>`, `*--*`, `o--o`,
+    /// `<-->`, `<..>`). `kind`/`reversed` mark the `from` end; this marks the
+    /// `to` end. `None` for the common single-ended relations.
+    pub to_kind: Option<ClassRelationKind>,
     /// A lollipop-interface socket circle sits on the `from` end — the `()`
     /// preceded the relation token (`bar ()-- foo`).
     pub lollipop_from: bool,
@@ -112,5 +117,10 @@ pub enum ClassRelationKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Namespace {
     pub name: String,
+    /// Display label from `namespace Name["label"]`; falls back to `name`.
+    pub label: Option<String>,
+    /// Nesting level, 0 for an outermost namespace. Deeper namespaces draw a
+    /// smaller frame so an outer namespace visibly encloses its nested ones.
+    pub depth: usize,
     pub class_names: Vec<String>,
 }
