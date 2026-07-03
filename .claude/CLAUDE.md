@@ -517,6 +517,23 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   (`src/svg/gitgraph.rs`) sorts lanes by explicit `order` (falling back to
   insertion order) and, for `BT`, flips the commit axis (`cols - 1 - col`) so
   newer commits sit higher.
+- gitGraph **config directives** (`config.gitGraph.*`, from `%%{init}%%` or
+  frontmatter `config:`) flow through the preamble: `preamble.rs` fills a
+  `DiagramMeta.git_graph` (`GitGraphMeta`, all-`Option`), and
+  `parse_with_meta` overlays them onto `GitGraphDiagram.config`
+  (`GitGraphConfig`, whose `Default` keeps upstream's own defaults). Honored:
+  `mainBranchName` (initial/default branch — the renderer no longer hardcodes
+  `"main"`), `showBranches` (branch labels + lane lines), `showCommitLabel`
+  (per-commit id label), `rotateCommitLabel` (rotates the id label -45° in the
+  horizontal layout), `parallelCommits` (`assign_col`: a commit's column is one
+  past its deepest parent so independent branches can share a column, instead of
+  a strictly advancing global counter).
+- gitGraph `merge` and `cherry-pick` render with **dedicated glyphs** (no longer
+  reusing `Highlight`/`Reverse`): `CommitKind::Merge` → double concentric circle
+  (`draw_merge_glyph`), `CommitKind::CherryPick` → the two-cherry glyph
+  (`draw_cherry_pick_glyph`). `cherry-pick id:"x" parent:"y" tag:"t"` keeps its
+  `parent`/`tag` on `GitEvent::CherryPick` (`parse_cherry_pick_attrs`); the tag
+  renders as the node label.
 - radar-beta (`src/parse/radar.rs`): multiple `axis` lines **accumulate**
   (`d.axes.extend`, not assign). Option keywords `min`/`max`/`ticks`/
   `graticule circle|polygon`/`showLegend [bool]` are consumed instead of

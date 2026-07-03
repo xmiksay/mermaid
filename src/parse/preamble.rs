@@ -29,14 +29,12 @@ pub fn strip(input: &str) -> (DiagramMeta, String) {
         let line = lines[i];
         let trimmed = line.trim();
 
-        if let Some(theme) = init_theme(trimmed) {
-            // A `%%{init}%%` directive line: consume it (theme captured) and
-            // keep nothing — the per-diagram scanner would otherwise see an
-            // empty comment line, which is harmless, but dropping keeps the
-            // cleaned source tidy.
-            if meta.theme.is_none() {
-                meta.theme = Some(theme);
-            }
+        if let Some(inner) = init_inner(trimmed) {
+            // A `%%{init}%%` directive line: consume it (theme + gitGraph keys
+            // captured) and keep nothing — the per-diagram scanner would
+            // otherwise see an empty comment line, which is harmless, but
+            // dropping keeps the cleaned source tidy.
+            apply_config_fragment(inner, &mut meta);
             i += 1;
             continue;
         }
@@ -102,6 +100,16 @@ fn strip_frontmatter(lines: &[&str], meta: &mut DiagramMeta) -> usize {
                 meta.ticket_base_url = Some(unquote(v.trim()).to_string());
             } else if let Some(v) = strip_prefix_ci(trimmed, "valueFormat:") {
                 meta.value_format = Some(unquote(v.trim()).to_string());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "mainBranchName:") {
+                meta.git_graph.main_branch_name = Some(unquote(v.trim()).to_string());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "showBranches:") {
+                meta.git_graph.show_branches = parse_flag(v.trim());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "showCommitLabel:") {
+                meta.git_graph.show_commit_label = parse_flag(v.trim());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "rotateCommitLabel:") {
+                meta.git_graph.rotate_commit_label = parse_flag(v.trim());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "parallelCommits:") {
+                meta.git_graph.parallel_commits = parse_flag(v.trim());
             }
         } else {
             in_config = false;
@@ -153,14 +161,48 @@ fn collect_descr_block(lines: &[&str], i: usize, first: &str, meta: &mut Diagram
     j
 }
 
-/// If `line` is a `%%{init: … }%%` directive, return its `theme` value.
-fn init_theme(line: &str) -> Option<String> {
+/// If `line` is a `%%{init: … }%%` directive, return its inner fragment.
+fn init_inner(line: &str) -> Option<&str> {
     let inner = line.strip_prefix("%%{")?;
     let inner = inner.strip_suffix("%%").unwrap_or(inner);
     let inner = inner.strip_suffix("}").unwrap_or(inner);
-    // Only treat it as an init directive (still consume the line regardless, so
-    // callers drop it) — theme is optional.
-    json_value(inner, "theme")
+    Some(inner)
+}
+
+/// Pull the config keys we honor out of a JSON-ish fragment (an init directive
+/// body). `theme` and the `gitGraph.*` keys are searched by name; each is only
+/// set when not already present so the first occurrence wins.
+fn apply_config_fragment(inner: &str, meta: &mut DiagramMeta) {
+    if meta.theme.is_none() {
+        if let Some(t) = json_value(inner, "theme") {
+            meta.theme = Some(t);
+        }
+    }
+    let g = &mut meta.git_graph;
+    if g.main_branch_name.is_none() {
+        g.main_branch_name = json_value(inner, "mainBranchName");
+    }
+    if g.show_branches.is_none() {
+        g.show_branches = json_value(inner, "showBranches").and_then(|v| parse_flag(&v));
+    }
+    if g.show_commit_label.is_none() {
+        g.show_commit_label = json_value(inner, "showCommitLabel").and_then(|v| parse_flag(&v));
+    }
+    if g.rotate_commit_label.is_none() {
+        g.rotate_commit_label = json_value(inner, "rotateCommitLabel").and_then(|v| parse_flag(&v));
+    }
+    if g.parallel_commits.is_none() {
+        g.parallel_commits = json_value(inner, "parallelCommits").and_then(|v| parse_flag(&v));
+    }
+}
+
+/// Parse a boolean flag value (`true`/`false`, plus common aliases).
+fn parse_flag(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" => Some(true),
+        "false" | "0" | "no" => Some(false),
+        _ => None,
+    }
 }
 
 /// Pull a `"key": value` out of a loose JSON/`%%{…}` fragment. Handles quoted
@@ -260,6 +302,25 @@ mod tests {
         let (m, s) = strip(src);
         assert_eq!(m.value_format.as_deref(), Some("$0,0"));
         assert_eq!(s, "treemap-beta\n\"A\": 5");
+    }
+
+    #[test]
+    fn init_directive_git_graph_config() {
+        let src = "%%{init: {'gitGraph': {'mainBranchName': 'master', 'showCommitLabel': false, 'parallelCommits': true}}}%%\ngitGraph\ncommit\n";
+        let (m, s) = strip(src);
+        assert_eq!(m.git_graph.main_branch_name.as_deref(), Some("master"));
+        assert_eq!(m.git_graph.show_commit_label, Some(false));
+        assert_eq!(m.git_graph.parallel_commits, Some(true));
+        assert_eq!(m.git_graph.show_branches, None);
+        assert_eq!(s, "gitGraph\ncommit");
+    }
+
+    #[test]
+    fn frontmatter_git_graph_config() {
+        let src = "---\nconfig:\n  gitGraph:\n    mainBranchName: trunk\n    showBranches: false\n---\ngitGraph\ncommit\n";
+        let (m, _) = strip(src);
+        assert_eq!(m.git_graph.main_branch_name.as_deref(), Some("trunk"));
+        assert_eq!(m.git_graph.show_branches, Some(false));
     }
 
     #[test]

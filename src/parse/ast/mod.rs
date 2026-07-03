@@ -60,6 +60,19 @@ pub struct DiagramMeta {
     /// `config.treemap.valueFormat` from frontmatter — copied onto a
     /// [`TreemapDiagram`] to format leaf values.
     pub value_format: Option<String>,
+    /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
+    pub git_graph: GitGraphMeta,
+}
+
+/// `config.gitGraph.*` keys pulled from the preamble; each is `None` when the
+/// source did not set it, leaving upstream's own default in place.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GitGraphMeta {
+    pub main_branch_name: Option<String>,
+    pub show_branches: Option<bool>,
+    pub show_commit_label: Option<bool>,
+    pub rotate_commit_label: Option<bool>,
+    pub parallel_commits: Option<bool>,
 }
 
 #[derive(Debug, Clone)]

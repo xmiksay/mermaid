@@ -67,9 +67,11 @@ pub(crate) fn parse(input: &str) -> Result<GitGraphDiagram, ParseError> {
             let (id, tag, _) = parse_commit_attrs(&attrs);
             d.events.push(GitEvent::Merge { from, id, tag });
         } else if let Some(rest) = line.strip_prefix("cherry-pick") {
-            let (id, _, _) = parse_commit_attrs(rest);
+            let (id, tag, parent) = parse_cherry_pick_attrs(rest);
             d.events.push(GitEvent::CherryPick {
                 commit_id: id.unwrap_or_default(),
+                parent,
+                tag,
             });
         } else {
             return Err(ParseError::Syntax {
@@ -103,6 +105,37 @@ fn parse_branch(s: &str) -> (String, Option<usize>) {
         }
     }
     (name, order)
+}
+
+/// `cherry-pick id:"x" [parent:"y"] [tag:"t"]` — returns `(id, tag, parent)`.
+/// Upstream requires `parent` when cherry-picking a merge commit and shows the
+/// tag, so neither may be dropped.
+fn parse_cherry_pick_attrs(s: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let mut id = None;
+    let mut tag = None;
+    let mut parent = None;
+    let mut s = s.trim();
+    while !s.is_empty() {
+        if let Some(rest) = s.strip_prefix("id:") {
+            let (v, r) = take_value(rest);
+            id = Some(v);
+            s = r;
+        } else if let Some(rest) = s.strip_prefix("parent:") {
+            let (v, r) = take_value(rest);
+            parent = Some(v);
+            s = r;
+        } else if let Some(rest) = s.strip_prefix("tag:") {
+            let (v, r) = take_value(rest);
+            tag = Some(v);
+            s = r;
+        } else {
+            match s.find(char::is_whitespace) {
+                Some(pos) => s = s[pos..].trim_start(),
+                None => break,
+            }
+        }
+    }
+    (id, tag, parent)
 }
 
 fn parse_commit_attrs(s: &str) -> (Option<String>, Option<String>, CommitKind) {
@@ -193,6 +226,39 @@ mod tests {
         // `gitGraph:` must route to the gitGraph parser, not be rejected.
         let d = crate::parse::parse("gitGraph:\ncommit\n").unwrap();
         assert!(matches!(d, crate::parse::Diagram::GitGraph(_)));
+    }
+
+    #[test]
+    fn cherry_pick_keeps_parent_and_tag() {
+        let d = parse("gitGraph\ncommit\ncherry-pick id: \"abc\" parent: \"xyz\" tag: \"v9\"\n")
+            .unwrap();
+        match &d.events[1] {
+            GitEvent::CherryPick {
+                commit_id,
+                parent,
+                tag,
+            } => {
+                assert_eq!(commit_id, "abc");
+                assert_eq!(parent.as_deref(), Some("xyz"));
+                assert_eq!(tag.as_deref(), Some("v9"));
+            }
+            _ => panic!("expected cherry-pick"),
+        }
+    }
+
+    #[test]
+    fn init_config_reaches_diagram() {
+        // `%%{init}%%` gitGraph keys must flow through `parse_with_meta` onto
+        // the diagram's config (default `mainBranchName` is otherwise `main`).
+        let src = "%%{init: {'gitGraph': {'mainBranchName': 'trunk', 'showBranches': false}}}%%\ngitGraph\ncommit\n";
+        let d = crate::parse::parse(src).unwrap();
+        let crate::parse::Diagram::GitGraph(g) = d else {
+            panic!("expected gitGraph");
+        };
+        assert_eq!(g.config.main_branch_name, "trunk");
+        assert!(!g.config.show_branches);
+        // Untouched keys keep their upstream defaults.
+        assert!(g.config.show_commit_label);
     }
 
     #[test]

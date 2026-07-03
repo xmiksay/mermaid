@@ -69,6 +69,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let (Diagram::Treemap(t), Some(fmt)) = (&mut diagram, &meta.value_format) {
         t.value_format = Some(fmt.clone());
     }
+    if let Diagram::GitGraph(g) = &mut diagram {
+        apply_git_graph_config(&mut g.config, &meta.git_graph);
+    }
     Ok((diagram, meta))
 }
 
@@ -95,6 +98,26 @@ fn apply_title(diagram: &mut Diagram, title: &str) {
         if slot.is_none() {
             *slot = Some(title.to_string());
         }
+    }
+}
+
+/// Overlay the preamble's `config.gitGraph.*` keys onto the diagram's config,
+/// leaving upstream defaults where the source set nothing.
+fn apply_git_graph_config(cfg: &mut ast::GitGraphConfig, meta: &ast::GitGraphMeta) {
+    if let Some(name) = &meta.main_branch_name {
+        cfg.main_branch_name = name.clone();
+    }
+    if let Some(v) = meta.show_branches {
+        cfg.show_branches = v;
+    }
+    if let Some(v) = meta.show_commit_label {
+        cfg.show_commit_label = v;
+    }
+    if let Some(v) = meta.rotate_commit_label {
+        cfg.rotate_commit_label = v;
+    }
+    if let Some(v) = meta.parallel_commits {
+        cfg.parallel_commits = v;
     }
 }
 
