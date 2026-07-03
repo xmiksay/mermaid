@@ -404,42 +404,44 @@ fn canonicalize(
         if is_source {
             *start_n += 1;
             let id = format!("__start_{start_n}");
-            diag.states.push(State {
-                id: id.clone(),
-                label: String::new(),
-                kind: StateKind::Start,
-                classes: Vec::new(),
-                style: Style::new(),
-            });
+            push_pseudo(diag, existing, &id, StateKind::Start);
             id
         } else {
             *end_n += 1;
             let id = format!("__end_{end_n}");
-            diag.states.push(State {
-                id: id.clone(),
-                label: String::new(),
-                kind: StateKind::End,
-                classes: Vec::new(),
-                style: Style::new(),
-            });
+            push_pseudo(diag, existing, &id, StateKind::End);
             id
         }
     } else if raw == "[H]" || raw == "[H*]" {
         let deep = raw == "[H*]";
         *hist_n += 1;
         let id = format!("__hist_{hist_n}");
-        diag.states.push(State {
-            id: id.clone(),
-            label: String::new(),
-            kind: StateKind::History { deep },
-            classes: Vec::new(),
-            style: Style::new(),
-        });
+        push_pseudo(diag, existing, &id, StateKind::History { deep });
         id
     } else {
         ensure_state(diag, existing, raw, "", StateKind::Normal);
         raw.to_string()
     }
+}
+
+/// Push a synthesized pseudo-state (`__start_N`/`__end_N`/`__hist_N`) and record
+/// it in `existing` so composite region-tracking (which keys off `existing`)
+/// counts it as a member — otherwise inner start/end/history circles land
+/// outside the composite frame.
+fn push_pseudo(
+    diag: &mut StateDiagram,
+    existing: &mut HashMap<String, usize>,
+    id: &str,
+    kind: StateKind,
+) {
+    existing.insert(id.to_string(), diag.states.len());
+    diag.states.push(State {
+        id: id.to_string(),
+        label: String::new(),
+        kind,
+        classes: Vec::new(),
+        style: Style::new(),
+    });
 }
 
 fn ensure_state(
