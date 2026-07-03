@@ -77,6 +77,15 @@ pub(crate) fn parse(input: &str) -> Result<PacketDiagram, ParseError> {
                 .map_err(|_| ParseError::number(line_no, format!("invalid bit '{range}'")))?;
             (s, s)
         };
+        if end < start {
+            // Upstream throws "End must be greater than start". A backwards
+            // range would rewind the relative cursor and overlap earlier
+            // fields, so hard-error like every other diagram parser.
+            return Err(ParseError::malformed(
+                line_no,
+                format!("field end {end} is before start {start}"),
+            ));
+        }
         let label = label.trim().trim_matches('"').to_string();
         cursor = end + 1;
         d.fields.push(PacketField { start, end, label });
@@ -125,5 +134,16 @@ mod tests {
     #[test]
     fn relative_zero_width_is_error() {
         assert!(parse("packet\n+0: \"nope\"\n").is_err());
+    }
+
+    #[test]
+    fn backwards_range_is_error() {
+        assert!(parse("packet\n15-0: \"backwards\"\n").is_err());
+    }
+
+    #[test]
+    fn equal_start_end_range_is_ok() {
+        let d = parse("packet\n5-5: \"one bit\"\n").unwrap();
+        assert_eq!((d.fields[0].start, d.fields[0].end), (5, 5));
     }
 }

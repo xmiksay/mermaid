@@ -251,6 +251,15 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   (`#lt;`/`#gt;`) at the source so the markup pass keeps them intact.
 - Pie drops slices `< 1%` of the total (`MIN_SLICE`, matching upstream
   `createPieArcs`); insertion order and per-slice palette color are preserved.
+- Packet fields hard-error on a backwards range (`end < start`, `src/parse/packet.rs`)
+  — like upstream's "End must be greater than start" — since it would rewind the
+  relative `+N` cursor and overlap earlier fields; `start == end` (single bit via
+  a dash) stays valid, and non-contiguous gaps remain a tolerated no-op.
+  `config.packet.*` (`bitsPerRow`/`bitWidth`/`rowHeight`/`showBits`/`paddingX`/
+  `paddingY`) flows through the preamble → `apply_packet_config` (`src/parse/mod.rs`)
+  onto `PacketDiagram.config` (`PacketConfig`, defaults matching the renderer's
+  old constants so the gallery stays byte-identical); `src/svg/packet.rs` reads
+  them (`showBits false` drops the bit ruler, `bitsPerRow` re-wraps rows).
 - Quadrant points carry optional styling on `QuadrantPoint`: a third array
   value `[x, y, r]` sets `radius`; trailing `radius:`/`color:`/`stroke-color:`/
   `stroke-width:` attributes and a `:::class` ref (resolved against

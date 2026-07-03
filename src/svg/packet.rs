@@ -5,12 +5,8 @@ use crate::parse::PacketDiagram;
 use super::builder::SvgBuilder;
 use super::theme::Theme;
 
-const PAD: f64 = 30.0;
 const TITLE_GAP: f64 = 32.0;
-const BIT_W: f64 = 16.0;
-const ROW_H: f64 = 40.0;
 const RULER_H: f64 = 14.0;
-const BITS_PER_ROW: u32 = 32;
 
 pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
@@ -18,55 +14,60 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
     let fill = &theme.flow_node_fill;
     let stroke = &theme.flow_node_stroke;
 
+    let bits_per_row = d.config.bits_per_row;
+    let bit_w = d.config.bit_width;
+    let row_h = d.config.row_height;
+    let pad_x = d.config.padding_x;
+    let pad_y = d.config.padding_y;
+    let ruler_h = if d.config.show_bits { RULER_H } else { 0.0 };
+
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let last_bit = d.fields.iter().map(|f| f.end).max().unwrap_or(0);
-    let rows: u32 = if last_bit == 0 {
-        1
-    } else {
-        last_bit / BITS_PER_ROW + 1
-    };
+    let rows: u32 = last_bit / bits_per_row + 1;
 
-    let chart_w = BIT_W * BITS_PER_ROW as f64;
-    let width = PAD * 2.0 + chart_w;
-    let height = PAD * 2.0 + title_h + RULER_H + rows as f64 * ROW_H + 10.0;
+    let chart_w = bit_w * bits_per_row as f64;
+    let width = pad_x * 2.0 + chart_w;
+    let height = pad_y * 2.0 + title_h + ruler_h + rows as f64 * row_h + 10.0;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(
             width / 2.0,
-            PAD + 18.0,
+            pad_y + 18.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
         );
     }
 
-    let chart_left = PAD;
-    let chart_top = PAD + title_h + RULER_H;
+    let chart_left = pad_x;
+    let chart_top = pad_y + title_h + ruler_h;
 
     // Ruler.
-    for i in 0..BITS_PER_ROW {
-        if i % 4 == 0 || i == BITS_PER_ROW - 1 {
-            let x = chart_left + i as f64 * BIT_W + BIT_W / 2.0;
-            svg.text(
-                x,
-                PAD + title_h + 10.0,
-                &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\""),
-                &i.to_string(),
-            );
+    if d.config.show_bits {
+        for i in 0..bits_per_row {
+            if i % 4 == 0 || i == bits_per_row - 1 {
+                let x = chart_left + i as f64 * bit_w + bit_w / 2.0;
+                svg.text(
+                    x,
+                    pad_y + title_h + 10.0,
+                    &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\""),
+                    &i.to_string(),
+                );
+            }
         }
     }
 
     // Rows background (empty cells get muted color).
     for row in 0..rows {
-        for bit in 0..BITS_PER_ROW {
-            let x = chart_left + bit as f64 * BIT_W;
-            let y = chart_top + row as f64 * ROW_H;
+        for bit in 0..bits_per_row {
+            let x = chart_left + bit as f64 * bit_w;
+            let y = chart_top + row as f64 * row_h;
             svg.rect(
                 x,
                 y,
-                BIT_W,
-                ROW_H,
+                bit_w,
+                row_h,
                 &format!("fill=\"{fill}\" fill-opacity=\"0.15\" stroke=\"{fg_muted}\" stroke-width=\"0.5\""),
             );
         }
@@ -77,30 +78,27 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
         let color = theme.pie_color(fi);
         let mut cur = f.start;
         while cur <= f.end {
-            let row = cur / BITS_PER_ROW;
-            let row_start = cur % BITS_PER_ROW;
-            let row_end = ((row + 1) * BITS_PER_ROW - 1).min(f.end);
-            let width_bits = row_end - row_start.min(row_end) + 1
-                - (row * BITS_PER_ROW).saturating_sub(row * BITS_PER_ROW);
-            let w = (row_end - cur + 1) as f64 * BIT_W;
-            let x = chart_left + row_start as f64 * BIT_W;
-            let y = chart_top + row as f64 * ROW_H;
+            let row = cur / bits_per_row;
+            let row_start = cur % bits_per_row;
+            let row_end = ((row + 1) * bits_per_row - 1).min(f.end);
+            let w = (row_end - cur + 1) as f64 * bit_w;
+            let x = chart_left + row_start as f64 * bit_w;
+            let y = chart_top + row as f64 * row_h;
             svg.rect(
                 x,
                 y,
                 w,
-                ROW_H,
+                row_h,
                 &format!(
                     "fill=\"{color}\" fill-opacity=\"0.45\" stroke=\"{stroke}\" stroke-width=\"1\""
                 ),
             );
             svg.text(
                 x + w / 2.0,
-                y + ROW_H / 2.0 + 4.0,
+                y + row_h / 2.0 + 4.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
                 &f.label,
             );
-            let _ = width_bits;
             cur = row_end + 1;
         }
     }
@@ -111,7 +109,7 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::PacketField;
+    use crate::parse::{PacketConfig, PacketField};
 
     #[test]
     fn produces_svg() {
@@ -129,10 +127,78 @@ mod tests {
                     label: "dst".into(),
                 },
             ],
+            config: PacketConfig::default(),
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">TCP<"));
         assert!(svg.contains(">src<"));
+    }
+
+    #[test]
+    fn bits_per_row_config_wraps_rows() {
+        let d = PacketDiagram {
+            title: None,
+            fields: vec![PacketField {
+                start: 0,
+                end: 31,
+                label: "x".into(),
+            }],
+            config: PacketConfig {
+                bits_per_row: 16,
+                ..PacketConfig::default()
+            },
+        };
+        // 32 bits over 16-bit rows → two rows, so the field splits into two rects.
+        let svg = render(&d, &Theme::default());
+        // A 16-bit row is 16 * bit_width = 256px wide plus paddings.
+        assert!(svg.contains("width=\"100%\""));
+        // Height must exceed a single-row default render.
+        let single = render(
+            &PacketDiagram {
+                title: None,
+                fields: d.fields.clone(),
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        let vb = |s: &str| {
+            let start = s.find("viewBox=\"").unwrap() + 9;
+            let end = s[start..].find('"').unwrap() + start;
+            s[start..end].to_string()
+        };
+        assert_ne!(vb(&svg), vb(&single));
+    }
+
+    #[test]
+    fn show_bits_false_omits_ruler() {
+        let fields = vec![PacketField {
+            start: 0,
+            end: 3,
+            label: "a".into(),
+        }];
+        let with_ruler = render(
+            &PacketDiagram {
+                title: None,
+                fields: fields.clone(),
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        let no_ruler = render(
+            &PacketDiagram {
+                title: None,
+                fields,
+                config: PacketConfig {
+                    show_bits: false,
+                    ..PacketConfig::default()
+                },
+            },
+            &Theme::default(),
+        );
+        // The ruler prints the bit index "0" as a muted <text>; hiding it drops
+        // those tick labels, shrinking the document.
+        assert!(with_ruler.contains("font-size=\"9\""));
+        assert!(!no_ruler.contains("font-size=\"9\""));
     }
 }

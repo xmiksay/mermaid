@@ -203,6 +203,8 @@ pub struct RadarCurve {
 pub struct PacketDiagram {
     pub title: Option<String>,
     pub fields: Vec<PacketField>,
+    /// `config.packet.*` rendering knobs (frontmatter / `%%{init}%%`).
+    pub config: PacketConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,4 +212,35 @@ pub struct PacketField {
     pub start: u32,
     pub end: u32,
     pub label: String,
+}
+
+/// `config.packet.*` layout knobs. Defaults match the renderer's built-in
+/// constants, so a diagram with no config renders byte-identically.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PacketConfig {
+    /// `packet.bitsPerRow` — bits drawn per row before wrapping.
+    pub bits_per_row: u32,
+    /// `packet.bitWidth` — pixel width of one bit cell.
+    pub bit_width: f64,
+    /// `packet.rowHeight` — pixel height of one row.
+    pub row_height: f64,
+    /// `packet.showBits` — draw the per-bit ruler above the block.
+    pub show_bits: bool,
+    /// `packet.paddingX` — horizontal margin around the block.
+    pub padding_x: f64,
+    /// `packet.paddingY` — vertical margin around the block.
+    pub padding_y: f64,
+}
+
+impl Default for PacketConfig {
+    fn default() -> Self {
+        Self {
+            bits_per_row: 32,
+            bit_width: 16.0,
+            row_height: 40.0,
+            show_bits: true,
+            padding_x: 30.0,
+            padding_y: 30.0,
+        }
+    }
 }
