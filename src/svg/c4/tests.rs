@@ -15,6 +15,7 @@ fn person(alias: &str, label: &str) -> C4Element {
         boundary_alias: None,
         boundary_label: None,
         boundary_kind: None,
+        boundary_type: None,
         members: vec![],
     }
 }
@@ -33,6 +34,7 @@ fn boundary(alias: &str, label: &str, kind: C4BoundaryKind, members: Vec<C4Eleme
         boundary_alias: None,
         boundary_label: None,
         boundary_kind: Some(kind),
+        boundary_type: None,
         members,
     }
 }
@@ -341,6 +343,7 @@ fn element_style_override_applies_colors() {
             boundary_alias: None,
             boundary_label: None,
             boundary_kind: None,
+            boundary_type: None,
             members: vec![],
         }],
         relations: vec![],
@@ -411,6 +414,28 @@ fn boundary_style_override_applies_colors() {
     };
     let svg = render(&d, &Theme::default());
     assert!(svg.contains("fill=\"#EEEEEE\" stroke=\"#333333\""));
+}
+
+#[test]
+fn boundary_type_overrides_kind_label() {
+    let mut node = boundary(
+        "n1",
+        "Web Server",
+        C4BoundaryKind::Deployment,
+        vec![person("a", "A")],
+    );
+    node.boundary_type = Some("Ubuntu 16.04 LTS".into());
+    let d = C4Diagram {
+        kind: C4Kind::Deployment,
+        title: None,
+        elements: vec![node],
+        relations: vec![],
+        ..Default::default()
+    };
+    let svg = render(&d, &Theme::default());
+    // The explicit type text replaces the default "[Deployment Node]" tag.
+    assert!(svg.contains("[Ubuntu 16.04 LTS]"));
+    assert!(!svg.contains("[Deployment Node]"));
 }
 
 #[test]

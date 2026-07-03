@@ -88,6 +88,10 @@ pub struct C4Element {
     pub boundary_alias: Option<String>,
     pub boundary_label: Option<String>,
     pub boundary_kind: Option<C4BoundaryKind>,
+    /// Optional boundary/`Deployment_Node` type argument (e.g. the OS text in
+    /// `Deployment_Node(n, "Web Server", "Ubuntu 16.04 LTS")`). When set it
+    /// overrides the fixed per-kind label the renderer would otherwise draw.
+    pub boundary_type: Option<String>,
     pub members: Vec<C4Element>,
 }
 

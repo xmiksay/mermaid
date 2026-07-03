@@ -201,6 +201,7 @@ pub(super) fn parse_element(line: &str, _line_no: usize) -> Result<Option<C4Elem
         boundary_alias: None,
         boundary_label: None,
         boundary_kind: None,
+        boundary_type: None,
         members: Vec::new(),
     }))
 }
@@ -210,21 +211,41 @@ pub(super) fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation
         Some(p) => (&line[..p], &line[p..]),
         None => return Ok(None),
     };
-    let (direction, bidirectional) = match token {
-        "Rel" => (C4RelDirection::Default, false),
-        "BiRel" => (C4RelDirection::Default, true),
-        "Rel_U" | "Rel_Up" => (C4RelDirection::Up, false),
-        "Rel_D" | "Rel_Down" => (C4RelDirection::Down, false),
-        "Rel_L" | "Rel_Left" => (C4RelDirection::Left, false),
-        "Rel_R" | "Rel_Right" => (C4RelDirection::Right, false),
+    // `RelIndex` (the C4Dynamic form) puts a step index first and shifts every
+    // positional field by one; `Rel_Back` draws the arrow reversed.
+    let (direction, bidirectional, back, indexed) = match token {
+        "Rel" => (C4RelDirection::Default, false, false, false),
+        "BiRel" => (C4RelDirection::Default, true, false, false),
+        "Rel_U" | "Rel_Up" => (C4RelDirection::Up, false, false, false),
+        "Rel_D" | "Rel_Down" => (C4RelDirection::Down, false, false, false),
+        "Rel_L" | "Rel_Left" => (C4RelDirection::Left, false, false, false),
+        "Rel_R" | "Rel_Right" => (C4RelDirection::Right, false, false, false),
+        "Rel_Back" => (C4RelDirection::Default, false, true, false),
+        "RelIndex" => (C4RelDirection::Default, false, false, true),
         _ => return Ok(None),
     };
     let args_str = rest.trim_start_matches('(').trim_end_matches(')');
     let (args, kw) = split_macro_args(&split_args(args_str));
-    let from = args.first().cloned().unwrap_or_default();
-    let to = args.get(1).cloned().unwrap_or_default();
-    let label = args.get(2).cloned().unwrap_or_default();
-    let technology = kw.techn.or_else(|| args.get(3).cloned());
+    // With `RelIndex` the leading index shifts the from/to/label/tech slots.
+    let (index, base) = if indexed {
+        (args.first().cloned(), 1)
+    } else {
+        (None, 0)
+    };
+    let from = args.get(base).cloned().unwrap_or_default();
+    let to = args.get(base + 1).cloned().unwrap_or_default();
+    let mut label = args.get(base + 2).cloned().unwrap_or_default();
+    let technology = kw.techn.or_else(|| args.get(base + 3).cloned());
+    // Keep the step number visible on the label (upstream numbers the arrows).
+    if let Some(idx) = index.filter(|s| !s.is_empty()) {
+        label = if label.is_empty() {
+            idx
+        } else {
+            format!("{idx}: {label}")
+        };
+    }
+    // `Rel_Back` reverses the arrow — swap endpoints so the head lands on `from`.
+    let (from, to) = if back { (to, from) } else { (from, to) };
     Ok(Some(C4Relation {
         from,
         to,

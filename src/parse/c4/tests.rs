@@ -140,6 +140,49 @@ fn parses_show_legend_and_boundary_style() {
 }
 
 #[test]
+fn rel_back_reverses_endpoints() {
+    let src = "C4Context\n\
+        System(a, \"A\")\n\
+        System(b, \"B\")\n\
+        Rel_Back(a, b, \"depends on\")\n";
+    let d = parse(src).unwrap();
+    assert_eq!(d.relations.len(), 1);
+    let r = &d.relations[0];
+    // Reversed: the arrow now points from `b` back to `a`.
+    assert_eq!((r.from.as_str(), r.to.as_str()), ("b", "a"));
+    assert_eq!(r.label, "depends on");
+}
+
+#[test]
+fn rel_index_shifts_positional_args() {
+    let src = "C4Dynamic\n\
+        System(a, \"A\")\n\
+        System(b, \"B\")\n\
+        RelIndex(1, a, b, \"Requests\", \"HTTPS\")\n";
+    let d = parse(src).unwrap();
+    assert_eq!(d.relations.len(), 1);
+    let r = &d.relations[0];
+    assert_eq!((r.from.as_str(), r.to.as_str()), ("a", "b"));
+    // The index prefixes the label; the technology comes from the shifted slot.
+    assert_eq!(r.label, "1: Requests");
+    assert_eq!(r.technology.as_deref(), Some("HTTPS"));
+}
+
+#[test]
+fn boundary_type_argument_is_kept() {
+    let src = "C4Deployment\n\
+        Deployment_Node(n1, \"Web Server\", \"Ubuntu 16.04 LTS\") {\n\
+          Container(a, \"App\")\n\
+        }\n";
+    let d = parse(src).unwrap();
+    assert_eq!(d.elements.len(), 1);
+    assert_eq!(
+        d.elements[0].boundary_type.as_deref(),
+        Some("Ubuntu 16.04 LTS")
+    );
+}
+
+#[test]
 fn parses_boundary() {
     let src = "C4Context\nSystem_Boundary(b, \"Boundary\") {\n  System(s, \"S\", \"d\")\n}\n";
     let d = parse(src).unwrap();
