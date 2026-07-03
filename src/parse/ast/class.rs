@@ -80,6 +80,12 @@ pub struct ClassRelation {
     /// `o--`, `<--`, `<..`. The renderer then draws the marker at the `from`
     /// end. Layout order (`from` → `to`) is preserved either way.
     pub reversed: bool,
+    /// A lollipop-interface socket circle sits on the `from` end — the `()`
+    /// preceded the relation token (`bar ()-- foo`).
+    pub lollipop_from: bool,
+    /// A lollipop-interface socket circle sits on the `to` end — the `()`
+    /// followed the relation token (`foo --() bar`).
+    pub lollipop_to: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

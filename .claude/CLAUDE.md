@@ -91,7 +91,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (462 tests: 448 lib + 13 integration + 1 doctest)
+cargo test               # unit + integration + doctest (465 tests: 451 lib + 13 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -368,6 +368,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   emits the single decorated marker as `marker-start` (reversed) or `marker-end`
   (forward); `orient="auto-start-reverse"` points it into its node at either
   end. Composition/aggregation draw *only* the diamond — no far-end arrowhead.
+- Class lollipop-interface `()` (`bar ()-- foo` / `foo --() bar`) is stripped
+  off the token-adjacent side in `src/parse/class/relation.rs`
+  (`split_trailing_lollipop`/`split_leading_lollipop`, before the multiplicity),
+  keeping the class names clean and setting `ClassRelation.lollipop_from`/
+  `lollipop_to`. The renderer overrides that end's marker with a hollow socket
+  circle (`cls-lollipop`), so `()--|>` still draws the inheritance triangle at
+  the far end plus the socket at the interface end.
 - Class generics `~T~` are converted to angle brackets at render time
   (`convert_generics` in `src/svg/class/members.rs`) for class names and member/return
   types — `List~int~` → `List<int>`, nested `List~List~int~~` →

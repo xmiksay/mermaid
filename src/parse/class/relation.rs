@@ -34,6 +34,28 @@ pub(super) fn split_trailing_card(s: &str) -> (String, Option<String>) {
     (s.to_string(), None)
 }
 
+/// Strip a trailing `()` lollipop-interface marker, e.g. `bar ()` →
+/// (`bar`, true). The `()` sits between the class name and the relation token
+/// in the `()--` form.
+pub(super) fn split_trailing_lollipop(s: &str) -> (String, bool) {
+    let s = s.trim();
+    match s.strip_suffix("()") {
+        Some(rest) => (rest.trim_end().to_string(), true),
+        None => (s.to_string(), false),
+    }
+}
+
+/// Strip a leading `()` lollipop-interface marker, e.g. `() bar` →
+/// (`bar`, true). The `()` sits between the relation token and the class name
+/// in the `--()` form.
+pub(super) fn split_leading_lollipop(s: &str) -> (String, bool) {
+    let s = s.trim();
+    match s.strip_prefix("()") {
+        Some(rest) => (rest.trim_start().to_string(), true),
+        None => (s.to_string(), false),
+    }
+}
+
 /// Strip a leading `"card"` multiplicity, e.g. `"*" Order` → (`Order`, `*`).
 pub(super) fn split_leading_card(s: &str) -> (String, Option<String>) {
     let s = s.trim();
@@ -150,6 +172,44 @@ mod tests {
         assert_eq!(d.relations[1].to_card.as_deref(), Some("*"));
         assert_eq!(d.relations[1].from, "C");
         assert_eq!(d.relations[1].to, "D");
+    }
+
+    #[test]
+    fn lollipop_interface_tokens() {
+        let d = parse(
+            "classDiagram\n\
+             bar ()-- foo\n\
+             foo --() baz\n\
+             classA ()--|> classB\n",
+        )
+        .unwrap();
+        // The `()` glues into the relation, not the class name.
+        assert!(d.classes.iter().any(|c| c.name == "bar"));
+        assert!(d.classes.iter().any(|c| c.name == "foo"));
+        assert!(d.classes.iter().any(|c| c.name == "classA"));
+        assert!(!d.classes.iter().any(|c| c.name.contains("()")));
+
+        // `bar ()-- foo`: lollipop on the `from` (bar) end, plain link.
+        let r0 = &d.relations[0];
+        assert_eq!(r0.from, "bar");
+        assert_eq!(r0.to, "foo");
+        assert!(r0.lollipop_from);
+        assert!(!r0.lollipop_to);
+        assert_eq!(r0.kind, ClassRelationKind::Link);
+
+        // `foo --() baz`: lollipop on the `to` (baz) end.
+        let r1 = &d.relations[1];
+        assert_eq!(r1.from, "foo");
+        assert_eq!(r1.to, "baz");
+        assert!(!r1.lollipop_from);
+        assert!(r1.lollipop_to);
+
+        // `classA ()--|> classB`: lollipop at `from`, inheritance triangle at `to`.
+        let r2 = &d.relations[2];
+        assert_eq!(r2.from, "classA");
+        assert_eq!(r2.to, "classB");
+        assert!(r2.lollipop_from);
+        assert_eq!(r2.kind, ClassRelationKind::Inheritance);
     }
 
     #[test]
