@@ -43,10 +43,20 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
             // Attach to last node at this or deeper indent.
             if let Some((_, n)) = stack.last_mut() {
                 n.icon = Some(icon);
-                continue;
             } else if let Some(n) = root.as_mut() {
                 n.icon = Some(icon);
-                continue;
+            }
+            continue;
+        }
+
+        // Class attachment: `:::class1 class2` attaches CSS classes to the
+        // preceding node instead of creating a literal child node.
+        if let Some(rest) = body.strip_prefix(":::") {
+            let classes = rest.split_whitespace().map(str::to_string);
+            if let Some((_, n)) = stack.last_mut() {
+                n.classes.extend(classes);
+            } else if let Some(n) = root.as_mut() {
+                n.classes.extend(classes);
             }
             continue;
         }
@@ -121,6 +131,7 @@ fn parse_node(body: &str) -> MindmapNode {
         text: text.to_string(),
         shape,
         icon: None,
+        classes: Vec::new(),
         children: Vec::new(),
     }
 }
@@ -155,5 +166,17 @@ mod tests {
         let d = parse("mindmap\nroot\n  A\n  ::icon(fa fa-book)\n").unwrap();
         let r = d.root.unwrap();
         assert_eq!(r.children[0].icon.as_deref(), Some("fa fa-book"));
+    }
+
+    #[test]
+    fn class_attaches_not_child() {
+        let d = parse("mindmap\n  root(Root)\n    A[Node]\n    :::urgent large\n").unwrap();
+        let r = d.root.unwrap();
+        assert_eq!(r.text, "Root");
+        // The `:::` line must not become a child node.
+        assert_eq!(r.children.len(), 1);
+        let a = &r.children[0];
+        assert_eq!(a.text, "Node");
+        assert_eq!(a.classes, vec!["urgent".to_string(), "large".to_string()]);
     }
 }

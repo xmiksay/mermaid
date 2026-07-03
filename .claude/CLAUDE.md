@@ -471,3 +471,10 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `block:ID … end` group works) and clip to the node boundary (`clip`) so
   arrowheads land on the edge, not the center. `block:id:span` keeps the span on
   `BlockGroup.span` (min group width).
+- mindmap `:::class1 class2` and `::icon(fa fa-book)` are **attachment lines**,
+  not child nodes (`src/parse/mindmap.rs`): both attach to the most-recent node
+  (`stack.last_mut()` / `root`), `:::` filling `MindmapNode.classes` and `::icon`
+  filling `MindmapNode.icon`. The renderer (`src/svg/mindmap.rs`) never prints the
+  raw Font Awesome class string — `draw_mindmap_icon` maps `icon_name()` (the last
+  `fa-`-prefixed token) onto a small builtin glyph set (book/star/clock/user/cog/
+  cloud/database/check/heart), unknown names falling back to a generic tag glyph.

@@ -225,17 +225,74 @@ fn draw_nodes(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme, depth: usize) {
     );
 
     if let Some(icon) = &n.icon {
-        svg.text(
-            cx,
-            cy + half_h + 14.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\" font-style=\"italic\""),
-            icon,
-        );
+        // Real Font Awesome glyphs aren't available without the font, so map
+        // the class string onto a small builtin glyph rather than printing the
+        // raw `fa fa-book` text (matching the architecture renderer's approach).
+        draw_mindmap_icon(svg, icon, cx, cy + half_h + 12.0, fg);
     }
 
     for c in &laid.children {
         draw_nodes(c, svg, theme, depth + 1);
     }
+}
+
+const ICON_SIZE: f64 = 16.0;
+
+/// Extract the meaningful name from a Font Awesome class string
+/// (`fa fa-book` / `fab fa-github` / `book`) — the last `fa-`-prefixed token,
+/// or the last token otherwise.
+fn icon_name(icon: &str) -> &str {
+    icon.split_whitespace()
+        .filter_map(|t| t.strip_prefix("fa-"))
+        .next_back()
+        .or_else(|| icon.split_whitespace().next_back())
+        .unwrap_or("")
+}
+
+fn draw_mindmap_icon(svg: &mut SvgBuilder, icon: &str, cx: f64, top_y: f64, stroke: &str) {
+    let paths: &[&str] = match icon_name(icon) {
+        "book" => &[
+            "M6 5 H15 C16 5 17 6 17 7 V27 C17 26 16 25 15 25 H6 Z",
+            "M26 5 H17 C16 5 15 6 15 7 V27 C15 26 16 25 17 25 H26 Z",
+        ],
+        "star" => &["M16 3 L20 13 L31 13 L22 20 L25 30 L16 24 L7 30 L10 20 L1 13 L12 13 Z"],
+        "clock" | "hourglass" => &[
+            "M16 4 A12 12 0 1 0 16 28 A12 12 0 1 0 16 4 Z",
+            "M16 9 V16 L21 20",
+        ],
+        "user" | "users" => &[
+            "M16 6 A5 5 0 1 0 16 16 A5 5 0 1 0 16 6 Z",
+            "M6 28 C6 20 26 20 26 28",
+        ],
+        "cog" | "gear" | "settings" => &[
+            "M16 11 A5 5 0 1 0 16 21 A5 5 0 1 0 16 11 Z",
+            "M16 2 V7 M16 25 V30 M2 16 H7 M25 16 H30 M6 6 L9 9 M23 23 L26 26 M26 6 L23 9 M9 23 L6 26",
+        ],
+        "cloud" => {
+            &["M9 24 C4 24 3 17 9 16 C9 11 16 9 18 14 C22 11 27 14 25 18 C30 19 28 24 24 24 Z"]
+        }
+        "database" | "db" => &[
+            "M4 8 C4 4 28 4 28 8 L28 24 C28 28 4 28 4 24 Z",
+            "M4 8 C4 12 28 12 28 8",
+        ],
+        "check" => &["M5 17 L13 25 L27 7"],
+        "heart" => &["M16 27 C4 18 4 8 12 8 C15 8 16 11 16 11 C16 11 17 8 20 8 C28 8 28 18 16 27 Z"],
+        // Unknown icon: a generic tag glyph rather than the raw class text.
+        _ => &["M6 6 H20 L26 16 L20 26 H6 Z", "M11 12 A2 2 0 1 0 11 12.1 Z"],
+    };
+    let s = ICON_SIZE / 32.0;
+    let x = cx - ICON_SIZE / 2.0;
+    let _ = write!(
+        svg.body,
+        "<g transform=\"translate({x} {y}) scale({s})\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"2\" stroke-linejoin=\"round\" stroke-linecap=\"round\">",
+        x = fnum(x),
+        y = fnum(top_y),
+        s = fnum(s),
+    );
+    for p in paths {
+        let _ = write!(svg.body, "<path d=\"{p}\"/>");
+    }
+    svg.raw("</g>");
 }
 
 #[cfg(test)]
@@ -250,10 +307,12 @@ mod tests {
                 text: "root".into(),
                 shape: MindmapShape::Circle,
                 icon: None,
+                classes: vec![],
                 children: vec![MindmapNode {
                     text: "A".into(),
                     shape: MindmapShape::Rounded,
-                    icon: None,
+                    icon: Some("fa fa-book".into()),
+                    classes: vec![],
                     children: vec![],
                 }],
             }),
@@ -262,5 +321,16 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">root<"));
         assert!(svg.contains(">A<"));
+        // The raw Font Awesome class string must not leak into the output as text.
+        assert!(!svg.contains("fa fa-book"));
+        assert!(!svg.contains("fa-book"));
+    }
+
+    #[test]
+    fn icon_name_extraction() {
+        assert_eq!(icon_name("fa fa-book"), "book");
+        assert_eq!(icon_name("fab fa-github"), "github");
+        assert_eq!(icon_name("book"), "book");
+        assert_eq!(icon_name(""), "");
     }
 }
