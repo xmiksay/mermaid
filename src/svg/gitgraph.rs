@@ -13,7 +13,6 @@ const COMMIT_R: f64 = 8.0;
 const COMMIT_GAP: f64 = 50.0;
 const LANE_GAP: f64 = 50.0;
 const TITLE_GAP: f64 = 32.0;
-const MAIN_BRANCH: &str = "main";
 
 struct CommitNode {
     id: String,
@@ -27,19 +26,47 @@ struct CommitNode {
     parents: Vec<String>,
 }
 
+/// Column for the next commit. With `parallelCommits`, it sits one past its
+/// deepest parent so independent branches can share a column; otherwise commits
+/// advance a global counter (time flows strictly left-to-right).
+fn assign_col(
+    parallel: bool,
+    parents: &[String],
+    col_of: &BTreeMap<String, usize>,
+    col: &mut usize,
+) -> usize {
+    if parallel {
+        parents
+            .iter()
+            .filter_map(|p| col_of.get(p))
+            .map(|&c| c + 1)
+            .max()
+            .unwrap_or(0)
+    } else {
+        let c = *col;
+        *col += 1;
+        c
+    }
+}
+
 pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     let fg = theme.fg;
     let fg_muted = theme.fg_muted;
 
+    let main_branch = d.config.main_branch_name.as_str();
+
     // Walk events building commits and branch state.
     let mut nodes: Vec<CommitNode> = Vec::new();
-    let mut branches: Vec<String> = vec![MAIN_BRANCH.into()];
+    let mut branches: Vec<String> = vec![main_branch.to_string()];
     // Explicit `order:` per branch (parallel to `branches`); None keeps
     // insertion order.
     let mut branch_orders: Vec<Option<usize>> = vec![None];
-    let mut current_branch = MAIN_BRANCH.to_string();
+    let mut current_branch = main_branch.to_string();
     // last commit id per branch.
     let mut head: BTreeMap<String, String> = BTreeMap::new();
+    // Column per commit id — used to resolve parent depth for parallelCommits.
+    let mut col_of: BTreeMap<String, usize> = BTreeMap::new();
+    let parallel = d.config.parallel_commits;
     let mut col: usize = 0;
     let mut auto_idx = 0usize;
     let next_id = |id: Option<String>, auto_idx: &mut usize| -> String {
@@ -61,15 +88,16 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                     .unwrap_or_default();
                 head.insert(current_branch.clone(), id.clone());
                 let lane = branches.iter().position(|b| b == &current_branch).unwrap();
+                let c = assign_col(parallel, &parents, &col_of, &mut col);
+                col_of.insert(id.clone(), c);
                 nodes.push(CommitNode {
                     id: id.clone(),
                     tag: tag.clone(),
                     kind: *kind,
-                    col,
+                    col: c,
                     lane,
                     parents,
                 });
-                col += 1;
             }
             GitEvent::Branch { name, order } => {
                 if let Some(pos) = branches.iter().position(|b| b == name) {
@@ -103,17 +131,18 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 }
                 head.insert(current_branch.clone(), id.clone());
                 let lane = branches.iter().position(|b| b == &current_branch).unwrap();
+                let c = assign_col(parallel, &parents, &col_of, &mut col);
+                col_of.insert(id.clone(), c);
                 nodes.push(CommitNode {
                     id: id.clone(),
                     tag: tag.clone(),
-                    kind: CommitKind::Highlight,
-                    col,
+                    kind: CommitKind::Merge,
+                    col: c,
                     lane,
                     parents,
                 });
-                col += 1;
             }
-            GitEvent::CherryPick { commit_id } => {
+            GitEvent::CherryPick { commit_id, tag, .. } => {
                 let new_id = format!("cp:{commit_id}");
                 let parents = head
                     .get(&current_branch)
@@ -121,15 +150,16 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                     .unwrap_or_default();
                 head.insert(current_branch.clone(), new_id.clone());
                 let lane = branches.iter().position(|b| b == &current_branch).unwrap();
+                let c = assign_col(parallel, &parents, &col_of, &mut col);
+                col_of.insert(new_id.clone(), c);
                 nodes.push(CommitNode {
                     id: new_id,
-                    tag: None,
-                    kind: CommitKind::Reverse,
-                    col,
+                    tag: tag.clone(),
+                    kind: CommitKind::CherryPick,
+                    col: c,
                     lane,
                     parents,
                 });
-                col += 1;
             }
         }
     }
@@ -202,45 +232,46 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
         }
     };
 
-    // Branch labels.
-    for (i, b) in branches.iter().enumerate() {
-        let lane = lane_of_seq[i];
-        let (x, y) = if horizontal {
-            (PAD, origin_y + lane as f64 * LANE_GAP + 4.0)
-        } else {
-            (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 14.0)
-        };
-        let color = theme.pie_color(lane);
-        svg.text(
-            x,
-            y,
-            &format!("fill=\"{color}\" font-size=\"12\" font-weight=\"bold\""),
-            b,
-        );
-    }
+    // Branch labels and lane lines (suppressed by `showBranches: false`).
+    if d.config.show_branches {
+        for (i, b) in branches.iter().enumerate() {
+            let lane = lane_of_seq[i];
+            let (x, y) = if horizontal {
+                (PAD, origin_y + lane as f64 * LANE_GAP + 4.0)
+            } else {
+                (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 14.0)
+            };
+            let color = theme.pie_color(lane);
+            svg.text(
+                x,
+                y,
+                &format!("fill=\"{color}\" font-size=\"12\" font-weight=\"bold\""),
+                b,
+            );
+        }
 
-    // Lane lines.
-    for (i, _) in branches.iter().enumerate() {
-        let lane = lane_of_seq[i];
-        let color = theme.pie_color(lane);
-        if horizontal {
-            let y = origin_y + lane as f64 * LANE_GAP;
-            svg.line(
-                origin_x,
-                y,
-                origin_x + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
-                y,
-                &format!("stroke=\"{color}\" stroke-width=\"2\""),
-            );
-        } else {
-            let x = origin_x + lane as f64 * LANE_GAP;
-            svg.line(
-                x,
-                origin_y,
-                x,
-                origin_y + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
-                &format!("stroke=\"{color}\" stroke-width=\"2\""),
-            );
+        for (i, _) in branches.iter().enumerate() {
+            let lane = lane_of_seq[i];
+            let color = theme.pie_color(lane);
+            if horizontal {
+                let y = origin_y + lane as f64 * LANE_GAP;
+                svg.line(
+                    origin_x,
+                    y,
+                    origin_x + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
+                    y,
+                    &format!("stroke=\"{color}\" stroke-width=\"2\""),
+                );
+            } else {
+                let x = origin_x + lane as f64 * LANE_GAP;
+                svg.line(
+                    x,
+                    origin_y,
+                    x,
+                    origin_y + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
+                    &format!("stroke=\"{color}\" stroke-width=\"2\""),
+                );
+            }
         }
     }
 
@@ -300,14 +331,18 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 svg.rect(x - COMMIT_R, y - COMMIT_R, COMMIT_R * 2.0, COMMIT_R * 2.0,
                     &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\" transform=\"rotate(45 {} {})\"", fnum(x), fnum(y)));
             }
+            CommitKind::Merge => draw_merge_glyph(&mut svg, x, y, color),
+            CommitKind::CherryPick => draw_cherry_pick_glyph(&mut svg, x, y, color, fg),
         }
         // Commit id label.
-        svg.text(
-            x,
-            y + COMMIT_R + 12.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"10\""),
-            &n.id,
-        );
+        if d.config.show_commit_label {
+            let mut attrs = format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"10\"");
+            let ly = y + COMMIT_R + 12.0;
+            if d.config.rotate_commit_label && horizontal {
+                let _ = write!(attrs, " transform=\"rotate(-45 {} {})\"", fnum(x), fnum(ly));
+            }
+            svg.text(x, ly, &attrs, &n.id);
+        }
         if let Some(t) = &n.tag {
             svg.text(
                 x,
@@ -321,6 +356,40 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
+}
+
+/// Merge commit: two concentric circles (an outer disc with an inner ring),
+/// distinct from a plain commit.
+fn draw_merge_glyph(svg: &mut SvgBuilder, x: f64, y: f64, color: &str) {
+    svg.circle(
+        x,
+        y,
+        COMMIT_R + 1.0,
+        &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\""),
+    );
+    svg.circle(
+        x,
+        y,
+        COMMIT_R - 3.0,
+        &format!("fill=\"#fff\" stroke=\"{color}\" stroke-width=\"1.5\""),
+    );
+}
+
+/// Cherry-pick commit: a disc carrying the two-cherry glyph (upstream's
+/// dedicated cherry-pick marker).
+fn draw_cherry_pick_glyph(svg: &mut SvgBuilder, x: f64, y: f64, color: &str, fg: &str) {
+    svg.circle(
+        x,
+        y,
+        COMMIT_R,
+        &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\""),
+    );
+    let cherry = "fill=\"#fff\"";
+    svg.circle(x - 3.0, y + 2.0, 2.5, cherry);
+    svg.circle(x + 3.0, y + 2.0, 2.5, cherry);
+    let stem = &format!("stroke=\"{fg}\" stroke-width=\"1\"");
+    svg.line(x - 3.0, y + 2.0, x + 4.0, y - 4.0, stem);
+    svg.line(x + 3.0, y + 2.0, x - 4.0, y - 4.0, stem);
 }
 
 #[cfg(test)]
@@ -354,6 +423,7 @@ mod tests {
                     kind: CommitKind::Normal,
                 },
             ],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -378,6 +448,7 @@ mod tests {
                     kind: CommitKind::Normal,
                 },
             ],
+            ..Default::default()
         }
     }
 
@@ -411,11 +482,97 @@ mod tests {
                     order: Some(1),
                 },
             ],
+            ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         let low_x = lane_x_before(&svg, svg.find(">low<").unwrap());
         let high_x = lane_x_before(&svg, svg.find(">high<").unwrap());
         assert!(low_x < high_x, "lower order should claim the earlier lane");
+    }
+
+    #[test]
+    fn main_branch_name_honored() {
+        let d = GitGraphDiagram {
+            events: vec![GitEvent::Commit {
+                id: None,
+                tag: None,
+                kind: CommitKind::Normal,
+            }],
+            config: crate::parse::GitGraphConfig {
+                main_branch_name: "master".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">master<"));
+        assert!(!svg.contains(">main<"));
+    }
+
+    #[test]
+    fn show_branches_and_commit_label_suppressed() {
+        let d = GitGraphDiagram {
+            events: vec![GitEvent::Commit {
+                id: Some("only".into()),
+                tag: None,
+                kind: CommitKind::Normal,
+            }],
+            config: crate::parse::GitGraphConfig {
+                show_branches: false,
+                show_commit_label: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // No branch label and no commit id label.
+        assert!(!svg.contains(">main<"));
+        assert!(!svg.contains(">only<"));
+    }
+
+    #[test]
+    fn merge_and_cherry_pick_use_distinct_glyphs() {
+        // A merge and a cherry-pick must not reuse the highlight/reverse glyphs.
+        let d = GitGraphDiagram {
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tag: None,
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
+                GitEvent::Commit {
+                    id: Some("b".into()),
+                    tag: None,
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Checkout {
+                    name: "main".into(),
+                },
+                GitEvent::Merge {
+                    from: "dev".into(),
+                    id: Some("m".into()),
+                    tag: None,
+                },
+                GitEvent::CherryPick {
+                    commit_id: "b".into(),
+                    parent: None,
+                    tag: Some("cp".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Cherry-pick tag is drawn.
+        assert!(svg.contains(">[cp]<"));
+        // The cherry glyph draws small r="2.5" circles; the merge glyph an
+        // inner r="5" ring — neither is a rotated square (reverse glyph).
+        assert!(svg.contains("r=\"2.5\""));
+        assert!(svg.contains("r=\"5\""));
+        assert!(!svg.contains("rotate(45"));
     }
 
     /// Reads the `x="…"` of the `<text>` element ending just before byte `end`.

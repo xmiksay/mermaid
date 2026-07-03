@@ -47,6 +47,37 @@ pub struct GitGraphDiagram {
     pub title: Option<String>,
     pub direction: GitDirection,
     pub events: Vec<GitEvent>,
+    /// `gitGraph` config keys from `%%{init}%%` / frontmatter `config`.
+    pub config: GitGraphConfig,
+}
+
+/// gitGraph configuration (upstream `config.gitGraph.*`), filled from the
+/// source preamble. Non-`Default` fields keep upstream's own defaults.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitGraphConfig {
+    /// `mainBranchName` — the initial/default branch (upstream default `main`).
+    pub main_branch_name: String,
+    /// `showBranches` — draw branch labels and lane lines.
+    pub show_branches: bool,
+    /// `showCommitLabel` — draw the per-commit id label.
+    pub show_commit_label: bool,
+    /// `rotateCommitLabel` — rotate the commit id label (horizontal layout).
+    pub rotate_commit_label: bool,
+    /// `parallelCommits` — position commits by parent depth so independent
+    /// branches can share a column instead of always advancing time.
+    pub parallel_commits: bool,
+}
+
+impl Default for GitGraphConfig {
+    fn default() -> Self {
+        Self {
+            main_branch_name: "main".into(),
+            show_branches: true,
+            show_commit_label: true,
+            rotate_commit_label: true,
+            parallel_commits: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -81,6 +112,11 @@ pub enum GitEvent {
     },
     CherryPick {
         commit_id: String,
+        /// `parent:"…"` — required by upstream when cherry-picking a merge
+        /// commit to pick which parent lineage.
+        parent: Option<String>,
+        /// `tag:"…"` — label drawn on the cherry-pick node.
+        tag: Option<String>,
     },
 }
 
@@ -91,6 +127,10 @@ pub enum CommitKind {
     Normal,
     Highlight,
     Reverse,
+    /// A merge commit — drawn as a double concentric circle.
+    Merge,
+    /// A cherry-pick commit — drawn with the dedicated cherry glyph.
+    CherryPick,
 }
 
 // ---- requirement -----------------------------------------------------------
