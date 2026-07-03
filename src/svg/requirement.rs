@@ -200,6 +200,11 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
                 vec![(acx, acy), (bcx, bcy)]
             };
 
+        // Router always returns both endpoints; guard the invariant so a
+        // regression skips the edge instead of underflowing `pts.len() - 1`.
+        if pts.len() < 2 {
+            continue;
+        }
         let first = clip_rect(pts[1], (acx, acy), (a.2, a.3));
         let last_idx = pts.len() - 1;
         let last = clip_rect(pts[last_idx - 1], (bcx, bcy), (b.2, b.3));

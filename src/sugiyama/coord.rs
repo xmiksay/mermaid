@@ -76,7 +76,7 @@ fn assign_x(w: &mut Work, node_gap: f64, max_iter: usize) {
                             x[u]
                         })
                         .collect();
-                    positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    positions.sort_by(|a, b| a.total_cmp(b));
                     let m = positions.len();
                     let target = if m % 2 == 1 {
                         positions[m / 2]
@@ -159,7 +159,7 @@ mod tests {
         // All children share layer 1: verify they don't overlap horizontally.
         for layer in &w.layers {
             let mut by_x: Vec<(f64, usize)> = layer.iter().map(|&v| (w.x[v], v)).collect();
-            by_x.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            by_x.sort_by(|a, b| a.0.total_cmp(&b.0));
             for win in by_x.windows(2) {
                 let (xa, va) = win[0];
                 let (xb, vb) = win[1];

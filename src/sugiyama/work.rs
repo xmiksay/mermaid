@@ -130,3 +130,101 @@ impl Work {
         self.kinds.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sugiyama::Graph;
+
+    fn graph(nodes: &[NodeId], edges: &[(NodeId, NodeId)]) -> Graph {
+        let node_size = nodes.iter().map(|&n| (n, (10.0, 10.0))).collect();
+        Graph {
+            nodes: nodes.to_vec(),
+            edges: edges.to_vec(),
+            node_size,
+        }
+    }
+
+    #[test]
+    fn from_input_indexes_reals_and_adjacency() {
+        let w = Work::from_input(&graph(&[1, 2, 3], &[(1, 2), (2, 3)])).unwrap();
+        assert_eq!(w.node_count(), 3);
+        assert_eq!(w.real_idx[&1], 0);
+        assert_eq!(w.real_idx[&3], 2);
+        // (1->2) recorded as an out-edge of 1 and an in-edge of 2.
+        assert_eq!(w.out_e[w.real_idx[&1]].len(), 1);
+        assert_eq!(w.in_e[w.real_idx[&2]].len(), 1);
+        assert!(w.self_loop.iter().all(|&s| !s));
+    }
+
+    #[test]
+    fn self_loop_is_flagged_and_kept_out_of_adjacency() {
+        let w = Work::from_input(&graph(&[1], &[(1, 1)])).unwrap();
+        assert_eq!(w.self_loop, vec![true]);
+        // A self-loop shapes no adjacency so it can't drive layering.
+        assert!(w.out_e[0].is_empty());
+        assert!(w.in_e[0].is_empty());
+    }
+
+    #[test]
+    fn duplicate_node_is_rejected() {
+        let g = graph(&[1, 1], &[]);
+        assert_eq!(
+            Work::from_input(&g).err(),
+            Some(LayoutError::DuplicateNode(1))
+        );
+    }
+
+    #[test]
+    fn unknown_edge_endpoint_is_rejected() {
+        let g = graph(&[1], &[(1, 2)]);
+        assert_eq!(
+            Work::from_input(&g).err(),
+            Some(LayoutError::UnknownNode(2))
+        );
+    }
+
+    #[test]
+    fn missing_size_is_rejected() {
+        let g = Graph {
+            nodes: vec![1, 2],
+            edges: vec![],
+            node_size: HashMap::from([(1, (10.0, 10.0))]),
+        };
+        assert_eq!(
+            Work::from_input(&g).err(),
+            Some(LayoutError::MissingSize(2))
+        );
+    }
+
+    #[test]
+    fn add_dummy_grows_all_arrays_in_lockstep() {
+        let mut w = Work::from_input(&graph(&[1, 2], &[(1, 2)])).unwrap();
+        let before = w.node_count();
+        let idx = w.add_dummy();
+        assert_eq!(idx, before);
+        assert_eq!(w.node_count(), before + 1);
+        for len in [w.w.len(), w.h.len(), w.rank.len(), w.x.len(), w.y.len()] {
+            assert_eq!(len, before + 1);
+        }
+        assert!(matches!(w.kinds[idx], NodeKind::Dummy));
+    }
+
+    #[test]
+    fn reverse_edge_swaps_endpoints_and_toggles_flag() {
+        let mut w = Work::from_input(&graph(&[1, 2], &[(1, 2)])).unwrap();
+        assert!(!w.reversed[0]);
+        w.reverse_edge(0);
+        let e = w.edges[0];
+        assert_eq!(e.src, w.real_idx[&2]);
+        assert_eq!(e.dst, w.real_idx[&1]);
+        assert!(w.reversed[0]);
+        // Adjacency followed the reversal.
+        assert!(w.out_e[w.real_idx[&2]].contains(&0));
+        assert!(w.in_e[w.real_idx[&1]].contains(&0));
+        // Reversing again restores the original orientation.
+        w.reverse_edge(0);
+        assert!(!w.reversed[0]);
+        assert_eq!(w.edges[0].src, w.real_idx[&1]);
+    }
+}
