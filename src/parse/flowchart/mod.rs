@@ -18,8 +18,9 @@
 //!   * `subgraph <id> [label]` ... `end` blocks tracked in `subgraphs`,
 //!     including nesting.
 //!   * `click <id> …` binds a hyperlink or JS callback to a node.
-//!   * Mermaid v11 edge ids: the `e1@` prefix in `A e1@--> B` and a standalone
-//!     `e1@{ … }` edge-attribute statement are parsed and ignored.
+//!   * Mermaid v11 edge ids: the `e1@` prefix in `A e1@--> B` names the edge,
+//!     and a standalone `e1@{ animate: …, curve: … }` statement applies those
+//!     attributes to it.
 //!   * `style`/`class` on a subgraph id styles the cluster frame; other
 //!     `style`/`classDef`/`class`/`linkStyle` populate the node/edge styles.
 //!
@@ -32,7 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::ast::{FlowDirection, FlowchartDiagram, Style, Subgraph};
+use super::ast::{EdgeCurve, FlowDirection, FlowchartDiagram, Style, Subgraph};
 use super::{strip_comment, ParseError};
 
 mod click;
@@ -45,7 +46,7 @@ use click::parse_click;
 use directive::{
     handle_class_apply, handle_class_def, handle_link_style, handle_style, node_index,
 };
-use edge::edge_attr_stmt_id;
+use edge::edge_attr_stmt;
 use node::parse_statement;
 
 pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
@@ -129,9 +130,11 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
         }
 
         // A standalone `e1@{ … }` edge-attribute statement (v11) referencing a
-        // known edge id carries no node — skip it so it doesn't spawn a phantom.
-        if let Some(eid) = edge_attr_stmt_id(line) {
+        // known edge id carries no node — apply its attributes to the edge and
+        // skip it so it doesn't spawn a phantom node.
+        if let Some((eid, attrs)) = edge_attr_stmt(line) {
             if edge_ids.contains(&eid) {
+                apply_edge_attrs(&mut diag, &eid, &attrs);
                 continue;
             }
         }
@@ -177,6 +180,24 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
         }
     }
     Ok(diag)
+}
+
+/// Apply a v11 `id@{ … }` edge-attribute statement to every edge carrying that
+/// id. `animate: true` turns on the dash-flow animation; `curve: <name>` sets
+/// the per-edge interpolation. Unknown keys are ignored.
+fn apply_edge_attrs(diag: &mut FlowchartDiagram, id: &str, attrs: &[(String, String)]) {
+    for edge in diag.edges.iter_mut() {
+        if edge.id.as_deref() != Some(id) {
+            continue;
+        }
+        for (key, value) in attrs {
+            match key.as_str() {
+                "animate" => edge.animate = value.eq_ignore_ascii_case("true"),
+                "curve" => edge.curve = Some(EdgeCurve::from_name(value)),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Split a comment-stripped line into statements at top-level `;`. A semicolon

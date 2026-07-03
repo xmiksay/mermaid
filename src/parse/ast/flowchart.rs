@@ -17,6 +17,10 @@ pub struct FlowchartDiagram {
     pub edge_styles: HashMap<usize, Style>,
     /// `linkStyle default …` applied to all edges.
     pub link_style_default: Style,
+    /// `linkStyle <idx> interpolate <curve>` overrides, keyed by edge index.
+    pub edge_interpolate: HashMap<usize, EdgeCurve>,
+    /// `linkStyle default interpolate <curve>` applied to all edges.
+    pub default_interpolate: Option<EdgeCurve>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -145,6 +149,40 @@ pub struct FlowEdge {
     /// `EdgeHead::None` for the common one-directional edge.
     pub tail: EdgeHead,
     pub head: EdgeHead,
+    /// Mermaid v11 edge id from the `A e1@--> B` prefix, if one was given.
+    /// Ties a later `e1@{ … }` attribute statement back to this edge.
+    pub id: Option<String>,
+    /// `e1@{ animate: true }` — draws a flowing dash animation on the edge.
+    pub animate: bool,
+    /// `e1@{ curve: … }` — per-edge interpolation, overriding the default basis.
+    pub curve: Option<EdgeCurve>,
+}
+
+/// Edge interpolation (d3 curve factory). `Basis` is the default; `Linear` and
+/// `Step` are the concrete alternatives — any other upstream curve name falls
+/// back to `Basis`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum EdgeCurve {
+    /// `basis` — smoothed B-spline (the default).
+    #[default]
+    Basis,
+    /// `linear` — straight segments between waypoints.
+    Linear,
+    /// `step`/`stepAfter`/`stepBefore` — orthogonal right-angle steps.
+    Step,
+}
+
+impl EdgeCurve {
+    /// Map an upstream curve name onto a supported variant; unknown names
+    /// (`cardinal`, `natural`, …) fall back to `Basis`.
+    pub fn from_name(name: &str) -> EdgeCurve {
+        match name.trim() {
+            "linear" => EdgeCurve::Linear,
+            "step" | "stepAfter" | "stepBefore" => EdgeCurve::Step,
+            _ => EdgeCurve::Basis,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -6,7 +6,7 @@
 //! prefix and the standalone `e1@{ … }` edge-attribute statement.
 
 use super::super::ast::{EdgeHead, EdgeLine};
-use super::super::token::unquote;
+use super::super::token::{split_unquoted, unquote};
 use super::super::ParseError;
 use super::scanner::Scanner;
 
@@ -32,19 +32,30 @@ pub(super) fn consume_edge_id(sc: &mut Scanner<'_>) -> Option<String> {
 }
 
 /// If `line` is exactly a v11 edge-attribute statement `id@{ … }` (an id, `@{`,
-/// a body, a closing `}`, and nothing more), return the id. Used to drop such a
-/// statement when `id` names a known edge instead of spawning a phantom node.
-pub(super) fn edge_attr_stmt_id(line: &str) -> Option<String> {
+/// a body, a closing `}`, and nothing more), return the id and its parsed
+/// `key: value` pairs. Used to apply the attributes to a known edge (or drop the
+/// statement) instead of spawning a phantom node.
+pub(super) fn edge_attr_stmt(line: &str) -> Option<(String, Vec<(String, String)>)> {
     let mut sc = Scanner::new(line);
     let id = sc.read_ident()?;
     if !sc.peek_str("@{") {
         return None;
     }
     sc.advance(2);
-    sc.read_until("}")?;
+    let body = sc.read_until("}")?;
     sc.try_consume("}");
     sc.skip_ws();
-    sc.eof().then_some(id)
+    if !sc.eof() {
+        return None;
+    }
+    let attrs = split_unquoted(&body, ',')
+        .into_iter()
+        .filter_map(|part| {
+            part.split_once(':')
+                .map(|(k, v)| (k.trim().to_string(), unquote(v.trim()).to_string()))
+        })
+        .collect();
+    Some((id, attrs))
 }
 
 /// The shape of an edge connector: `(line, tail head, arrow head, label)`.
@@ -436,11 +447,23 @@ mod tests {
     }
 
     #[test]
-    fn v11_edge_attr_statement_is_dropped() {
-        // `e1@{ animate: true }` referencing a known edge id spawns no node.
-        let d = parse("flowchart TD\nA e1@--> B\ne1@{ animate: true }\n").unwrap();
+    fn v11_edge_attr_statement_applies_and_spawns_no_node() {
+        // `e1@{ animate: true, curve: step }` referencing a known edge id spawns
+        // no node and applies its attributes to that edge.
+        let d = parse("flowchart TD\nA e1@--> B\ne1@{ animate: true, curve: step }\n").unwrap();
         assert_eq!(d.edges.len(), 1);
         assert_eq!(d.nodes.len(), 2);
         assert!(!d.nodes.iter().any(|n| n.id == "e1"));
+        assert_eq!(d.edges[0].id.as_deref(), Some("e1"));
+        assert!(d.edges[0].animate);
+        assert_eq!(d.edges[0].curve, Some(crate::parse::ast::EdgeCurve::Step));
+    }
+
+    #[test]
+    fn v11_edge_id_carried_onto_edge() {
+        let d = parse("flowchart TD\nA e1@--> B\n").unwrap();
+        assert_eq!(d.edges[0].id.as_deref(), Some("e1"));
+        assert!(!d.edges[0].animate);
+        assert_eq!(d.edges[0].curve, None);
     }
 }

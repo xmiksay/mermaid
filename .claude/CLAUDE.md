@@ -281,10 +281,21 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     cleanup, so the parser moves its `style`/`classes` onto `Subgraph.style`/
     `Subgraph.classes` first; the renderer resolves them through the shared
     `resolve_style` (fill/stroke override the theme cluster colors).
-  - Mermaid v11 edge ids parse and are ignored: the `e1@` prefix in
-    `A e1@--> B` (`consume_edge_id`, recorded in an `edge_ids` set) and a
-    standalone `e1@{ … }` edge-attribute statement (`edge_attr_stmt_id`, dropped
-    when the id is a known edge) — so v11 documents render instead of erroring.
+  - Mermaid v11 edge ids and attributes: the `e1@` prefix in `A e1@--> B`
+    (`consume_edge_id`) names the edge — recorded in an `edge_ids` set *and*
+    stored on `FlowEdge.id` — and a standalone `e1@{ animate: …, curve: … }`
+    statement (`edge_attr_stmt`) applies those attributes to the matching edge
+    (`apply_edge_attrs`) instead of spawning a phantom node. `animate: true`
+    sets `FlowEdge.animate` (a SMIL `<animate>` on `stroke-dashoffset` in
+    `draw_edge`, needing a dash pattern — falls back to `8 8`); `curve: <name>`
+    sets `FlowEdge.curve` (`EdgeCurve::from_name`). `linkStyle N interpolate
+    <curve>` / `linkStyle default interpolate <curve>` fill
+    `FlowchartDiagram.edge_interpolate`/`default_interpolate`. The renderer
+    resolves the effective curve per edge — `@{ curve }` → per-index
+    interpolate → default interpolate → basis — and `curve_basis_path`,
+    `curve_linear_path` (straight segments), and `curve_step_path` (orthogonal
+    right-angle steps) in `src/svg/builder.rs` build the path. Any other
+    upstream curve name (`cardinal`, `natural`, …) falls back to basis.
   - `direction X` inside a subgraph body fills `Subgraph.direction`. The
     renderer works in screen space and, for a cluster whose flow axis differs
     from the diagram's, transposes just that cluster's members (and their

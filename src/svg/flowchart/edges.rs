@@ -4,11 +4,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
-    EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape,
+    EdgeCurve, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape,
 };
 use crate::sugiyama::NodeId;
 
-use crate::svg::builder::{curve_basis_path, SvgBuilder};
+use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, SvgBuilder};
 use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
 use crate::svg::style::ResolvedStyle;
 use crate::svg::theme::Theme;
@@ -113,10 +113,12 @@ pub(super) fn apply_local_directions(
 
 // ---- edge drawing ----------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_edge(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
     edge: &FlowEdge,
+    curve: EdgeCurve,
     style_override: &ResolvedStyle,
     start: &EndClip,
     end: &EndClip,
@@ -137,7 +139,11 @@ pub(super) fn draw_edge(
     }
     clipped.push(last);
 
-    let d = curve_basis_path(&clipped);
+    let d = match curve {
+        EdgeCurve::Linear => curve_linear_path(&clipped),
+        EdgeCurve::Step => curve_step_path(&clipped),
+        _ => curve_basis_path(&clipped),
+    };
 
     // linkStyle overrides layer over the kind-based defaults.
     let stroke = style_override
@@ -149,19 +155,56 @@ pub(super) fn draw_edge(
         _ => "1.5",
     };
     let width = style_override.stroke_width.as_deref().unwrap_or(default_w);
-    let dash = match (&style_override.stroke_dasharray, edge.line) {
-        (Some(da), _) => format!(" stroke-dasharray=\"{da}\""),
-        (None, EdgeLine::Dotted) => " stroke-dasharray=\"2 4\"".to_string(),
-        _ => String::new(),
+    // An animated edge needs a dash pattern to flow; keep any explicit/dotted
+    // dash, otherwise fall back to a plain `8 8`.
+    let dash_val = match (&style_override.stroke_dasharray, edge.line) {
+        (Some(da), _) => Some(da.clone()),
+        (None, EdgeLine::Dotted) => Some("2 4".to_string()),
+        _ => None,
     };
+    let dash_val = if edge.animate {
+        dash_val.or_else(|| Some("8 8".to_string()))
+    } else {
+        dash_val
+    };
+    let dash = dash_val
+        .as_ref()
+        .map(|d| format!(" stroke-dasharray=\"{d}\""))
+        .unwrap_or_default();
     let marker = marker_attr(edge_marker(edge.tail), edge_marker(edge.head));
     let attrs =
         format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{width}\"{dash} {marker}");
-    svg.path(&d, &attrs);
+    if edge.animate {
+        // SMIL animation on stroke-dashoffset: works in browsers without JS.
+        // The offset sweeps one full dash period so the flow loops seamlessly.
+        let period = dash_period(dash_val.as_deref().unwrap_or("8 8"));
+        let anim = format!(
+            "<animate attributeName=\"stroke-dashoffset\" values=\"{};0\" \
+             dur=\"0.6s\" repeatCount=\"indefinite\"/>",
+            crate::svg::builder::fnum(period)
+        );
+        svg.raw(&format!("<path d=\"{d}\" {attrs}>{anim}</path>"));
+    } else {
+        svg.path(&d, &attrs);
+    }
 
     if let Some(label) = &edge.label {
         let mid = polyline_midpoint(&clipped);
         draw_edge_label(svg, mid, label, theme);
+    }
+}
+
+/// Sum the numeric lengths in a `stroke-dasharray` value (e.g. `"8 8"` → 16) to
+/// get the offset the animation must travel for one seamless loop.
+fn dash_period(dash: &str) -> f64 {
+    let sum: f64 = dash
+        .split([' ', ','])
+        .filter_map(|t| t.trim().parse::<f64>().ok())
+        .sum();
+    if sum > 0.0 {
+        sum
+    } else {
+        16.0
     }
 }
 

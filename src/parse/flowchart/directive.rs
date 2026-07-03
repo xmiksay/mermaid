@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use super::super::ast::{FlowNode, FlowchartDiagram, NodeShape, Style};
+use super::super::ast::{EdgeCurve, FlowNode, FlowchartDiagram, NodeShape, Style};
 use super::super::style::parse_style_props;
 
 /// Index of the node with `id`, creating a bare rectangle placeholder if a
@@ -85,28 +85,36 @@ pub(super) fn handle_class_apply(
 }
 
 /// `linkStyle <default|idx-list> [interpolate <curve>] <props>` — style edges
-/// by their definition index. The optional `interpolate <curve>` clause is
-/// accepted but ignored (curve is fixed to basis).
+/// by their definition index. The optional `interpolate <curve>` clause sets the
+/// edge interpolation (`linear`/`step`/…); the remaining tokens are real props.
 pub(super) fn handle_link_style(rest: &str, diag: &mut FlowchartDiagram) {
     let Some((selector, props)) = rest.trim().split_once(char::is_whitespace) else {
         return;
     };
     let mut props = props.trim();
+    let mut curve = None;
     if let Some(after) = props.strip_prefix("interpolate ") {
-        // Drop `interpolate <curve>`; the remaining (if any) are real props.
-        props = after
+        let (name, remaining) = after
             .trim()
             .split_once(char::is_whitespace)
-            .map_or("", |(_, p)| p);
+            .unwrap_or((after.trim(), ""));
+        curve = Some(EdgeCurve::from_name(name));
+        props = remaining;
     }
     let style = parse_style_props(props);
     if selector == "default" {
         diag.link_style_default = style;
+        if let Some(c) = curve {
+            diag.default_interpolate = Some(c);
+        }
         return;
     }
     for idx in selector.split(',') {
         if let Ok(i) = idx.trim().parse::<usize>() {
             diag.edge_styles.insert(i, style.clone());
+            if let Some(c) = curve {
+                diag.edge_interpolate.insert(i, c);
+            }
         }
     }
 }
@@ -174,11 +182,27 @@ mod tests {
     }
 
     #[test]
-    fn link_style_interpolate_is_ignored() {
-        let d = parse("flowchart TD\nA-->B\nlinkStyle 0 interpolate basis stroke:#abc\n").unwrap();
+    fn link_style_interpolate_sets_curve_and_keeps_props() {
+        use super::super::super::ast::EdgeCurve;
+        let d = parse("flowchart TD\nA-->B\nlinkStyle 0 interpolate linear stroke:#abc\n").unwrap();
         assert_eq!(
             d.edge_styles[&0],
             vec![("stroke".to_string(), "#abc".to_string())]
         );
+        assert_eq!(d.edge_interpolate[&0], EdgeCurve::Linear);
+    }
+
+    #[test]
+    fn link_style_interpolate_without_props() {
+        use super::super::super::ast::EdgeCurve;
+        let d = parse("flowchart TD\nA-->B\nlinkStyle 0 interpolate step\n").unwrap();
+        assert_eq!(d.edge_interpolate[&0], EdgeCurve::Step);
+    }
+
+    #[test]
+    fn link_style_default_interpolate() {
+        use super::super::super::ast::EdgeCurve;
+        let d = parse("flowchart TD\nA-->B\nlinkStyle default interpolate linear\n").unwrap();
+        assert_eq!(d.default_interpolate, Some(EdgeCurve::Linear));
     }
 }

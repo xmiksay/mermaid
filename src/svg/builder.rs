@@ -327,6 +327,40 @@ pub(crate) fn curve_basis_path(pts: &[(f64, f64)]) -> String {
     s
 }
 
+/// Straight-segment path through the waypoints (d3 `curveLinear`): a `moveTo`
+/// the first point, a `lineTo` each remaining one.
+pub(crate) fn curve_linear_path(pts: &[(f64, f64)]) -> String {
+    let mut s = String::new();
+    for (i, &(x, y)) in pts.iter().enumerate() {
+        let cmd = if i == 0 { 'M' } else { 'L' };
+        let _ = write!(s, "{cmd}{} {}", fnum(x), fnum(y));
+    }
+    s
+}
+
+/// Orthogonal right-angle path through the waypoints (d3 `curveStep`, `t=0.5`):
+/// each segment turns at the mid-x between its endpoints. A final `lineTo`
+/// reaches the true last point so the arrow marker still lands on the node.
+pub(crate) fn curve_step_path(pts: &[(f64, f64)]) -> String {
+    let n = pts.len();
+    let mut s = String::new();
+    if n == 0 {
+        return s;
+    }
+    let (mut px, mut py) = pts[0];
+    let _ = write!(s, "M{} {}", fnum(px), fnum(py));
+    for &(x, y) in &pts[1..] {
+        let mx = (px + x) / 2.0;
+        let _ = write!(s, "L{} {}L{} {}", fnum(mx), fnum(py), fnum(mx), fnum(y));
+        px = x;
+        py = y;
+    }
+    if n > 1 {
+        let _ = write!(s, "L{} {}", fnum(px), fnum(py));
+    }
+    s
+}
+
 /// Format an f64 with up to 3 decimals, trimming trailing zeros so the SVG
 /// stays compact and matches across platforms.
 pub fn fnum(v: f64) -> String {
@@ -509,5 +543,24 @@ mod tests {
         assert!(d.contains('C'));
         // Endpoint exactness: path must end at the last point.
         assert!(d.ends_with("L20 0"));
+    }
+
+    #[test]
+    fn curve_linear_is_straight_segments() {
+        assert_eq!(curve_linear_path(&[]), "");
+        assert_eq!(curve_linear_path(&[(3.0, 4.0)]), "M3 4");
+        let d = curve_linear_path(&[(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)]);
+        assert_eq!(d, "M0 0L10 10L20 0");
+        assert!(!d.contains('C'));
+    }
+
+    #[test]
+    fn curve_step_turns_at_midpoints_and_reaches_endpoint() {
+        assert_eq!(curve_step_path(&[]), "");
+        assert_eq!(curve_step_path(&[(3.0, 4.0)]), "M3 4");
+        let d = curve_step_path(&[(0.0, 0.0), (20.0, 10.0)]);
+        // Mid-x is 10: go to (10,0), (10,10), then the true endpoint (20,10).
+        assert_eq!(d, "M0 0L10 0L10 10L20 10");
+        assert!(!d.contains('C'));
     }
 }

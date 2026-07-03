@@ -343,3 +343,44 @@ fn adjacent_layer_edge_stays_straight() {
     let svg = render(&parse_flow("flowchart TD\na --> b\n"), &Theme::default());
     assert!(!any_bezier_path(&svg));
 }
+
+#[test]
+fn edge_attr_animate_emits_smil_animation() {
+    let svg = render(
+        &parse_flow("flowchart TD\nA e1@--> B\ne1@{ animate: true }\n"),
+        &Theme::default(),
+    );
+    assert!(svg.contains("<animate attributeName=\"stroke-dashoffset\""));
+    assert!(svg.contains("repeatCount=\"indefinite\""));
+    // Needs a dash pattern to make the flow visible.
+    assert!(svg.contains("stroke-dasharray=\"8 8\""));
+}
+
+#[test]
+fn link_style_interpolate_linear_removes_curve() {
+    // The skip edge a→d curves under the default basis...
+    let basis = render(
+        &parse_flow("flowchart TD\na --> b --> c --> d\na --> d\n"),
+        &Theme::default(),
+    );
+    assert!(any_bezier_path(&basis));
+    // ...and becomes straight segments (no cubic `C`) under linear interpolate.
+    let linear = render(
+        &parse_flow(
+            "flowchart TD\na --> b --> c --> d\na --> d\nlinkStyle default interpolate linear\n",
+        ),
+        &Theme::default(),
+    );
+    assert!(!any_bezier_path(&linear));
+}
+
+#[test]
+fn edge_attr_curve_step_is_honored() {
+    // `curve: step` renders orthogonal steps — no cubic bezier on the skip edge.
+    let svg = render(
+        &parse_flow("flowchart TD\na --> b --> c --> d\na e1@--> d\ne1@{ curve: step }\n"),
+        &Theme::default(),
+    );
+    assert!(svg.starts_with("<svg"));
+    assert!(!any_bezier_path(&svg));
+}
