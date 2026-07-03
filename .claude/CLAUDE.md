@@ -604,11 +604,19 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `$fontColor`/`$borderColor`, rel `$textColor`/`$lineColor`/`$offsetX/Y`.
   `$c4ShapeInRow`/`$c4BoundaryInRow` override the row-flow wrap counts
   (`flow_layout`'s `shape_in_row`/`boundary_in_row`). `C4Relation.direction`
-  (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout.
+  (`Rel_U/D/L/R`) is parsed but not used by the row-flow layout. `Rel_Back`
+  reverses the arrow (from/to swapped at parse time so the head lands on
+  `from`); `RelIndex(index, from, to, …)` is the C4Dynamic step form — the
+  leading index shifts every positional slot by one and is prepended to the
+  label (`"{index}: {label}"`). Both were previously swallowed by the tolerant
+  unknown-line arm.
   C4Deployment's `Node(...)`/`Node_L(...)`/`Node_R(...)` boundary openers alias
   `Deployment_Node` in `parse_boundary_open` (checked `Node_L`/`Node_R` before
   the bare `Node` prefix), so their children nest instead of leaking to top
-  level.
+  level. A boundary/`Deployment_Node`'s optional third arg (`type`) lands on
+  `C4Element.boundary_type` and, when present, overrides the fixed per-kind
+  `[label]` header tag (`boundary_tag_text` in `src/svg/c4/mod.rs`) — e.g.
+  `Deployment_Node(n, "Web Server", "Ubuntu 16.04 LTS")` shows `[Ubuntu 16.04 LTS]`.
   - C4 element/relation macros are **not** positional-only: `split_macro_args`
     (`src/parse/c4/calls.rs`) pulls the `$descr`/`$techn`/`$sprite`/`$tags`/
     `$link` keyword args out of the arg list before slotting the positional

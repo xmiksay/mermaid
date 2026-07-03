@@ -13,6 +13,8 @@
 //! Node(alias, "Label", "Description") { ... }
 //! Rel(from, to, "Label", "Optional Tech")
 //! Rel_U/D/L/R(...)
+//! Rel_Back(from, to, "Label")  // arrow reversed
+//! RelIndex(index, from, to, "Label")  // C4Dynamic step, index first
 //! Enterprise_Boundary(alias, "Label") { ... }
 //! System_Boundary(alias, "Label") { ... }
 //! Container_Boundary(alias, "Label") { ... }
@@ -88,6 +90,7 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
                 boundary_alias: None,
                 boundary_label: None,
                 boundary_kind: Some(kind),
+                boundary_type: btype,
                 members: Vec::new(),
             };
             for el in inner.elements {
@@ -100,7 +103,6 @@ pub(crate) fn parse(input: &str) -> Result<C4Diagram, ParseError> {
                 apply_directive(&mut d, dir);
             }
             d.elements.push(element);
-            let _ = btype;
             let _ = has_open;
             continue;
         }
@@ -208,7 +210,7 @@ fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseE
             out.directives.push(dir);
             continue;
         }
-        if let Some((kind, alias, label, _, _)) = parse_boundary_open(&line) {
+        if let Some((kind, alias, label, btype, _)) = parse_boundary_open(&line) {
             let mut tmp_i = 0;
             let rest: Vec<(usize, String)> = body[i..].to_vec();
             let nested_body = collect_until_close(&rest, &mut tmp_i);
@@ -227,6 +229,7 @@ fn parse_boundary_body(body: &[(usize, String)]) -> Result<BoundaryInner, ParseE
                 boundary_alias: None,
                 boundary_label: None,
                 boundary_kind: Some(kind),
+                boundary_type: btype,
                 members: inner.elements,
             };
             for r in inner.relations {

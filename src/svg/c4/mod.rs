@@ -161,6 +161,8 @@ struct BoundaryBox {
     alias: String,
     label: String,
     kind: C4BoundaryKind,
+    /// Explicit type argument (overrides the fixed per-kind `[label]` tag).
+    type_text: Option<String>,
     x: f64,
     y: f64,
     w: f64,
@@ -278,6 +280,7 @@ fn place_absolute(
                 alias: n.el.alias.clone(),
                 label: n.el.label.clone(),
                 kind: n.el.boundary_kind.unwrap_or(C4BoundaryKind::Generic),
+                type_text: n.el.boundary_type.clone(),
                 x: ax,
                 y: ay,
                 w: n.w,
@@ -297,10 +300,23 @@ fn shape_size(_kind: C4ElementKind) -> (f64, f64) {
 /// Minimum boundary width so the header label and the `[kind]` tag (stacked
 /// below it) don't get clipped.
 fn header_min_w(b: &C4Element, font_size: f64) -> f64 {
-    let kind = boundary_kind_label(b.boundary_kind.unwrap_or(C4BoundaryKind::Generic));
+    let kind = boundary_tag_text(
+        b.boundary_kind.unwrap_or(C4BoundaryKind::Generic),
+        &b.boundary_type,
+    );
     let label_w = text_width(&b.label, 8.0, font_size);
-    let kind_w = text_width(kind, 6.0, font_size);
+    let kind_w = text_width(&kind, 6.0, font_size);
     label_w.max(kind_w) + 28.0
+}
+
+/// The `[…]` header tag: an explicit type argument overrides the fixed per-kind
+/// label (e.g. `Deployment_Node(n, "Web Server", "Ubuntu 16.04 LTS")` shows the
+/// OS text).
+fn boundary_tag_text(kind: C4BoundaryKind, type_text: &Option<String>) -> String {
+    match type_text {
+        Some(t) if !t.is_empty() => t.clone(),
+        _ => boundary_kind_label(kind).to_string(),
+    }
 }
 
 fn boundary_kind_label(kind: C4BoundaryKind) -> &'static str {
@@ -346,7 +362,7 @@ fn draw_boundary_rect(
             "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\"{dash}"
         ),
     );
-    let kind = boundary_kind_label(b.kind);
+    let kind = boundary_tag_text(b.kind, &b.type_text);
     let label_size = theme.font_size + 2.0;
     svg.text(
         b.x + 14.0,
