@@ -1,123 +1,740 @@
 //! ZenUML parser. ZenUML is a sequence-style notation; we translate it to a
 //! [`SequenceDiagram`] so it reuses the sequence renderer.
 //!
-//! Supported subset (one statement per line):
+//! Supported subset:
 //!
 //! ```text
 //! zenuml
 //!     title <text>
-//!     <From> -> <To>: <message>
+//!     @Actor Alice                    // annotator: declares Alice as an actor
+//!     @Database DB                    // any other annotator declares a participant
+//!     @Starter(Alice)                 // sets the implicit top-level caller
+//!     <From> -> <To>: <message>       // plain messages
 //!     <From> ->> <To>: <message>
-//!     <From>.<method>(<args>)         // implies From -> method-receiver
+//!     <Recv>.method(args)             // method call from the current context
+//!     <From> -> <Recv>.method() {     // nesting: body runs in <Recv>'s context
+//!         ret = process()             //   assignment → dashed return arrow
+//!         return value                //   explicit return to the caller
+//!     }
+//!     if (cond) { … } else if (c) { … } else { … }   // → alt frame
+//!     while (cond) { … }              // → loop frame
+//!     opt (cond) { … }                // → opt frame
+//!     par { … }                       // → par frame
+//!     try { … } catch (e) { … } finally { … }         // → critical frame
 //! ```
+//!
+//! A bare `method()` / `A.method()` originates from the current context: the
+//! [`@Starter`] participant at the top level (defaulting to a synthetic
+//! `Starter` lane), or the receiver of the enclosing method-call brace.
 
-use super::ast::{ArrowKind, Message, Participant, ParticipantKind, SequenceDiagram, SequenceItem};
-use super::{strip_comment, ParseError};
+use super::ast::{
+    AltBranch, ArrowKind, Message, Participant, ParticipantKind, SequenceBlock, SequenceDiagram,
+    SequenceItem,
+};
+use super::ParseError;
+
+const DEFAULT_STARTER: &str = "Starter";
+
+/// A structural token: an opening/closing brace, or a logical statement string.
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Open,
+    Close,
+    Stmt(String),
+}
 
 pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
-    let mut d = SequenceDiagram::default();
-    let mut header_seen = false;
-    let mut seen_participants: Vec<String> = Vec::new();
-
-    for (idx, raw) in input.lines().enumerate() {
-        let line_no = idx + 1;
-        let line = strip_comment(raw).trim();
+    let mut lines = input.lines().enumerate();
+    // Header: first non-empty, non-comment line must be `zenuml`.
+    let mut header_line = None;
+    for (idx, raw) in lines.by_ref() {
+        let line = strip_line_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
-        if !header_seen {
-            if line != "zenuml" {
-                return Err(ParseError::Syntax {
-                    message: "expected 'zenuml' header".into(),
-                    line: line_no,
-                });
-            }
-            header_seen = true;
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("title") {
-            d.title = Some(rest.trim().to_string());
-            continue;
-        }
-
-        // Recognise the arrow form: A -> B : msg / A ->> B : msg.
-        let (arrow, sep) = if line.contains("->>") {
-            (ArrowKind::SolidArrow, "->>")
-        } else if line.contains("->") {
-            (ArrowKind::Solid, "->")
-        } else {
-            // method-call form: A.b()
-            if let Some(dot) = line.find('.') {
-                let from = line[..dot].trim().to_string();
-                let call = line[dot + 1..].trim();
-                let to = call.split('(').next().unwrap_or("").trim().to_string();
-                if from.is_empty() || to.is_empty() {
-                    continue;
-                }
-                ensure(&mut seen_participants, &mut d, &from);
-                ensure(&mut seen_participants, &mut d, &to);
-                d.items.push(SequenceItem::Message(Message {
-                    from,
-                    to,
-                    text: call.to_string(),
-                    arrow: ArrowKind::SolidArrow,
-                }));
-                continue;
-            }
+        if line != "zenuml" {
             return Err(ParseError::Syntax {
-                message: format!("unrecognised zenuml line: '{line}'"),
-                line: line_no,
+                message: "expected 'zenuml' header".into(),
+                line: idx + 1,
             });
-        };
+        }
+        header_line = Some(idx);
+        break;
+    }
+    if header_line.is_none() {
+        return Err(ParseError::Empty);
+    }
 
-        let (left, rest) = line.split_once(sep).unwrap();
-        let (right, text) = match rest.split_once(':') {
-            Some((r, t)) => (r.trim(), t.trim().to_string()),
-            None => (rest.trim(), String::new()),
+    // The rest of the document is brace-structured; tokenize it whole.
+    let body: String = input
+        .lines()
+        .skip(header_line.unwrap() + 1)
+        .map(strip_line_comment)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let toks = tokenize(&body);
+
+    let mut p = Parser {
+        toks,
+        pos: 0,
+        diag: SequenceDiagram::default(),
+        starter: None,
+    };
+    let items = p.parse_items(None, None);
+    p.diag.items = items;
+    Ok(p.diag)
+}
+
+/// Strip a `//` or `%%` line comment. Only a `//` run (two slashes) counts, so a
+/// single `/` inside a path like `GET /login` survives.
+fn strip_line_comment(line: &str) -> &str {
+    let cut = [line.find("//"), line.find("%%")]
+        .into_iter()
+        .flatten()
+        .min();
+    match cut {
+        Some(pos) => &line[..pos],
+        None => line,
+    }
+}
+
+/// Split a body into brace/statement tokens. Braces inside parentheses or
+/// quotes are kept literal; newlines and `;` terminate statements.
+fn tokenize(body: &str) -> Vec<Tok> {
+    let mut toks = Vec::new();
+    let mut cur = String::new();
+    let mut paren = 0u32;
+    let mut in_quote = false;
+    let flush = |cur: &mut String, toks: &mut Vec<Tok>| {
+        let s = cur.trim();
+        if !s.is_empty() {
+            toks.push(Tok::Stmt(s.to_string()));
+        }
+        cur.clear();
+    };
+    for ch in body.chars() {
+        if in_quote {
+            cur.push(ch);
+            if ch == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_quote = true;
+                cur.push(ch);
+            }
+            '(' => {
+                paren += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                paren = paren.saturating_sub(1);
+                cur.push(ch);
+            }
+            '{' if paren == 0 => {
+                flush(&mut cur, &mut toks);
+                toks.push(Tok::Open);
+            }
+            '}' if paren == 0 => {
+                flush(&mut cur, &mut toks);
+                toks.push(Tok::Close);
+            }
+            '\n' | ';' if paren == 0 => flush(&mut cur, &mut toks),
+            _ => cur.push(ch),
+        }
+    }
+    flush(&mut cur, &mut toks);
+    toks
+}
+
+struct Parser {
+    toks: Vec<Tok>,
+    pos: usize,
+    diag: SequenceDiagram,
+    starter: Option<String>,
+}
+
+impl Parser {
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
+
+    fn bump(&mut self) -> Option<Tok> {
+        let t = self.toks.get(self.pos).cloned();
+        if t.is_some() {
+            self.pos += 1;
+        }
+        t
+    }
+
+    /// Consume an `Open`, the items up to the matching `Close`, and the `Close`.
+    /// A missing `Open` yields an empty body (tolerant of malformed input).
+    fn braced(&mut self, ctx: Option<&str>, ret: Option<&str>) -> Vec<SequenceItem> {
+        if self.peek() != Some(&Tok::Open) {
+            return Vec::new();
+        }
+        self.bump();
+        let items = self.parse_items(ctx, ret);
+        if self.peek() == Some(&Tok::Close) {
+            self.bump();
+        }
+        items
+    }
+
+    fn parse_items(&mut self, ctx: Option<&str>, ret: Option<&str>) -> Vec<SequenceItem> {
+        let mut items = Vec::new();
+        while let Some(tok) = self.peek() {
+            match tok {
+                Tok::Close => break,
+                Tok::Open => {
+                    // Stray block: run it in the current context.
+                    let inner = self.braced(ctx, ret);
+                    items.extend(inner);
+                }
+                Tok::Stmt(_) => {
+                    let s = match self.bump() {
+                        Some(Tok::Stmt(s)) => s,
+                        _ => unreachable!(),
+                    };
+                    self.handle_stmt(&s, ctx, ret, &mut items);
+                }
+            }
+        }
+        items
+    }
+
+    fn handle_stmt(
+        &mut self,
+        s: &str,
+        ctx: Option<&str>,
+        ret: Option<&str>,
+        items: &mut Vec<SequenceItem>,
+    ) {
+        // Annotators / declarations.
+        if let Some(rest) = s.strip_prefix('@') {
+            self.annotator(rest);
+            return;
+        }
+        if let Some(rest) = s.strip_prefix("title ") {
+            self.diag.title = Some(rest.trim().to_string());
+            return;
+        }
+
+        match first_word(s).as_str() {
+            "if" => self.parse_if(s, ctx, ret, items),
+            "while" | "for" | "forEach" | "loop" => {
+                let label = strip_kw_cond(s);
+                let body = self.braced(ctx, ret);
+                items.push(SequenceItem::Loop(SequenceBlock { label, items: body }));
+            }
+            "opt" => {
+                let label = strip_kw_cond(s);
+                let body = self.braced(ctx, ret);
+                items.push(SequenceItem::Opt(SequenceBlock { label, items: body }));
+            }
+            "par" => {
+                let body = self.braced(ctx, ret);
+                items.push(SequenceItem::Par(vec![AltBranch {
+                    label: String::new(),
+                    items: body,
+                }]));
+            }
+            "try" => self.parse_try(ctx, ret, items),
+            // A stray chain keyword (malformed input) — run any body inline.
+            "else" | "catch" | "finally" => {
+                let body = self.braced(ctx, ret);
+                items.extend(body);
+            }
+            "return" => self.emit_return(&after_kw(s, "return"), ctx, ret, items),
+            _ => self.parse_call(s, ctx, ret, items),
+        }
+    }
+
+    /// `if (c) { … } else if (c2) { … } else { … }` → an `alt` frame.
+    fn parse_if(
+        &mut self,
+        s: &str,
+        ctx: Option<&str>,
+        ret: Option<&str>,
+        items: &mut Vec<SequenceItem>,
+    ) {
+        let mut branches = vec![AltBranch {
+            label: strip_kw_cond(s),
+            items: self.braced(ctx, ret),
+        }];
+        while let Some(Tok::Stmt(next)) = self.peek() {
+            if first_word(next) != "else" {
+                break;
+            }
+            let next = next.clone();
+            self.bump();
+            let tail = after_kw(&next, "else");
+            let label = if first_word(&tail) == "if" {
+                strip_kw_cond(&tail)
+            } else {
+                "else".to_string()
+            };
+            let plain_else = first_word(&tail) != "if";
+            branches.push(AltBranch {
+                label,
+                items: self.braced(ctx, ret),
+            });
+            if plain_else {
+                break;
+            }
+        }
+        items.push(SequenceItem::Alt(branches));
+    }
+
+    /// `try { … } catch (e) { … } finally { … }` → a `critical` frame.
+    fn parse_try(&mut self, ctx: Option<&str>, ret: Option<&str>, items: &mut Vec<SequenceItem>) {
+        let mut branches = vec![AltBranch {
+            label: String::new(),
+            items: self.braced(ctx, ret),
+        }];
+        while let Some(Tok::Stmt(next)) = self.peek() {
+            let fw = first_word(next);
+            if fw != "catch" && fw != "finally" {
+                break;
+            }
+            let next = next.clone();
+            self.bump();
+            let label = if fw == "catch" {
+                let arg = strip_kw_cond(&next);
+                if arg.is_empty() {
+                    "catch".to_string()
+                } else {
+                    format!("catch {arg}")
+                }
+            } else {
+                "finally".to_string()
+            };
+            branches.push(AltBranch {
+                label,
+                items: self.braced(ctx, ret),
+            });
+        }
+        items.push(SequenceItem::Critical(branches));
+    }
+
+    /// A message or method call, optionally with a `{ … }` body (nesting) and an
+    /// `x = …` assignment (which draws a dashed return arrow).
+    fn parse_call(
+        &mut self,
+        s: &str,
+        ctx: Option<&str>,
+        _ret: Option<&str>,
+        items: &mut Vec<SequenceItem>,
+    ) {
+        let (assign, rhs) = split_assignment(s);
+        let call = match self.classify_call(rhs, ctx) {
+            Some(c) => c,
+            None => return,
         };
-        let from = left.trim().to_string();
-        let to = right.to_string();
-        ensure(&mut seen_participants, &mut d, &from);
-        ensure(&mut seen_participants, &mut d, &to);
-        d.items.push(SequenceItem::Message(Message {
+        let Call {
             from,
             to,
             text,
             arrow,
+        } = call;
+        self.ensure(&from);
+        self.ensure(&to);
+        items.push(SequenceItem::Message(Message {
+            from: from.clone(),
+            to: to.clone(),
+            text,
+            arrow,
+        }));
+
+        let has_brace = self.peek() == Some(&Tok::Open);
+        if has_brace {
+            // The body runs in the receiver's context; a `return` there replies
+            // to this call's sender.
+            let body = self.braced(Some(&to), Some(&from));
+            items.extend(body);
+        }
+        // A nested call or an assigned result draws a dashed return back to the
+        // caller (skipped for self-calls, which need no reply arrow).
+        if (has_brace || assign.is_some()) && from != to {
+            items.push(SequenceItem::Message(Message {
+                from: to,
+                to: from,
+                text: assign.unwrap_or_default(),
+                arrow: ArrowKind::DashedArrow,
+            }));
+        }
+    }
+
+    /// Resolve a call's `from`/`to`/`text`/`arrow`. Returns `None` for an empty
+    /// statement that names no participant.
+    fn classify_call(&mut self, rhs: &str, ctx: Option<&str>) -> Option<Call> {
+        // Explicit arrow form: `A ->> B: msg` or `A -> B.method()`.
+        for (sep, arrow) in [("->>", ArrowKind::SolidArrow), ("->", ArrowKind::Solid)] {
+            if let Some((left, right)) = rhs.split_once(sep) {
+                let from = left.trim().to_string();
+                let right = right.trim();
+                let (to, text) = match right.split_once(':') {
+                    Some((t, msg)) => (t.trim().to_string(), msg.trim().to_string()),
+                    None => split_receiver(right),
+                };
+                if from.is_empty() || to.is_empty() {
+                    return None;
+                }
+                return Some(Call {
+                    from,
+                    to,
+                    text,
+                    arrow,
+                });
+            }
+        }
+        // Method-call form from the current context: `Recv.method()` / `method()`.
+        let rhs = rhs.trim();
+        if rhs.is_empty() {
+            return None;
+        }
+        let from = self.source(ctx);
+        let (to, text) = split_receiver(rhs);
+        let to = if to.is_empty() { from.clone() } else { to };
+        Some(Call {
+            from,
+            to,
+            text,
+            arrow: ArrowKind::SolidArrow,
+        })
+    }
+
+    fn emit_return(
+        &mut self,
+        text: &str,
+        ctx: Option<&str>,
+        ret: Option<&str>,
+        items: &mut Vec<SequenceItem>,
+    ) {
+        // A top-level `return` has no caller to reply to — ignore it.
+        let Some(target) = ret else { return };
+        let from = self.source(ctx);
+        self.ensure(target);
+        items.push(SequenceItem::Message(Message {
+            from,
+            to: target.to_string(),
+            text: text.trim().to_string(),
+            arrow: ArrowKind::DashedArrow,
         }));
     }
 
-    if !header_seen {
-        return Err(ParseError::Empty);
+    /// Declare a participant from an annotator line (`Actor Alice`,
+    /// `Database DB`, `Starter(Alice)`).
+    fn annotator(&mut self, rest: &str) {
+        let rest = rest.trim();
+        if let Some(inner) = rest
+            .strip_prefix("Starter(")
+            .and_then(|r| r.strip_suffix(')'))
+        {
+            let id = inner.trim().to_string();
+            if !id.is_empty() {
+                self.ensure(&id);
+                self.starter = Some(id);
+            }
+            return;
+        }
+        let (kind_word, name) = match rest.split_once(char::is_whitespace) {
+            Some((k, n)) => (k, n.trim()),
+            None => return, // `@Type` with no name declares nothing.
+        };
+        if name.is_empty() {
+            return;
+        }
+        let kind = if kind_word.eq_ignore_ascii_case("Actor") {
+            ParticipantKind::Actor
+        } else {
+            ParticipantKind::Participant
+        };
+        self.declare(name, kind);
     }
-    Ok(d)
+
+    /// The originating participant for a context: the enclosing receiver, or the
+    /// starter (created lazily on first top-level use).
+    fn source(&mut self, ctx: Option<&str>) -> String {
+        match ctx {
+            Some(c) => c.to_string(),
+            None => {
+                let id = self
+                    .starter
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_STARTER.into());
+                self.ensure(&id);
+                self.starter = Some(id.clone());
+                id
+            }
+        }
+    }
+
+    fn ensure(&mut self, id: &str) {
+        if !self.diag.participants.iter().any(|p| p.id == id) {
+            self.diag.participants.push(Participant {
+                id: id.to_string(),
+                display: id.to_string(),
+                kind: ParticipantKind::Participant,
+            });
+        }
+    }
+
+    fn declare(&mut self, id: &str, kind: ParticipantKind) {
+        if let Some(p) = self.diag.participants.iter_mut().find(|p| p.id == id) {
+            p.kind = kind;
+        } else {
+            self.diag.participants.push(Participant {
+                id: id.to_string(),
+                display: id.to_string(),
+                kind,
+            });
+        }
+    }
 }
 
-fn ensure(seen: &mut Vec<String>, d: &mut SequenceDiagram, id: &str) {
-    if !seen.contains(&id.to_string()) {
-        seen.push(id.to_string());
-        d.participants.push(Participant {
-            id: id.to_string(),
-            display: id.to_string(),
-            kind: ParticipantKind::Participant,
-        });
+struct Call {
+    from: String,
+    to: String,
+    text: String,
+    arrow: ArrowKind,
+}
+
+/// The leading identifier word of a statement (letters, digits, `_`).
+fn first_word(s: &str) -> String {
+    s.trim()
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect()
+}
+
+/// Everything after the leading keyword, trimmed.
+fn after_kw(s: &str, kw: &str) -> String {
+    s.trim()
+        .strip_prefix(kw)
+        .map(|r| r.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Strip a leading control keyword and an optional `( … )` condition wrapper,
+/// e.g. `if (x > 0)` → `x > 0`, `while cond` → `cond`, `catch (e)` → `e`.
+fn strip_kw_cond(s: &str) -> String {
+    let rest = s.trim();
+    let word = first_word(rest);
+    let rest = rest[word.len()..].trim();
+    match rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        Some(inner) => inner.trim().to_string(),
+        None => rest.to_string(),
     }
+}
+
+/// Split a `Recv.method(args)` into `(Recv, "method(args)")`; a call with no
+/// receiver dot returns an empty receiver and the whole text.
+fn split_receiver(s: &str) -> (String, String) {
+    let s = s.trim();
+    // Only a dot before the argument list separates a receiver.
+    let paren = s.find('(').unwrap_or(s.len());
+    match s[..paren].find('.') {
+        Some(dot) => (s[..dot].trim().to_string(), s[dot + 1..].trim().to_string()),
+        None => (String::new(), s.to_string()),
+    }
+}
+
+/// Split a leading `name = …` assignment. The left side must be a plain
+/// identifier, so a message body containing `=` (`A -> B: n = 5`) is untouched.
+fn split_assignment(s: &str) -> (Option<String>, &str) {
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'=' if depth == 0 => {
+                let prev = if i > 0 { bytes[i - 1] } else { b' ' };
+                let next = *bytes.get(i + 1).unwrap_or(&b' ');
+                if matches!(prev, b'<' | b'>' | b'=' | b'!') || next == b'=' {
+                    return (None, s);
+                }
+                let left = s[..i].trim();
+                if !left.is_empty() && left.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    return (Some(left.to_string()), s[i + 1..].trim());
+                }
+                return (None, s);
+            }
+            _ => {}
+        }
+    }
+    (None, s)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn parse_ok(src: &str) -> SequenceDiagram {
+        parse(src).unwrap()
+    }
+
     #[test]
     fn basic_arrow() {
-        let d = parse("zenuml\nAlice -> Bob: Hello\nBob ->> Alice: Reply\n").unwrap();
+        let d = parse_ok("zenuml\nAlice -> Bob: Hello\nBob ->> Alice: Reply\n");
         assert_eq!(d.participants.len(), 2);
         assert_eq!(d.items.len(), 2);
     }
 
     #[test]
-    fn method_call() {
-        let d = parse("zenuml\nA.b()\n").unwrap();
+    fn method_call_uses_starter() {
+        let d = parse_ok("zenuml\nA.b()\n");
+        // Starter (implicit caller) + A.
         assert_eq!(d.participants.len(), 2);
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Message(m)) if m.from == DEFAULT_STARTER && m.to == "A" && m.text == "b()"
+        ));
+    }
+
+    #[test]
+    fn annotator_declares_actor_and_starter() {
+        let d = parse_ok("zenuml\n@Actor Alice\n@Database DB\n@Starter(Alice)\nDB.query()\n");
+        let alice = d.participants.iter().find(|p| p.id == "Alice").unwrap();
+        assert_eq!(alice.kind, ParticipantKind::Actor);
+        // The call originates from the declared starter, not the synthetic one.
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Message(m)) if m.from == "Alice" && m.to == "DB"
+        ));
+        assert!(d.participants.iter().all(|p| p.id != DEFAULT_STARTER));
+    }
+
+    #[test]
+    fn nesting_braces_body_and_return() {
+        let d = parse_ok("zenuml\nA -> B.method() {\n  ret = process()\n}\n");
+        // A -> B: method(), then B -> B: process() (self, no return), then the
+        // implicit dashed return B --> A for the closed brace.
+        let msgs: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!((&*msgs[0].from, &*msgs[0].to), ("A", "B"));
+        assert_eq!((&*msgs[1].from, &*msgs[1].to), ("B", "B"));
+        assert_eq!((&*msgs[2].from, &*msgs[2].to), ("B", "A"));
+        assert_eq!(msgs[2].arrow, ArrowKind::DashedArrow);
+    }
+
+    #[test]
+    fn assignment_without_brace_returns() {
+        let d = parse_ok("zenuml\nres = A.load()\n");
+        let msgs: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[1].text, "res");
+        assert_eq!(msgs[1].arrow, ArrowKind::DashedArrow);
+    }
+
+    #[test]
+    fn explicit_return_replies_to_caller() {
+        let d = parse_ok("zenuml\nA -> B.handle() {\n  return done\n}\n");
+        let ret = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) if m.arrow == ArrowKind::DashedArrow => Some(m),
+                _ => None,
+            })
+            .find(|m| m.text == "done")
+            .unwrap();
+        assert_eq!((&*ret.from, &*ret.to), ("B", "A"));
+    }
+
+    #[test]
+    fn if_else_maps_to_alt() {
+        let d = parse_ok(
+            "zenuml\nif (ok) {\n  A.a()\n} else if (retry) {\n  A.b()\n} else {\n  A.c()\n}\n",
+        );
+        let alt = d
+            .items
+            .iter()
+            .find_map(|i| match i {
+                SequenceItem::Alt(b) => Some(b),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(alt.len(), 3);
+        assert_eq!(alt[0].label, "ok");
+        assert_eq!(alt[1].label, "retry");
+        assert_eq!(alt[2].label, "else");
+    }
+
+    #[test]
+    fn while_maps_to_loop() {
+        let d = parse_ok("zenuml\nwhile (more) {\n  A.next()\n}\n");
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Loop(b)) if b.label == "more" && b.items.len() == 1
+        ));
+    }
+
+    #[test]
+    fn opt_and_par_frames() {
+        let d = parse_ok("zenuml\nopt (cond) {\n  A.x()\n}\npar {\n  A.y()\n}\n");
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Opt(b) if b.label == "cond")));
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Par(b) if b.len() == 1)));
+    }
+
+    #[test]
+    fn try_catch_finally_maps_to_critical() {
+        let d = parse_ok(
+            "zenuml\ntry {\n  A.risky()\n} catch (e) {\n  A.recover()\n} finally {\n  A.cleanup()\n}\n",
+        );
+        let crit = d
+            .items
+            .iter()
+            .find_map(|i| match i {
+                SequenceItem::Critical(b) => Some(b),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(crit.len(), 3);
+        assert_eq!(crit[1].label, "catch e");
+        assert_eq!(crit[2].label, "finally");
+    }
+
+    #[test]
+    fn comments_are_stripped() {
+        let d = parse_ok("zenuml\n// a comment\nA.b() // trailing\n");
+        assert_eq!(
+            d.items
+                .iter()
+                .filter(|i| matches!(i, SequenceItem::Message(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_missing_header() {
+        assert!(matches!(
+            parse("flowchart TD\n"),
+            Err(ParseError::Syntax { line: 1, .. })
+        ));
     }
 }
