@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::parse::{Cardinality, Entity, ErDiagram, ErRelation};
+use crate::parse::{Cardinality, Entity, ErDiagram, ErRelation, FlowDirection};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
@@ -26,6 +26,7 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
             .finish();
     }
 
+    let dir = d.direction;
     let sizes: Vec<(f64, f64)> = d.entities.iter().map(entity_size).collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .entities
@@ -39,11 +40,20 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         .iter()
         .filter_map(|r| Some((*id_to_u32.get(&r.left)?, *id_to_u32.get(&r.right)?)))
         .collect();
+    // Sugiyama only lays out top-down; for LR/RL swap node sizes so the
+    // transposed layout reserves the right footprint (as flowchart/class do).
     let node_size_su: HashMap<NodeId, (f64, f64)> = d
         .entities
         .iter()
         .enumerate()
-        .map(|(i, _)| (i as NodeId, sizes[i]))
+        .map(|(i, _)| {
+            let (w, h) = sizes[i];
+            let s = match dir {
+                FlowDirection::LeftRight | FlowDirection::RightLeft => (h, w),
+                _ => (w, h),
+            };
+            (i as NodeId, s)
+        })
         .collect();
 
     let g = Graph {
@@ -52,10 +62,23 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         node_size: node_size_su,
     };
     let layout = layout_with(&g, &LayoutConfig::default()).unwrap_or_default();
-    let width = layout.width + CANVAS_PAD * 2.0;
-    let height = layout.height + CANVAS_PAD * 2.0;
+    let (raw_w, raw_h) = (layout.width, layout.height);
+    let (canvas_w, canvas_h) = match dir {
+        FlowDirection::TopDown | FlowDirection::BottomTop => (raw_w, raw_h),
+        FlowDirection::LeftRight | FlowDirection::RightLeft => (raw_h, raw_w),
+    };
+    let width = canvas_w + CANVAS_PAD * 2.0;
+    let height = canvas_h + CANVAS_PAD * 2.0;
 
-    let transform = |(x, y): (f64, f64)| -> (f64, f64) { (x + CANVAS_PAD, y + CANVAS_PAD) };
+    let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
+        let (tx, ty) = match dir {
+            FlowDirection::TopDown => (sx, sy),
+            FlowDirection::BottomTop => (sx, raw_h - sy),
+            FlowDirection::LeftRight => (sy, sx),
+            FlowDirection::RightLeft => (raw_h - sy, sx),
+        };
+        (tx + CANVAS_PAD, ty + CANVAS_PAD)
+    };
 
     let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
 
@@ -82,12 +105,16 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 }
 
 fn entity_size(e: &Entity) -> (f64, f64) {
-    let (tw, nw, kw) = col_widths(e);
-    let mut content = tw + nw + COL_GAP;
+    let (tw, nw, kw, cw) = col_widths(e);
+    // Sum only the columns that carry content, one COL_GAP between each pair.
+    let mut content = tw + COL_GAP + nw;
     if kw > 0.0 {
         content += COL_GAP + kw;
     }
-    let title_w = e.name.chars().count() as f64 * CHAR_W;
+    if cw > 0.0 {
+        content += COL_GAP + cw;
+    }
+    let title_w = e.label.chars().count() as f64 * CHAR_W;
     let w = (content.max(title_w) + PAD_X * 2.0).max(MIN_W);
     let h = HEADER_H
         + e.attributes.len() as f64 * LINE_H
@@ -95,7 +122,7 @@ fn entity_size(e: &Entity) -> (f64, f64) {
     (w, h)
 }
 
-fn col_widths(e: &Entity) -> (f64, f64, f64) {
+fn col_widths(e: &Entity) -> (f64, f64, f64, f64) {
     let tw = e
         .attributes
         .iter()
@@ -117,7 +144,14 @@ fn col_widths(e: &Entity) -> (f64, f64, f64) {
         .max()
         .unwrap_or(0) as f64
         * KEY_CHAR_W;
-    (tw, nw, kw)
+    let cw = e
+        .attributes
+        .iter()
+        .filter_map(|a| a.comment.as_ref().map(|c| c.chars().count()))
+        .max()
+        .unwrap_or(0) as f64
+        * CHAR_W;
+    (tw, nw, kw, cw)
 }
 
 fn draw_entity(
@@ -145,7 +179,7 @@ fn draw_entity(
         cx,
         y + 19.0,
         &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
-        &e.name,
+        &e.label,
     );
     if !e.attributes.is_empty() {
         svg.line(
@@ -155,10 +189,13 @@ fn draw_entity(
             y + HEADER_H,
             &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
         );
-        let (tw, _nw, _kw) = col_widths(e);
+        // Columns run left-to-right: type, name, key, comment — each present
+        // only when some attribute populates it (upstream shows a comment col).
+        let (tw, nw, kw, _cw) = col_widths(e);
         let type_x = x + PAD_X;
         let name_x = type_x + tw + COL_GAP;
-        let key_x = x + w - PAD_X;
+        let key_x = name_x + nw + COL_GAP;
+        let comment_x = key_x + if kw > 0.0 { kw + COL_GAP } else { 0.0 };
         let mut row_y = y + HEADER_H + 6.0;
         for a in &e.attributes {
             row_y += LINE_H - 4.0;
@@ -178,8 +215,16 @@ fn draw_entity(
                 svg.text(
                     key_x,
                     row_y,
-                    "text-anchor=\"end\" fill=\"#c33\" font-size=\"11\" font-weight=\"bold\"",
+                    "fill=\"#c33\" font-size=\"11\" font-weight=\"bold\"",
                     k,
+                );
+            }
+            if let Some(c) = &a.comment {
+                svg.text(
+                    comment_x,
+                    row_y,
+                    &format!("fill=\"{fg}\" font-size=\"12\""),
+                    c,
                 );
             }
             row_y += 4.0;
@@ -435,5 +480,19 @@ mod tests {
         assert!(svg.contains(">name<"));
         assert!(svg.contains(">email<"));
         assert!(svg.contains(">PK<"));
+    }
+
+    #[test]
+    fn comment_is_rendered() {
+        let d = build("erDiagram\nCUSTOMER {\nstring name \"the customer name\"\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">the customer name<"));
+    }
+
+    #[test]
+    fn alias_label_shown() {
+        let d = build("erDiagram\np[Person] {\nstring name\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Person<"));
     }
 }

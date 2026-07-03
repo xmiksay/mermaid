@@ -340,7 +340,22 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   colon can't misroute the line. The shared `open_click`/`close_click` wrappers
   live in `src/svg/interact.rs` (used by both the flowchart and class renderers).
 - ER `EntityAttribute.comment` is populated from a quoted string after the
-  attribute (`string name "the customer name"`).
+  attribute (`string name "the customer name"`) and rendered as a fourth
+  attribute column (type · name · key · comment). `EntityAttribute.key` holds
+  all comma-separated key constraints joined as `PK, FK`.
+- ER relations accept both the glyph cardinality form (`||--o{`) and the
+  **verbal/numeric** form `LEFT <card> to|optionally to <card> RIGHT : label`
+  (`src/parse/er.rs`, `find_reltype` + `split_card_end`/`split_card_start`):
+  `to` is identifying, `optionally to` non-identifying; cardinality words
+  (`only one`, `zero or one`, `zero or more`, `one or many`, `many(0)`, `0+`,
+  `1+`, `1`) map onto the existing `Cardinality` enum.
+- ER entity alias `id[Alias] { … }` (and bare `id[Alias]`) sets `Entity.label`
+  (display) while `Entity.name` (the id relations reference) stays clean —
+  `split_id_label`, mirroring the flowchart/kanban split. `ensure_entity`
+  upgrades a placeholder label when the aliased block/decl appears after a
+  relation already materialized the entity.
+- ER `direction TB/BT/LR/RL` fills `ErDiagram.direction`; the renderer drives
+  the same size-swap/transpose the flowchart and class renderers use.
 - Gantt dates are **exact civil day-counts from the Unix epoch**
   (`src/svg/gantt_date.rs`: `days_from_civil`/`civil_from_days`/`weekday`, the
   Hinnant algorithms) — no more `365.25`-day drift. `parse_date` honors the
