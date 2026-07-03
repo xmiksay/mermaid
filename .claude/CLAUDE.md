@@ -798,7 +798,16 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   default to 0. The renderer (`src/svg/radar.rs`) draws `ticks` graticule rings
   as concentric **circles** by default (`graticule polygon` for the old polygon
   rings) and scales curves over `[min, max]` so `min` acts as a scale offset;
-  `showLegend false` suppresses the legend.
+  `showLegend false` suppresses the legend. Curves are drawn as a **closed
+  cardinal (Catmull-Rom) spline** for the default circle graticule
+  (`cardinal_closed_path`, d3's `curveCardinalClosed.tension`, `k=(1−t)/6`) and
+  as straight closed segments (`straight_closed_path`) for `graticule polygon`.
+  `config.radar.{width,height,marginTop,marginBottom,marginLeft,marginRight,
+  axisScaleFactor,curveTension}` flow through `apply_radar_config`
+  (`src/parse/mod.rs`, from `meta.config`) onto `RadarDiagram`: width/height
+  override the derived SVG size (default 640×480 + title), margins replace the
+  symmetric `PAD`, `axisScaleFactor` multiplies the curve plot radius, and
+  `curveTension` sets the spline tension (default 0.17).
 - Kanban columns and tasks accept the documented `id[Label]` bracket form
   (`split_id_label` in `src/parse/kanban.rs`): the text before `[` is the id,
   the bracketed text the display label (a bare `[Label]` reuses the label as
