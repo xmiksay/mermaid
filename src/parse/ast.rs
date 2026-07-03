@@ -850,6 +850,8 @@ pub struct MindmapNode {
     pub text: String,
     pub shape: MindmapShape,
     pub icon: Option<String>,
+    /// CSS classes attached via a `:::class1 class2` line.
+    pub classes: Vec<String>,
     pub children: Vec<MindmapNode>,
 }
 
