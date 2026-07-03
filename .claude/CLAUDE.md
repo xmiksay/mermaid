@@ -203,6 +203,19 @@ Edge clipping (`clip_to_node`) has per-shape variants:
   `QuadrantDiagram::classes`, filled from top-level `classDef <name> …` lines)
   set the rest. Inline attrs override the array radius and the class default;
   the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
+- Sankey nodes render their **throughput value** after the name
+  (`Name\n42`, upstream `showValues` — on by default). The value is the node's
+  `max(in, out)` flow; the `SvgBuilder::text` multi-line path stacks it as a
+  second `<tspan>`.
+- xychart series accept an optional **quoted title** — `bar "Revenue" [..]` /
+  `line "Trend" [..]` parses into `XySeries.title` (previously a hard error);
+  upstream draws no legend, so the renderer ignores it. Category lists split
+  **quote-aware** (`split_unquoted`) so a `"a, b"` cell survives the comma.
+- Treemap honors `classDef <name> <props>` (into `TreemapDiagram.class_defs`)
+  and a node's trailing `:::name` (into `TreemapNode.class_name`, stripped
+  before the label/value colon split). The renderer resolves the class through
+  the shared `resolve_style`, overriding the palette fill/stroke — the raw
+  `:::name` no longer leaks into the label text.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `;` is a **statement terminator/separator** anywhere a newline is

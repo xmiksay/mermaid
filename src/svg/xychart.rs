@@ -301,6 +301,7 @@ mod tests {
             }),
             series: vec![XySeries {
                 kind: XySeriesKind::Bar,
+                title: None,
                 values: vec![40.0, 80.0],
             }],
         };
@@ -344,6 +345,7 @@ mod tests {
             }),
             series: vec![XySeries {
                 kind: XySeriesKind::Bar,
+                title: None,
                 values: vec![40.0, 80.0],
             }],
         };

@@ -129,6 +129,8 @@ pub enum XyAxisKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct XySeries {
     pub kind: XySeriesKind,
+    /// Optional quoted series title (`bar "Revenue" [..]`), shown in a legend.
+    pub title: Option<String>,
     pub values: Vec<f64>,
 }
 

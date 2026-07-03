@@ -243,6 +243,8 @@ pub struct KanbanTask {
 pub struct TreemapDiagram {
     pub title: Option<String>,
     pub root: Vec<TreemapNode>,
+    /// `classDef <name> <props>` definitions, referenced by a node's `:::name`.
+    pub class_defs: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,4 +252,6 @@ pub struct TreemapNode {
     pub label: String,
     pub value: Option<f64>,
     pub children: Vec<TreemapNode>,
+    /// `:::name` class reference into [`TreemapDiagram::class_defs`].
+    pub class_name: Option<String>,
 }

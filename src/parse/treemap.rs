@@ -11,6 +11,7 @@
 //! ```
 
 use super::ast::{TreemapDiagram, TreemapNode};
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<TreemapDiagram, ParseError> {
@@ -46,10 +47,30 @@ pub(crate) fn parse(input: &str) -> Result<TreemapDiagram, ParseError> {
             d.title = Some(rest.trim().trim_matches('"').to_string());
             continue;
         }
+        if let Some(rest) = body.strip_prefix("classDef ") {
+            if let Some((name, props)) = rest.trim().split_once(char::is_whitespace) {
+                d.class_defs
+                    .insert(name.trim().to_string(), parse_style_props(props));
+            }
+            continue;
+        }
 
         if base_indent.is_none() {
             base_indent = Some(indent);
         }
+
+        // A trailing `:::className` attaches a class; strip it before the
+        // label/value split so the `:::` can't be mistaken for the value colon.
+        let (body, class_name) = match body.split_once(":::") {
+            Some((before, after)) => {
+                let cls = after
+                    .split([':', ' ', '\t'])
+                    .find(|s| !s.is_empty())
+                    .map(str::to_string);
+                (before.trim(), cls)
+            }
+            None => (body, None),
+        };
 
         let (label, value) = if let Some((l, v)) = body.rsplit_once(':') {
             // Make sure the colon is not inside the label quotes.
@@ -66,6 +87,7 @@ pub(crate) fn parse(input: &str) -> Result<TreemapDiagram, ParseError> {
             label,
             value,
             children: Vec::new(),
+            class_name,
         };
 
         // Pop deeper levels.
@@ -110,5 +132,20 @@ mod tests {
         assert_eq!(d.root[0].children.len(), 2);
         assert_eq!(d.root[0].children[0].value, Some(12.0));
         assert_eq!(d.root[1].value, Some(30.0));
+    }
+
+    #[test]
+    fn classdef_and_class_ref() {
+        let d = parse(
+            "treemap-beta\nclassDef hot fill:#f00,stroke:#333\n\"Section 1\":::hot\n    \"Leaf 1.1\": 12:::hot\n",
+        )
+        .unwrap();
+        assert!(d.class_defs.contains_key("hot"));
+        assert_eq!(d.root[0].label, "Section 1");
+        assert_eq!(d.root[0].class_name.as_deref(), Some("hot"));
+        let leaf = &d.root[0].children[0];
+        assert_eq!(leaf.label, "Leaf 1.1");
+        assert_eq!(leaf.value, Some(12.0));
+        assert_eq!(leaf.class_name.as_deref(), Some("hot"));
     }
 }
