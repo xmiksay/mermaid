@@ -138,7 +138,9 @@ fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'sta
         ArrowKind::Dashed => ("6 4", None, None),
         ArrowKind::DashedArrow => ("6 4", None, Some("arrow-filled")),
         ArrowKind::Cross => ("", None, Some("arrow-cross")),
+        ArrowKind::DashedCross => ("6 4", None, Some("arrow-cross")),
         ArrowKind::Open => ("", None, Some("arrow-open")),
+        ArrowKind::DashedOpen => ("6 4", None, Some("arrow-open")),
         ArrowKind::BiSolidArrow => ("", Some("arrow-filled"), Some("arrow-filled")),
         ArrowKind::BiDashedArrow => ("6 4", Some("arrow-filled"), Some("arrow-filled")),
     }
@@ -196,5 +198,28 @@ mod tests {
             &Theme::default(),
         );
         assert!(svg.contains(">shared<"));
+    }
+
+    #[test]
+    fn dashed_cross_and_open_carry_dash() {
+        // `--x` / `--)` are dashed; `-x` / `-)` are solid — same marker, but the
+        // dashed forms add `stroke-dasharray` (issue #115).
+        for (src, marker) in [("A--xB: t", "arrow-cross"), ("A--)B: t", "arrow-open")] {
+            let svg = render(
+                &build(&format!("sequenceDiagram\n{src}\n")),
+                &Theme::default(),
+            );
+            assert!(svg.contains(&format!("marker-end=\"url(#{marker})\"")));
+            assert!(svg.contains("stroke-dasharray=\"6 4\""), "case: {src}");
+        }
+        for (src, marker) in [("A-xB: t", "arrow-cross"), ("A-)B: t", "arrow-open")] {
+            let svg = render(
+                &build(&format!("sequenceDiagram\n{src}\n")),
+                &Theme::default(),
+            );
+            assert!(svg.contains(&format!("marker-end=\"url(#{marker})\"")));
+            // Lifelines carry `4 4`; only the message-line dash is `6 4`.
+            assert!(!svg.contains("stroke-dasharray=\"6 4\""), "case: {src}");
+        }
     }
 }

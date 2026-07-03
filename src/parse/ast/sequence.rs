@@ -129,10 +129,14 @@ pub enum ArrowKind {
     Dashed,
     /// `-->>` dashed line, arrowhead
     DashedArrow,
-    /// `-x` / `--x` cross terminator
+    /// `-x` cross terminator, solid line
     Cross,
-    /// `-)` / `--)` open arrow (async)
+    /// `--x` cross terminator, dashed line
+    DashedCross,
+    /// `-)` open arrow (async), solid line
     Open,
+    /// `--)` open arrow (async), dashed line
+    DashedOpen,
     /// `<<->>` solid line, filled arrowhead at both ends (bidirectional)
     BiSolidArrow,
     /// `<<-->>` dashed line, filled arrowhead at both ends (bidirectional)
