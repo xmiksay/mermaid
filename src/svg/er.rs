@@ -247,6 +247,12 @@ fn draw_relation(
     let src = id_to_u32[&rel.left] as usize;
     let dst = id_to_u32[&rel.right] as usize;
     let n = pts.len();
+    // The router always yields >= 2 points (both endpoints); guard the
+    // invariant so a future regression clips nothing instead of panicking on
+    // `pts[1]` / `pts[n - 2]` (the latter underflows `usize`).
+    if n < 2 {
+        return;
+    }
     let first = clip_rect(pts[1], pts[0], sizes[src]);
     let last = clip_rect(pts[n - 2], pts[n - 1], sizes[dst]);
 

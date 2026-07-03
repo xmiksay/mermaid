@@ -186,8 +186,11 @@ fn column_depths(order: &[String], links: &[crate::parse::SankeyLink]) -> BTreeM
         changed = false;
         iter += 1;
         for l in links {
-            let s = depth[&l.source];
-            let t = depth[&l.target];
+            // `order` is expected to cover every endpoint, but a link naming an
+            // undeclared node would otherwise panic on the map index — treat a
+            // missing endpoint as column 0 rather than crashing.
+            let s = depth.get(&l.source).copied().unwrap_or(0);
+            let t = depth.get(&l.target).copied().unwrap_or(0);
             if t <= s {
                 depth.insert(l.target.clone(), s + 1);
                 changed = true;

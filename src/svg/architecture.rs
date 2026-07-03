@@ -260,6 +260,11 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             vec![(acx, acy), (bcx, bcy)]
         };
 
+        // `pts` is built with both endpoints above; guard the invariant so a
+        // regression skips the edge instead of underflowing `pts.len() - 1`.
+        if pts.len() < 2 {
+            continue;
+        }
         // Attach endpoints to the sides named in the edge (`db:L -- R:server`).
         let last_idx = pts.len() - 1;
         pts[0] = port_point((acx, acy), a.2, a.3, e.from_side);

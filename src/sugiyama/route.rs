@@ -94,3 +94,70 @@ pub(crate) fn build(w: &Work) -> Layout {
         height,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sugiyama::{cycle, layer, order, Graph, LayoutConfig};
+
+    fn build_layout(nodes: &[NodeId], edges: &[(NodeId, NodeId)]) -> Layout {
+        let node_size = nodes.iter().map(|&n| (n, (40.0, 20.0))).collect();
+        let g = Graph {
+            nodes: nodes.to_vec(),
+            edges: edges.to_vec(),
+            node_size,
+        };
+        let mut w = Work::from_input(&g).unwrap();
+        cycle::remove(&mut w);
+        layer::assign(&mut w);
+        order::minimize_crossings(&mut w, 24);
+        super::super::coord::assign(&mut w, &LayoutConfig::default());
+        build(&w)
+    }
+
+    // The invariant every downstream renderer clips against: a routed edge
+    // always carries at least its two endpoints.
+    #[test]
+    fn every_edge_polyline_has_at_least_two_points() {
+        let l = build_layout(&[1, 2, 3, 4, 5], &[(1, 2), (2, 3), (3, 4), (4, 5), (1, 5)]);
+        assert_eq!(l.edge_points.len(), 5);
+        for (edge, pts) in &l.edge_points {
+            assert!(pts.len() >= 2, "edge {edge:?} routed with < 2 points");
+        }
+    }
+
+    #[test]
+    fn endpoints_sit_at_node_centers() {
+        let l = build_layout(&[1, 2], &[(1, 2)]);
+        let pts = &l.edge_points[&(1, 2)];
+        assert_eq!(*pts.first().unwrap(), l.node_pos[&1]);
+        assert_eq!(*pts.last().unwrap(), l.node_pos[&2]);
+    }
+
+    #[test]
+    fn reversed_edge_keeps_user_direction() {
+        // 3 -> 1 is a back-edge; the polyline still runs 3's center -> 1's center.
+        let l = build_layout(&[1, 2, 3], &[(1, 2), (2, 3), (3, 1)]);
+        let pts = &l.edge_points[&(3, 1)];
+        assert!(pts.len() >= 2);
+        assert_eq!(*pts.first().unwrap(), l.node_pos[&3]);
+        assert_eq!(*pts.last().unwrap(), l.node_pos[&1]);
+    }
+
+    #[test]
+    fn self_loop_routes_a_closed_four_point_loop() {
+        let l = build_layout(&[1, 2], &[(1, 1), (1, 2)]);
+        let loop_pts = l.edge_points.get(&(1, 1)).expect("self-loop routed");
+        assert_eq!(loop_pts.len(), 4);
+        // A self-loop starts and ends on the same node boundary point.
+        assert_eq!(loop_pts.first(), loop_pts.last());
+        assert!(loop_pts.len() >= 2);
+    }
+
+    #[test]
+    fn isolated_node_has_no_edges_but_is_positioned() {
+        let l = build_layout(&[1], &[]);
+        assert!(l.node_pos.contains_key(&1));
+        assert!(l.edge_points.is_empty());
+    }
+}
