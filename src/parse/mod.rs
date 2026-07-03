@@ -177,6 +177,17 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let Diagram::XyChart(x) = &mut diagram {
         apply_xychart_config(x, &meta.config);
     }
+    if let Diagram::Pie(p) = &mut diagram {
+        if meta.pie_text_position.is_some() {
+            p.text_position = meta.pie_text_position;
+        }
+        if meta.pie_donut_hole.is_some() {
+            p.donut_hole = meta.pie_donut_hole;
+        }
+        if meta.pie_legend_position.is_some() {
+            p.legend_position = meta.pie_legend_position.clone();
+        }
+    }
     Ok((diagram, meta))
 }
 
@@ -430,5 +441,19 @@ mod tests {
             panic!("expected packet diagram")
         };
         assert_eq!(p.config, ast::PacketConfig::default());
+    }
+
+    #[test]
+    fn pie_config_reaches_diagram() {
+        let src = "%%{init: {\"pie\": {\"textPosition\": 0.2, \"donutHole\": 0.5, \"legendPosition\": \"bottom\"}}}%%\npie\n\"A\": 1\n";
+        let (d, _) = parse_with_meta(src).unwrap();
+        match d {
+            Diagram::Pie(p) => {
+                assert_eq!(p.text_position, Some(0.2));
+                assert_eq!(p.donut_hole, Some(0.5));
+                assert_eq!(p.legend_position.as_deref(), Some("bottom"));
+            }
+            other => panic!("expected pie, got {other:?}"),
+        }
     }
 }

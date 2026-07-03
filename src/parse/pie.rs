@@ -107,6 +107,17 @@ fn parse_entry(line: &str, line_no: usize) -> Result<PieEntry, ParseError> {
     if value.is_nan() {
         return Err(ParseError::number(line_no, "value is NaN"));
     }
+    // Upstream rejects negative slice values ("values must be positive")
+    // rather than silently clamping and dropping the slice.
+    if value < 0.0 {
+        return Err(ParseError::number(
+            line_no,
+            format!(
+                "pie slice value must be non-negative: '{}'",
+                value_raw.trim()
+            ),
+        ));
+    }
     Ok(PieEntry { label, value })
 }
 
@@ -195,6 +206,19 @@ mod tests {
             ParseError::Syntax { line, message, .. } => {
                 assert_eq!(line, 2);
                 assert!(message.contains("invalid number"));
+            }
+            e => panic!("unexpected: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_negative_value() {
+        // Upstream errors on negative values; we must not silently drop the slice.
+        let err = parse("pie\n\"A\" : -5\n").unwrap_err();
+        match err {
+            ParseError::Syntax { line, message, .. } => {
+                assert_eq!(line, 2);
+                assert!(message.contains("non-negative"));
             }
             e => panic!("unexpected: {e:?}"),
         }

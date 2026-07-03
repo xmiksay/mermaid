@@ -106,6 +106,15 @@ pub struct DiagramMeta {
     pub sankey_node_padding: Option<f64>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
+    /// `config.pie.textPosition` from the preamble — copied onto a
+    /// [`PieDiagram`] to place slice labels.
+    pub pie_text_position: Option<f64>,
+    /// `config.pie.donutHole` from the preamble — copied onto a [`PieDiagram`]
+    /// to cut a donut hole.
+    pub pie_donut_hole: Option<f64>,
+    /// `config.pie.legendPosition` from the preamble — copied onto a
+    /// [`PieDiagram`] to place the legend.
+    pub pie_legend_position: Option<String>,
     /// The whole `config:` tree flattened to dotted `key → value` entries
     /// (both frontmatter and `%%{init}%%`). The typed fields above are derived
     /// from this; per-diagram renderers can read further keys as needed.
@@ -158,6 +167,15 @@ pub struct PieDiagram {
     pub title: Option<String>,
     pub show_data: bool,
     pub entries: Vec<PieEntry>,
+    /// `config.pie.textPosition` — fraction of the radius at which the slice
+    /// percentage labels sit (upstream default `0.75`).
+    pub text_position: Option<f64>,
+    /// `config.pie.donutHole` — inner-hole radius as a fraction of the radius,
+    /// turning the pie into a donut (upstream default `0`, i.e. a full pie).
+    pub donut_hole: Option<f64>,
+    /// `config.pie.legendPosition` — `right` (default), `left`, `top`, or
+    /// `bottom`.
+    pub legend_position: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
