@@ -30,6 +30,22 @@
 //!   * `edge` — the arrow scanner and v11 edge ids,
 //!   * `click` — the `click` directive,
 //!   * `directive` — `style`/`classDef`/`class`/`linkStyle`.
+//!
+//! # Unknown-line policy
+//!
+//! Unparseable statements **hard-error** with `ParseError::Syntax { line }`,
+//! matching every other diagram parser (upstream renders its error diagram for
+//! the same input). A recognized keyword whose body is malformed — a bare
+//! `style` / `classDef` / `class` / `linkStyle` / `click` with no arguments, or
+//! a `direction` naming an unknown token — errors on the offending line rather
+//! than being silently dropped, so a typo can't vanish.
+//!
+//! Two tolerances are deliberate, following upstream:
+//!   * a top-level `direction` (outside any `subgraph`) is a no-op — the header
+//!     already fixed the diagram direction — though its value is still checked;
+//!   * unknown keys inside a v11 `id@{ … }` attribute block, and unknown
+//!     `shape:` names, are ignored/fall back to `Rect` (see `node`) so forward-
+//!     compatible metadata doesn't break older renderers.
 
 use std::collections::{HashMap, HashSet};
 
@@ -96,35 +112,41 @@ pub(crate) fn parse(input: &str) -> Result<FlowchartDiagram, ParseError> {
         }
 
         if let Some(rest) = line.strip_prefix("style ") {
-            handle_style(rest, &mut diag, &mut nodes_by_id);
+            handle_style(rest, &mut diag, &mut nodes_by_id, line_no)?;
             continue;
         }
         if let Some(rest) = line.strip_prefix("classDef ") {
-            handle_class_def(rest, &mut diag);
+            handle_class_def(rest, &mut diag, line_no)?;
             continue;
         }
         if let Some(rest) = line.strip_prefix("class ") {
-            handle_class_apply(rest, &mut diag, &mut nodes_by_id);
+            handle_class_apply(rest, &mut diag, &mut nodes_by_id, line_no)?;
             continue;
         }
         if let Some(rest) = line.strip_prefix("linkStyle ") {
-            handle_link_style(rest, &mut diag);
+            handle_link_style(rest, &mut diag, line_no)?;
             continue;
         }
         if let Some(rest) = line.strip_prefix("click ") {
-            if let Some((id, action)) = parse_click(rest) {
-                let idx = node_index(&mut diag, &mut nodes_by_id, &id);
-                diag.nodes[idx].click = Some(action);
-            }
+            let (id, action) = parse_click(rest).ok_or_else(|| ParseError::Syntax {
+                message: "malformed 'click' statement".into(),
+                line: line_no,
+            })?;
+            let idx = node_index(&mut diag, &mut nodes_by_id, &id);
+            diag.nodes[idx].click = Some(action);
             continue;
         }
         if let Some(rest) = line.strip_prefix("direction ") {
-            // A `direction X` inside a subgraph body overrides the flow
-            // direction for that cluster's members; ignored at top level.
+            // The direction value is validated (an unknown token is a typo we
+            // report), but a `direction X` only takes effect inside a subgraph
+            // body — at top level the header already set the diagram direction,
+            // so upstream treats it as a no-op.
+            let dir = parse_direction(rest.trim()).ok_or_else(|| ParseError::Syntax {
+                message: format!("unknown direction: '{}'", rest.trim()),
+                line: line_no,
+            })?;
             if let Some(&parent) = subgraph_stack.last() {
-                if let Some(dir) = parse_direction(rest.trim()) {
-                    diag.subgraphs[parent].direction = Some(dir);
-                }
+                diag.subgraphs[parent].direction = Some(dir);
             }
             continue;
         }
@@ -426,5 +448,45 @@ mod tests {
         let d = parse("graph TD;\nA-->|a;b|B;\n").unwrap();
         assert_eq!(d.edges.len(), 1);
         assert_eq!(d.edges[0].label.as_deref(), Some("a;b"));
+    }
+
+    fn syntax_line(input: &str) -> usize {
+        match parse(input) {
+            Err(ParseError::Syntax { line, .. }) => line,
+            other => panic!("expected ParseError::Syntax, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unparseable_statement_hard_errors() {
+        // A misspelled keyword parses as a node followed by junk it can't read
+        // as an arrow — that must error, not silently disappear.
+        assert_eq!(syntax_line("flowchart TD\nsubgrapgh Foo bar\n"), 2);
+    }
+
+    #[test]
+    fn malformed_directives_hard_error() {
+        // Recognized keyword, but an incomplete body → error on that line.
+        assert_eq!(syntax_line("flowchart TD\nstyle A\n"), 2);
+        assert_eq!(syntax_line("flowchart TD\nclassDef foo\n"), 2);
+        assert_eq!(syntax_line("flowchart TD\nclass foo\n"), 2);
+        assert_eq!(syntax_line("flowchart TD\nlinkStyle 0\n"), 2);
+        assert_eq!(syntax_line("flowchart TD\nA-->B\nclick A\n"), 3);
+    }
+
+    #[test]
+    fn unknown_direction_hard_errors() {
+        assert_eq!(
+            syntax_line("flowchart TD\nsubgraph S\ndirection SIDEWAYS\nend\n"),
+            3
+        );
+    }
+
+    #[test]
+    fn top_level_direction_is_tolerated_no_op() {
+        // A valid top-level `direction` stays a no-op (the header wins), but its
+        // value is still validated — so this parses.
+        let d = parse("flowchart TD\ndirection LR\nA-->B\n").unwrap();
+        assert_eq!(d.direction, FlowDirection::TopDown);
     }
 }
