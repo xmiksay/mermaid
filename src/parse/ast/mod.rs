@@ -80,6 +80,9 @@ pub struct DiagramMeta {
     /// `config.treemap.valueFormat` from frontmatter — copied onto a
     /// [`TreemapDiagram`] to format leaf values.
     pub value_format: Option<String>,
+    /// `config.treemap.showValues` from frontmatter — copied onto a
+    /// [`TreemapDiagram`]; `Some(false)` hides leaf value text.
+    pub show_values: Option<bool>,
     /// `config.sankey.linkColor` from frontmatter — copied onto a
     /// [`SankeyDiagram`] to tint links.
     pub sankey_link_color: Option<String>,

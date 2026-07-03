@@ -288,6 +288,9 @@ pub struct TreemapDiagram {
     pub class_defs: HashMap<String, Style>,
     /// `config.treemap.valueFormat` (d3-format subset) applied to leaf values.
     pub value_format: Option<String>,
+    /// `config.treemap.showValues` — `Some(false)` suppresses leaf value text
+    /// (upstream gates on `showValues !== false`, so `None`/`Some(true)` show).
+    pub show_values: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

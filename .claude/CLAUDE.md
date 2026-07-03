@@ -286,7 +286,11 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `config.treemap.valueFormat` (frontmatter) flows through
   `DiagramMeta.value_format` → `TreemapDiagram.value_format` and formats leaf
   values via `format_value`: `$` prefix, `,` thousands, `.N` decimals, `%`
-  percent (the common d3-format subset).
+  percent (the common d3-format subset). Absent a `valueFormat`, upstream
+  defaults it to `,` (thousands grouping), so bare leaf values still render
+  grouped (`1,234,567`). `config.treemap.showValues` flows the same way
+  (`DiagramMeta.show_values` → `TreemapDiagram.show_values`); `Some(false)`
+  suppresses the leaf value text (upstream gates on `showValues !== false`).
 - **Parser unknown-line policy is hard-error everywhere.** Every diagram
   parser (flowchart included) returns `ParseError::Syntax { line }` on an
   unparseable statement — the honest library equivalent of upstream rendering

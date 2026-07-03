@@ -23,6 +23,7 @@ struct Ctx<'a> {
     theme: &'a Theme,
     class_defs: &'a HashMap<String, Style>,
     value_format: Option<&'a str>,
+    show_values: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -53,6 +54,7 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
         theme,
         class_defs: &d.class_defs,
         value_format: d.value_format.as_deref(),
+        show_values: d.show_values != Some(false),
     };
     let area = Rect {
         x: PAD,
@@ -130,7 +132,7 @@ fn draw_node(n: &TreemapNode, r: Rect, i: usize, depth: usize, svg: &mut SvgBuil
             &n.label,
         );
         if let Some(v) = n.value {
-            if leaf && r.h > 28.0 {
+            if ctx.show_values && leaf && r.h > 28.0 {
                 svg.text(
                     r.x + 4.0,
                     r.y + 24.0,
@@ -225,12 +227,10 @@ fn worst(row: &[f64], side: f64) -> f64 {
 }
 
 /// Format a leaf value through the supported `valueFormat` subset: `$` prefix,
-/// `,` thousands grouping, `.N` decimal places, `%` percentage. Absent a
-/// format, the value is rendered naturally.
+/// `,` thousands grouping, `.N` decimal places, `%` percentage. Upstream
+/// defaults `valueFormat` to `,` (thousands grouping) when unset.
 fn format_value(v: f64, fmt: Option<&str>) -> String {
-    let Some(fmt) = fmt else {
-        return fnum(v);
-    };
+    let fmt = fmt.unwrap_or(",");
     let currency = fmt.contains('$');
     let percent = fmt.contains('%');
     let thousands = fmt.contains(',');
@@ -310,6 +310,7 @@ mod tests {
             }],
             class_defs: HashMap::new(),
             value_format: None,
+            show_values: None,
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -334,6 +335,7 @@ mod tests {
             }],
             class_defs,
             value_format: None,
+            show_values: None,
         };
         let svg = render(&d, &Theme::default());
         assert!(
@@ -389,7 +391,41 @@ mod tests {
         assert_eq!(format_value(0.42, Some("%")), "42%");
         assert_eq!(format_value(1000.0, Some("$,.2f")), "$1,000.00");
         assert_eq!(format_value(-1234.0, Some(",")), "-1,234");
-        // No format → natural rendering.
+        // No format → upstream default ',' thousands grouping.
         assert_eq!(format_value(12.0, None), "12");
+        assert_eq!(format_value(1234567.0, None), "1,234,567");
+    }
+
+    #[test]
+    fn show_values_false_hides_leaf_value() {
+        let d = TreemapDiagram {
+            title: None,
+            root: vec![leaf("Big", 1234.0)],
+            class_defs: HashMap::new(),
+            value_format: None,
+            show_values: Some(false),
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Big<"), "label should still render: {svg}");
+        assert!(
+            !svg.contains(">1,234<"),
+            "leaf value should be hidden: {svg}"
+        );
+    }
+
+    #[test]
+    fn default_value_format_groups_thousands() {
+        let d = TreemapDiagram {
+            title: None,
+            root: vec![leaf("Big", 1234567.0)],
+            class_defs: HashMap::new(),
+            value_format: None,
+            show_values: None,
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(
+            svg.contains(">1,234,567<"),
+            "default valueFormat should group thousands: {svg}"
+        );
     }
 }

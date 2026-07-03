@@ -128,8 +128,13 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let (Diagram::Kanban(k), Some(url)) = (&mut diagram, &meta.ticket_base_url) {
         k.ticket_base_url = Some(url.clone());
     }
-    if let (Diagram::Treemap(t), Some(fmt)) = (&mut diagram, &meta.value_format) {
-        t.value_format = Some(fmt.clone());
+    if let Diagram::Treemap(t) = &mut diagram {
+        if let Some(fmt) = &meta.value_format {
+            t.value_format = Some(fmt.clone());
+        }
+        if meta.show_values.is_some() {
+            t.show_values = meta.show_values;
+        }
     }
     if let Diagram::Sankey(s) = &mut diagram {
         if meta.sankey_link_color.is_some() {
