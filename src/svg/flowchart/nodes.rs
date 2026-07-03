@@ -23,7 +23,10 @@ pub(super) fn node_size(n: &FlowNode, font_size: f64) -> (f64, f64) {
     let w = (widest + PAD_X * 2.0).max(MIN_W);
     let h = (lines.len() as f64 * LINE_H * font_scale(font_size) + PAD_Y * 2.0).max(MIN_H);
     match n.shape {
-        NodeShape::Circle | NodeShape::DoubleCircle => {
+        NodeShape::Circle
+        | NodeShape::DoubleCircle
+        | NodeShape::FilledCircle
+        | NodeShape::CrossedCircle => {
             let d = w.max(h);
             (d, d)
         }
@@ -33,6 +36,11 @@ pub(super) fn node_size(n: &FlowNode, font_size: f64) -> (f64, f64) {
         | NodeShape::Trapezoid
         | NodeShape::TrapezoidAlt => (w + 24.0, h),
         NodeShape::Asymmetric => (w + 16.0, h),
+        // Triangles taper, so the label needs more room to sit inside them.
+        NodeShape::Triangle | NodeShape::FlippedTriangle => (w + h, h + PAD_Y),
+        NodeShape::Hourglass => (w, h + PAD_Y),
+        // End-cap ellipses eat horizontal room.
+        NodeShape::DirectAccessStorage => (w + 24.0, h),
         _ => (w, h),
     }
 }
@@ -224,6 +232,15 @@ pub(super) fn draw_node(
             );
             svg.path(&d, &fill_attr);
         }
+        // Mermaid v11 `@{ shape: … }` geometries live in the sibling module.
+        other => super::shapes::draw(
+            svg,
+            other,
+            (x, y, w, h),
+            (cx, cy),
+            &fill_attr,
+            flow_node_stroke,
+        ),
     }
     let fg = rs.label_fill(theme.fg);
     let font = rs.font_size.as_deref();

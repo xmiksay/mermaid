@@ -199,14 +199,16 @@ fn split_attrs(body: &str) -> Vec<(String, String)> {
 }
 
 /// Map a v11 named shape onto an existing `NodeShape`. Aliases follow upstream
-/// Mermaid; visual-only shapes that lack a variant here (e.g. `notch-rect`,
-/// `bolt`, `hourglass`, `fr-rect`) fall back to `Rect` so their content is
-/// still rendered. Unknown names likewise fall back to `Rect`.
+/// Mermaid; visual-only shapes still without a variant (e.g. `sm-circ`, `fork`,
+/// `text`) fall back to `Rect` so their content is still rendered. Unknown names
+/// likewise fall back to `Rect`.
 fn shape_from_name(name: &str) -> NodeShape {
     match name.trim() {
-        "rounded" => NodeShape::Round,
+        "rounded" | "event" => NodeShape::Round,
         "stadium" | "pill" | "term" | "terminal" => NodeShape::Stadium,
-        "subproc" | "subprocess" | "subroutine" | "framed-rectangle" => NodeShape::Subroutine,
+        "subproc" | "subprocess" | "subroutine" | "fr-rect" | "framed-rectangle" => {
+            NodeShape::Subroutine
+        }
         "cyl" | "cylinder" | "database" | "db" => NodeShape::Cylinder,
         "circle" | "circ" => NodeShape::Circle,
         "dbl-circ" | "double-circle" => NodeShape::DoubleCircle,
@@ -217,6 +219,29 @@ fn shape_from_name(name: &str) -> NodeShape {
         "trap-b" | "trapezoid-bottom" | "trapezoid" | "priority" => NodeShape::Trapezoid,
         "trap-t" | "trapezoid-top" | "inv-trapezoid" | "manual" => NodeShape::TrapezoidAlt,
         "odd" => NodeShape::Asymmetric,
+        "notch-rect" | "card" | "notched-rectangle" => NodeShape::NotchedRect,
+        "doc" | "document" => NodeShape::Document,
+        "docs" | "documents" | "st-doc" | "stacked-document" => NodeShape::MultiDocument,
+        "tag-doc" | "tagged-document" => NodeShape::TaggedDocument,
+        "bolt" | "com-link" | "lightning-bolt" => NodeShape::LightningBolt,
+        "hourglass" | "collate" => NodeShape::Hourglass,
+        "brace" | "brace-l" | "brace-r" | "braces" | "comment" => NodeShape::Comment,
+        "delay" | "half-rounded-rectangle" => NodeShape::Delay,
+        "das" | "h-cyl" | "horizontal-cylinder" => NodeShape::DirectAccessStorage,
+        "lin-cyl" | "disk" | "lined-cylinder" => NodeShape::LinedCylinder,
+        "lin-rect" | "lin-proc" | "lined-process" | "lined-rectangle" | "shaded-process" => {
+            NodeShape::LinedProcess
+        }
+        "div-rect" | "div-proc" | "divided-rectangle" | "divided-process" => {
+            NodeShape::DividedProcess
+        }
+        "win-pane" | "window-pane" | "internal-storage" => NodeShape::WindowPane,
+        "tri" | "triangle" | "extract" => NodeShape::Triangle,
+        "flip-tri" | "flipped-triangle" | "manual-file" => NodeShape::FlippedTriangle,
+        "f-circ" | "filled-circle" | "junction" => NodeShape::FilledCircle,
+        "cross-circ" | "crossed-circle" | "summary" => NodeShape::CrossedCircle,
+        "flag" | "paper-tape" => NodeShape::PaperTape,
+        "bow-rect" | "bow-tie-rectangle" | "stored-data" => NodeShape::StoredData,
         _ => NodeShape::Rect,
     }
 }
@@ -369,12 +394,43 @@ mod tests {
 
     #[test]
     fn at_unknown_shape_falls_back_to_rect() {
-        // Visual-only shapes without a variant (and any unknown name) fall back
-        // to Rect rather than erroring, and the label is preserved.
-        let d = parse("flowchart TD\nA@{ shape: bolt, label: \"kept\" } --> B\n").unwrap();
+        // A name with no variant (and any unknown name) falls back to Rect
+        // rather than erroring, and the label is preserved.
+        let d = parse("flowchart TD\nA@{ shape: text, label: \"kept\" } --> B\n").unwrap();
         let a = node(&d, "A");
         assert_eq!(a.shape, NodeShape::Rect);
         assert_eq!(a.text, "kept");
+    }
+
+    #[test]
+    fn at_v11_shape_names_map_to_variants() {
+        // Each v11 name (and a representative alias) maps to its own variant.
+        let cases = [
+            ("notch-rect", NodeShape::NotchedRect),
+            ("card", NodeShape::NotchedRect),
+            ("doc", NodeShape::Document),
+            ("docs", NodeShape::MultiDocument),
+            ("tag-doc", NodeShape::TaggedDocument),
+            ("bolt", NodeShape::LightningBolt),
+            ("hourglass", NodeShape::Hourglass),
+            ("comment", NodeShape::Comment),
+            ("delay", NodeShape::Delay),
+            ("das", NodeShape::DirectAccessStorage),
+            ("lin-cyl", NodeShape::LinedCylinder),
+            ("lin-rect", NodeShape::LinedProcess),
+            ("div-rect", NodeShape::DividedProcess),
+            ("win-pane", NodeShape::WindowPane),
+            ("tri", NodeShape::Triangle),
+            ("flip-tri", NodeShape::FlippedTriangle),
+            ("f-circ", NodeShape::FilledCircle),
+            ("cross-circ", NodeShape::CrossedCircle),
+            ("paper-tape", NodeShape::PaperTape),
+            ("bow-rect", NodeShape::StoredData),
+        ];
+        for (name, expected) in cases {
+            let d = parse(&format!("flowchart TD\nA@{{ shape: {name} }} --> B\n")).unwrap();
+            assert_eq!(node(&d, "A").shape, expected, "shape name {name:?}");
+        }
     }
 
     #[test]

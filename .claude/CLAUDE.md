@@ -465,10 +465,18 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `parse_at_node` (`src/parse/flowchart/node.rs`): the `@{…}` block right after a
   node id is split into `key: value` pairs (quote-aware comma/colon split), the
   `shape` name mapped onto a `NodeShape` by `shape_from_name` (aliases like
-  `rounded`/`diam`/`cyl`/`lean-r`/`trap-b`/`dbl-circ`/`subproc`; unknown or
-  visual-only names such as `bolt`/`hourglass`/`notch-rect` fall back to Rect),
-  and `label`/`title` set the node text. `icon`/`img` forms are dropped but
-  their `label` is preserved so content is never lost.
+  `rounded`/`diam`/`cyl`/`lean-r`/`trap-b`/`dbl-circ`/`subproc`), and
+  `label`/`title` set the node text. `icon`/`img` forms are dropped but their
+  `label` is preserved so content is never lost. Beyond the classic geometries,
+  ~19 v11 shapes have their own `NodeShape` variant and are drawn in
+  `src/svg/flowchart/shapes.rs` (kept out of `nodes.rs`; `draw_node` delegates
+  its non-classic arm there): `notch-rect`/`card`, `doc`, `docs`, `tag-doc`,
+  `bolt`, `hourglass`, `comment`/`braces`, `delay`, `das` (horizontal cylinder),
+  `lin-cyl`/`disk`, `lin-rect`, `div-rect`, `win-pane`, `tri`, `flip-tri`,
+  `f-circ`, `cross-circ`, `paper-tape`, `bow-rect`/`stored-data` (+ their
+  aliases). The round ones (`f-circ`/`cross-circ`) get a circle edge-clip; every
+  other new shape uses the rect-boundary clip. Names still without a variant
+  (e.g. `text`, `fork`, `sm-circ`) fall back to Rect.
 - Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked

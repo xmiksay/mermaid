@@ -223,10 +223,12 @@ fn clip_to_node(
     shape: NodeShape,
 ) -> (f64, f64) {
     match shape {
-        NodeShape::Circle | NodeShape::DoubleCircle => {
-            clip_circle(from, center, size.0.max(size.1) / 2.0)
-        }
+        NodeShape::Circle
+        | NodeShape::DoubleCircle
+        | NodeShape::FilledCircle
+        | NodeShape::CrossedCircle => clip_circle(from, center, size.0.max(size.1) / 2.0),
         NodeShape::Rhombus => clip_rhombus(from, center, size),
+        // Every other v11 geometry falls back to the rectangle-boundary clip.
         _ => clip_rect(from, center, size),
     }
 }

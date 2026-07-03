@@ -318,6 +318,26 @@ fn non_clickable_node_has_no_anchor() {
 }
 
 #[test]
+fn v11_shapes_render_distinct_geometry() {
+    // Every listed v11 shape must render without panicking and produce its own
+    // outline (not a plain rect fallback). We assert a few signature marks.
+    let src = "flowchart TD\n\
+               A@{ shape: doc } --> B@{ shape: hourglass }\n\
+               B --> C@{ shape: tri, label: \"t\" }\n\
+               C --> D@{ shape: cross-circ }\n\
+               D --> E@{ shape: delay }\n\
+               E --> F@{ shape: comment, label: \"c\" }\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    assert!(svg.starts_with("<svg"));
+    // Document's wavy bottom is a cubic (`C`) path.
+    assert!(any_bezier_path(&svg));
+    // cross-circ draws a circle plus a diagonal cross.
+    assert!(svg.contains("<circle"));
+    // Comment draws no body fill, only brace strokes (quadratics).
+    assert!(svg.contains("Q"));
+}
+
+#[test]
 fn adjacent_layer_edge_stays_straight() {
     // A single short edge clips to 2 points → straight M..L.., no curve.
     let svg = render(&parse_flow("flowchart TD\na --> b\n"), &Theme::default());
