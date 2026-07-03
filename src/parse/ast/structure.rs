@@ -245,6 +245,8 @@ pub struct TreemapDiagram {
     pub root: Vec<TreemapNode>,
     /// `classDef <name> <props>` definitions, referenced by a node's `:::name`.
     pub class_defs: HashMap<String, Style>,
+    /// `config.treemap.valueFormat` (d3-format subset) applied to leaf values.
+    pub value_format: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

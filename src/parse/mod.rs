@@ -66,6 +66,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let (Diagram::Kanban(k), Some(url)) = (&mut diagram, &meta.ticket_base_url) {
         k.ticket_base_url = Some(url.clone());
     }
+    if let (Diagram::Treemap(t), Some(fmt)) = (&mut diagram, &meta.value_format) {
+        t.value_format = Some(fmt.clone());
+    }
     Ok((diagram, meta))
 }
 

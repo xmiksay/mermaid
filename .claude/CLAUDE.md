@@ -218,7 +218,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   and a node's trailing `:::name` (into `TreemapNode.class_name`, stripped
   before the label/value colon split). The renderer resolves the class through
   the shared `resolve_style`, overriding the palette fill/stroke — the raw
-  `:::name` no longer leaks into the label text.
+  `:::name` no longer leaks into the label text. Layout is **squarified**
+  (Bruls/Huizing/van Wijk worst-aspect-ratio row packing in `squarify`/`worst`,
+  `src/svg/treemap.rs`), not slice-and-dice, so rectangles stay near square.
+  `config.treemap.valueFormat` (frontmatter) flows through
+  `DiagramMeta.value_format` → `TreemapDiagram.value_format` and formats leaf
+  values via `format_value`: `$` prefix, `,` thousands, `.N` decimals, `%`
+  percent (the common d3-format subset).
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
 - Flowchart `;` is a **statement terminator/separator** anywhere a newline is

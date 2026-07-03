@@ -100,6 +100,8 @@ fn strip_frontmatter(lines: &[&str], meta: &mut DiagramMeta) -> usize {
                 meta.theme = Some(unquote(v.trim()).to_string());
             } else if let Some(v) = strip_prefix_ci(trimmed, "ticketBaseUrl:") {
                 meta.ticket_base_url = Some(unquote(v.trim()).to_string());
+            } else if let Some(v) = strip_prefix_ci(trimmed, "valueFormat:") {
+                meta.value_format = Some(unquote(v.trim()).to_string());
             }
         } else {
             in_config = false;
@@ -249,6 +251,15 @@ mod tests {
         let (m, s) = strip(src);
         assert_eq!(m.acc_descr.as_deref(), Some("line one\nline two"));
         assert_eq!(s, "flowchart TD\nA --> B");
+    }
+
+    #[test]
+    fn frontmatter_treemap_value_format() {
+        let src =
+            "---\nconfig:\n  treemap:\n    valueFormat: \"$0,0\"\n---\ntreemap-beta\n\"A\": 5\n";
+        let (m, s) = strip(src);
+        assert_eq!(m.value_format.as_deref(), Some("$0,0"));
+        assert_eq!(s, "treemap-beta\n\"A\": 5");
     }
 
     #[test]
