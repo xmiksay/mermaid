@@ -120,8 +120,14 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
         );
     }
 
+    let boundary_styles: HashMap<&str, &C4ElementStyle> = d
+        .boundary_styles
+        .iter()
+        .map(|s| (s.alias.as_str(), s))
+        .collect();
     for b in &boundaries {
-        draw_boundary_rect(b, &mut svg, theme);
+        let ov = boundary_styles.get(b.alias.as_str()).copied();
+        draw_boundary_rect(b, ov, &mut svg, theme);
     }
 
     let elem_styles: HashMap<&str, &C4ElementStyle> = d
@@ -150,6 +156,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
 }
 
 struct BoundaryBox {
+    alias: String,
     label: String,
     kind: C4BoundaryKind,
     x: f64,
@@ -264,6 +271,7 @@ fn place_absolute(
         pos.insert(n.el.alias.clone(), (ax, ay, n.w, n.h));
         if n.is_boundary {
             boundaries.push(BoundaryBox {
+                alias: n.el.alias.clone(),
                 label: n.el.label.clone(),
                 kind: n.el.boundary_kind.unwrap_or(C4BoundaryKind::Generic),
                 x: ax,
@@ -301,8 +309,22 @@ fn boundary_kind_label(kind: C4BoundaryKind) -> &'static str {
     }
 }
 
-fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
-    let fg = theme.fg;
+fn draw_boundary_rect(
+    b: &BoundaryBox,
+    style: Option<&C4ElementStyle>,
+    svg: &mut SvgBuilder,
+    theme: &Theme,
+) {
+    // `UpdateBoundaryStyle` overrides the outline/fill/label colors.
+    let fill = style
+        .and_then(|s| s.bg_color.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let stroke = style
+        .and_then(|s| s.border_color.clone())
+        .unwrap_or_else(|| C4_LINE.to_string());
+    let fg = style
+        .and_then(|s| s.font_color.clone())
+        .unwrap_or_else(|| theme.fg.to_string());
     let fg_muted = theme.fg_muted;
     // Upstream draws a `Deployment_Node` (any boundary with a `nodeType`) with a
     // solid border and every other boundary kind dashed `7.0,7.0`.
@@ -317,7 +339,7 @@ fn draw_boundary_rect(b: &BoundaryBox, svg: &mut SvgBuilder, theme: &Theme) {
         b.w,
         b.h,
         &format!(
-            "fill=\"none\" stroke=\"{C4_LINE}\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\"{dash}"
+            "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\" rx=\"2.5\" ry=\"2.5\"{dash}"
         ),
     );
     let kind = boundary_kind_label(b.kind);

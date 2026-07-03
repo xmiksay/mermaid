@@ -76,6 +76,70 @@ fn parses_update_directives() {
 }
 
 #[test]
+fn keyword_args_are_position_independent() {
+    // `$descr` placed before other keyword args must not shift the label, and
+    // `$sprite`/`$tags`/`$link` are captured instead of corrupting descr.
+    let src = "C4Context\n\
+        Person(a, \"Alice\", $descr=\"A customer\", $sprite=\"person\", $tags=\"v1\", $link=\"https://x\")\n";
+    let d = parse(src).unwrap();
+    let e = &d.elements[0];
+    assert_eq!(e.alias, "a");
+    assert_eq!(e.label, "Alice");
+    assert_eq!(e.descr.as_deref(), Some("A customer"));
+    assert_eq!(e.sprite.as_deref(), Some("person"));
+    assert_eq!(e.tags.as_deref(), Some("v1"));
+    assert_eq!(e.link.as_deref(), Some("https://x"));
+}
+
+#[test]
+fn container_keyword_techn_and_descr() {
+    // A `$sprite` before the positional technology/description must not shift
+    // them; `$techn`/`$descr` override the positional slots.
+    let src = "C4Container\n\
+        Container(c, \"Api\", $sprite=\"go\", \"REST\", \"The API\")\n\
+        Container(c2, \"Web\", \"Ignored\", \"desc\", $techn=\"Vue\")\n";
+    let d = parse(src).unwrap();
+    assert_eq!(d.elements[0].technology.as_deref(), Some("REST"));
+    assert_eq!(d.elements[0].descr.as_deref(), Some("The API"));
+    assert_eq!(d.elements[0].sprite.as_deref(), Some("go"));
+    // $techn overrides the positional technology.
+    assert_eq!(d.elements[1].technology.as_deref(), Some("Vue"));
+    assert_eq!(d.elements[1].descr.as_deref(), Some("desc"));
+}
+
+#[test]
+fn rel_keyword_args() {
+    let src = "C4Context\n\
+        System(a, \"A\")\n\
+        System(b, \"B\")\n\
+        Rel(a, b, \"uses\", $techn=\"HTTPS\", $link=\"https://x\", $tags=\"t\")\n";
+    let d = parse(src).unwrap();
+    let r = &d.relations[0];
+    assert_eq!(r.label, "uses");
+    assert_eq!(r.technology.as_deref(), Some("HTTPS"));
+    assert_eq!(r.link.as_deref(), Some("https://x"));
+    assert_eq!(r.tags.as_deref(), Some("t"));
+}
+
+#[test]
+fn parses_show_legend_and_boundary_style() {
+    let src = "C4Context\n\
+        System_Boundary(b, \"Group\") {\n\
+          System(s, \"S\")\n\
+        }\n\
+        UpdateBoundaryStyle(b, $bgColor=\"#eee\", $borderColor=\"#333\", $fontColor=\"#000\")\n\
+        SHOW_LEGEND()\n";
+    let d = parse(src).unwrap();
+    assert!(d.show_legend);
+    assert_eq!(d.boundary_styles.len(), 1);
+    let bs = &d.boundary_styles[0];
+    assert_eq!(bs.alias, "b");
+    assert_eq!(bs.bg_color.as_deref(), Some("#eee"));
+    assert_eq!(bs.border_color.as_deref(), Some("#333"));
+    assert_eq!(bs.font_color.as_deref(), Some("#000"));
+}
+
+#[test]
 fn parses_boundary() {
     let src = "C4Context\nSystem_Boundary(b, \"Boundary\") {\n  System(s, \"S\", \"d\")\n}\n";
     let d = parse(src).unwrap();

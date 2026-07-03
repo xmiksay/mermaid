@@ -91,7 +91,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (465 tests: 451 lib + 13 integration + 1 doctest)
+cargo test               # unit + integration + doctest (472 tests: 458 lib + 13 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -480,6 +480,17 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `Deployment_Node` in `parse_boundary_open` (checked `Node_L`/`Node_R` before
   the bare `Node` prefix), so their children nest instead of leaking to top
   level.
+  - C4 element/relation macros are **not** positional-only: `split_macro_args`
+    (`src/parse/c4/calls.rs`) pulls the `$descr`/`$techn`/`$sprite`/`$tags`/
+    `$link` keyword args out of the arg list before slotting the positional
+    ones, so a `$sprite=` placed before the positional technology no longer
+    shifts every later field. `$descr`/`$techn` override their positional slot;
+    `$sprite`/`$tags`/`$link` land on `C4Element`/`C4Relation` (rendering
+    deferred). `UpdateBoundaryStyle(alias, $bgColor/$fontColor/$borderColor)`
+    fills `C4Diagram.boundary_styles` (reusing `C4ElementStyle` via
+    `parse_style_directive`) and restyles the boundary frame fill/stroke/label
+    in `draw_boundary_rect`. `SHOW_LEGEND()` sets `C4Diagram.show_legend`
+    (consumed; legend rendering is a follow-up).
 - requirementDiagram (`src/parse/requirement.rs`) accepts both relation
   directions — forward `src - kind -> dst` and reverse `dst <- kind - src`
   (endpoints swapped so `from`→`to` order, hence layout, is preserved). Kind

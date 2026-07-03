@@ -10,8 +10,12 @@ pub struct C4Diagram {
     pub element_styles: Vec<C4ElementStyle>,
     /// `UpdateRelStyle` color/offset overrides, keyed by the (from, to) pair.
     pub rel_styles: Vec<C4RelStyle>,
+    /// `UpdateBoundaryStyle` color overrides, keyed by boundary alias.
+    pub boundary_styles: Vec<C4ElementStyle>,
     /// `UpdateLayoutConfig` row hints.
     pub layout: C4LayoutConfig,
+    /// `SHOW_LEGEND()` was requested (legend rendering deferred).
+    pub show_legend: bool,
 }
 
 impl Default for C4Diagram {
@@ -23,7 +27,9 @@ impl Default for C4Diagram {
             relations: Vec::new(),
             element_styles: Vec::new(),
             rel_styles: Vec::new(),
+            boundary_styles: Vec::new(),
             layout: C4LayoutConfig::default(),
+            show_legend: false,
         }
     }
 }
@@ -72,6 +78,12 @@ pub struct C4Element {
     pub label: String,
     pub descr: Option<String>,
     pub technology: Option<String>,
+    /// `$sprite=` keyword arg (icon name — rendering deferred).
+    pub sprite: Option<String>,
+    /// `$tags=` keyword arg.
+    pub tags: Option<String>,
+    /// `$link=` keyword arg (URL — rendering deferred).
+    pub link: Option<String>,
     pub external: bool,
     pub boundary_alias: Option<String>,
     pub boundary_label: Option<String>,
@@ -111,6 +123,12 @@ pub struct C4Relation {
     pub to: String,
     pub label: String,
     pub technology: Option<String>,
+    /// `$sprite=` keyword arg (icon name — rendering deferred).
+    pub sprite: Option<String>,
+    /// `$tags=` keyword arg.
+    pub tags: Option<String>,
+    /// `$link=` keyword arg (URL — rendering deferred).
+    pub link: Option<String>,
     pub direction: C4RelDirection,
     pub bidirectional: bool,
 }
