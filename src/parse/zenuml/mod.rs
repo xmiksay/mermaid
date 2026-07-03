@@ -253,7 +253,7 @@ impl Parser {
 
         match first_word(s).as_str() {
             "if" => self.parse_if(s, ctx, ret, items),
-            "while" | "for" | "forEach" | "loop" => {
+            "while" | "for" | "forEach" | "foreach" | "loop" => {
                 let label = strip_kw_cond(s);
                 let body = self.braced(ctx, ret);
                 items.push(SequenceItem::Loop(SequenceBlock { label, items: body }));
@@ -277,7 +277,42 @@ impl Parser {
                 items.extend(body);
             }
             "return" => self.emit_return(&after_kw(s, "return"), line, ctx, ret, items),
+            "new" => self.parse_new(s, ctx, items),
+            // A bare `Bob` or an `A as Alice` alias declares a participant; only
+            // fall through to a message/call when it isn't a declaration.
+            _ if self.try_declaration(s) => {}
             _ => self.parse_call(s, ctx, ret, items),
+        }
+    }
+
+    /// A participant declaration: a bare identifier (`Bob`) or an alias
+    /// (`A as Alice`, id `A` displayed as `Alice`). Returns `false` for anything
+    /// that carries a call (`(`) or an arrow (`->`), leaving it to `parse_call`.
+    fn try_declaration(&mut self, s: &str) -> bool {
+        let s = s.trim();
+        if s.contains('(') || s.contains("->") {
+            return false;
+        }
+        if let Some((id, display)) = split_alias(s) {
+            self.declare_alias(&id, &display);
+            return true;
+        }
+        if !s.is_empty() && is_identifier(s) {
+            self.ensure(s);
+            return true;
+        }
+        false
+    }
+
+    fn declare_alias(&mut self, id: &str, display: &str) {
+        if let Some(p) = self.diag.participants.iter_mut().find(|p| p.id == id) {
+            p.display = display.to_string();
+        } else {
+            self.diag.participants.push(Participant {
+                id: id.to_string(),
+                display: display.to_string(),
+                kind: ParticipantKind::Participant,
+            });
         }
     }
 
@@ -354,6 +389,28 @@ impl Parser {
     }
 }
 
+/// True if `s` is a single participant identifier (letters, digits, `_`).
+fn is_identifier(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Split an `Id as Display` alias declaration into `(id, display)`. `id` must be
+/// a plain identifier; `display` may be quoted. Returns `None` when the `as`
+/// keyword is absent.
+fn split_alias(s: &str) -> Option<(String, String)> {
+    let (id, rest) = s.trim().split_once(char::is_whitespace)?;
+    let after = rest.trim_start().strip_prefix("as")?;
+    // `as` must be a whole word, not the head of a longer identifier.
+    if !after.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let display = after.trim().trim_matches('"').trim();
+    if !is_identifier(id) || display.is_empty() {
+        return None;
+    }
+    Some((id.to_string(), display.to_string()))
+}
+
 /// The leading identifier word of a statement (letters, digits, `_`).
 fn first_word(s: &str) -> String {
     s.trim()
@@ -425,6 +482,62 @@ mod tests {
         assert_eq!(kind("Ctrl"), ParticipantKind::Control);
         assert_eq!(kind("Order"), ParticipantKind::Entity);
         assert_eq!(kind("DB"), ParticipantKind::Database);
+    }
+
+    #[test]
+    fn bare_and_alias_declarations() {
+        let d = parse_ok("zenuml\nBob\nA as Alice\nA.greet()\n");
+        // Declaration order is column order: Bob, then A.
+        assert_eq!(d.participants[0].id, "Bob");
+        let a = d.participants.iter().find(|p| p.id == "A").unwrap();
+        assert_eq!(a.display, "Alice");
+        // The declarations produced no phantom Starter self-message; only the
+        // real `A.greet()` call remains (from the implicit starter to A).
+        let msgs: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!((&*msgs[0].from, &*msgs[0].to), (DEFAULT_STARTER, "A"));
+    }
+
+    #[test]
+    fn new_materializes_participant_with_creation_message() {
+        let d = parse_ok("zenuml\nnew A1\nnew A2(with, parameters)\n");
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Create(id) if id == "A1")));
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Create(id) if id == "A2")));
+        // Each `new` draws a creation message to the new participant, not a
+        // Starter self-call.
+        let create_msg = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                SequenceItem::Message(m) if m.to == "A1" => Some(m),
+                _ => None,
+            })
+            .next()
+            .unwrap();
+        assert_ne!(&*create_msg.from, "A1");
+        assert_eq!(create_msg.text, "«create»");
+    }
+
+    #[test]
+    fn foreach_is_a_loop_keyword() {
+        let d = parse_ok("zenuml\nforeach (item) {\n  A.step()\n}\n");
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::Loop(b)) if b.label == "item" && b.items.len() == 1
+        ));
     }
 
     #[test]
