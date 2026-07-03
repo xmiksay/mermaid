@@ -103,6 +103,7 @@ pub struct GitGraphMeta {
     pub show_commit_label: Option<bool>,
     pub rotate_commit_label: Option<bool>,
     pub parallel_commits: Option<bool>,
+    pub main_branch_order: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

@@ -189,6 +189,9 @@ fn apply_git_graph_config(cfg: &mut ast::GitGraphConfig, meta: &ast::GitGraphMet
     if let Some(v) = meta.parallel_commits {
         cfg.parallel_commits = v;
     }
+    if let Some(v) = meta.main_branch_order {
+        cfg.main_branch_order = Some(v);
+    }
 }
 
 fn dispatch(input: &str) -> Result<Diagram, ParseError> {

@@ -326,6 +326,10 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
         .config
         .get("gitGraph.parallelCommits")
         .and_then(|v| parse_flag(v));
+    g.main_branch_order = meta
+        .config
+        .get("gitGraph.mainBranchOrder")
+        .and_then(|v| v.trim().parse().ok());
 }
 
 /// Parse a `fontSize` value that may carry a `px` suffix (`"16px"` / `"16"`).

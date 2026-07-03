@@ -68,6 +68,10 @@ pub struct GitGraphConfig {
     /// `parallelCommits` — position commits by parent depth so independent
     /// branches can share a column instead of always advancing time.
     pub parallel_commits: bool,
+    /// `mainBranchOrder` — the lane ordering key of the main branch; `None`
+    /// pins it to lane 0 (upstream default), a value positions it among the
+    /// `branch … order:` branches.
+    pub main_branch_order: Option<usize>,
 }
 
 impl Default for GitGraphConfig {
@@ -78,6 +82,7 @@ impl Default for GitGraphConfig {
             show_commit_label: true,
             rotate_commit_label: true,
             parallel_commits: false,
+            main_branch_order: None,
         }
     }
 }
@@ -96,7 +101,9 @@ pub enum GitDirection {
 pub enum GitEvent {
     Commit {
         id: Option<String>,
-        tag: Option<String>,
+        /// `tag:"…"` labels — upstream `tags+=STRING`, so more than one may be
+        /// attached to a single commit.
+        tags: Vec<String>,
         kind: CommitKind,
     },
     Branch {
@@ -110,7 +117,11 @@ pub enum GitEvent {
     Merge {
         from: String,
         id: Option<String>,
-        tag: Option<String>,
+        /// `tag:"…"` labels on the merge commit (upstream `tags+=STRING`).
+        tags: Vec<String>,
+        /// `type: NORMAL|REVERSE|HIGHLIGHT` overrides the merge glyph; defaults
+        /// to [`CommitKind::Merge`] when absent.
+        kind: CommitKind,
     },
     CherryPick {
         commit_id: String,
