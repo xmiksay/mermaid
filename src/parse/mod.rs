@@ -153,6 +153,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let Diagram::Packet(p) = &mut diagram {
         apply_packet_config(&mut p.config, &meta.config);
     }
+    if let Diagram::XyChart(x) = &mut diagram {
+        apply_xychart_config(x, &meta.config);
+    }
     Ok((diagram, meta))
 }
 
@@ -243,6 +246,34 @@ fn apply_packet_config(
         if v >= 0.0 {
             cfg.padding_y = v;
         }
+    }
+}
+
+/// Overlay `config.xyChart.*` and the `themeVariables.xyChart.plotColorPalette`
+/// theme variable onto an [`ast::XyChartDiagram`].
+fn apply_xychart_config(
+    d: &mut ast::XyChartDiagram,
+    config: &std::collections::BTreeMap<String, String>,
+) {
+    if let Some(w) = config.get("xyChart.width").and_then(|v| v.parse().ok()) {
+        d.width = Some(w);
+    }
+    if let Some(h) = config.get("xyChart.height").and_then(|v| v.parse().ok()) {
+        d.height = Some(h);
+    }
+    if let Some(v) = config.get("xyChart.showLegend") {
+        d.show_legend = match v.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => d.show_legend,
+        };
+    }
+    if let Some(p) = config.get("themeVariables.xyChart.plotColorPalette") {
+        d.plot_color_palette = p
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
     }
 }
 

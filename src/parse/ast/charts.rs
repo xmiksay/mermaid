@@ -122,6 +122,15 @@ pub struct XyChartDiagram {
     pub x_axis: Option<XyAxis>,
     pub y_axis: Option<XyAxis>,
     pub series: Vec<XySeries>,
+    /// `config.xyChart.width` — overrides the default plot width.
+    pub width: Option<f64>,
+    /// `config.xyChart.height` — overrides the default plot height.
+    pub height: Option<f64>,
+    /// `themeVariables.xyChart.plotColorPalette` — comma-separated series
+    /// colors used in place of the theme's pie palette.
+    pub plot_color_palette: Vec<String>,
+    /// `config.xyChart.showLegend` — `None` shows the legend (upstream default).
+    pub show_legend: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,6 +154,9 @@ pub struct XySeries {
     /// Optional quoted series title (`bar "Revenue" [..]`), shown in a legend.
     pub title: Option<String>,
     pub values: Vec<f64>,
+    /// Per-point labels (`line [1.5 "label", 2.3]`), aligned with `values`;
+    /// each entry is `None` when the point carried no label.
+    pub labels: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
