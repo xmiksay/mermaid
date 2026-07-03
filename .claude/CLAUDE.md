@@ -26,6 +26,7 @@ src/
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
 │   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
+│   ├── markup.rs    inline-HTML labels → styled tspans (b/i/u/span/a); strip_tags
 │   ├── metrics.rs   shared text_width/font_scale (per-glyph widths track font_size)
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
 │   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*
@@ -87,6 +88,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 | Cross-cutting preamble (frontmatter title/theme, `%%{init}%%`, accTitle/accDescr) | done |
 | Responsive SVG output + `role`/`aria`/`<title>`/`<desc>` accessibility | done |
 | `#…;` entity codes + markdown-string emphasis in labels | done |
+| Inline HTML labels (`<b>`/`<i>`/`<u>`/`<span style=color>`/`<a href>`) | done |
 
 ## Build & test
 
@@ -199,6 +201,19 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `#…;` entity codes (`#quot;`→`"`, `#35;`→`#`, `#9829;`/`#x2665;`→`♥`, named
   set) and backtick-fenced markdown *strings* have their `**`/`*`/`_` emphasis
   stripped. Bare labels with `_`/`*` (e.g. `snake_case`) are left untouched.
+- **Inline HTML labels** (`htmlLabels`, `src/svg/markup.rs`): `SvgBuilder::text`
+  first line-splits, then `parse_spans` walks each line into styled runs mapped
+  onto `<tspan>`s — `<b>`/`<strong>`→`font-weight="bold"`, `<i>`/`<em>`→italic,
+  `<u>`→underline, `<span style="color:…">`→`fill`, `<a href>`→wraps the run in
+  an SVG `<a>`. Tag scanning runs on the raw source *before* entity decoding, so
+  `#lt;`-encoded brackets never masquerade as tags; the per-run text is then
+  `decode_label`-ed. Unknown tags are **stripped** (not escaped), so unsupported
+  markup degrades to plain text; a bare `<` that doesn't open a well-formed tag
+  stays literal. A tag-free single-line label keeps the bare `<text>` fast path,
+  so the whole gallery stays byte-identical. `strip_tags` gives the visible text
+  for width estimation (`node_size`). Renderers that emit *literal* angle
+  brackets (class generics `List<int>`, C4 `<<stereotype>>`) entity-encode them
+  (`#lt;`/`#gt;`) at the source so the markup pass keeps them intact.
 - Pie drops slices `< 1%` of the total (`MIN_SLICE`, matching upstream
   `createPieArcs`); insertion order and per-slice palette color are preserved.
 - Quadrant points carry optional styling on `QuadrantPoint`: a third array

@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 
-use super::label::decode_label;
+use super::markup::{parse_spans, Span};
 
 /// Baseline-to-baseline spacing used when a label is split across lines.
 pub const LABEL_LINE_H: f64 = 18.0;
@@ -103,33 +103,59 @@ impl SvgBuilder {
 
     pub fn text(&mut self, x: f64, y: f64, attrs: &str, content: &str) {
         let lines = split_label_lines(content);
-        if lines.len() <= 1 {
+        let parsed: Vec<Vec<Span>> = lines.iter().map(|l| parse_spans(l)).collect();
+        // Fast path: a single line of plain text stays a bare <text>, so
+        // tag-free labels render byte-identically to before inline HTML support.
+        if parsed.len() == 1 && parsed[0].len() == 1 && parsed[0][0].is_plain() {
             let _ = write!(
                 self.body,
                 "<text x=\"{}\" y=\"{}\" {}>{}</text>",
                 fnum(x),
                 fnum(y),
                 attrs,
-                escape(&decode_label(content))
+                escape(&parsed[0][0].text)
             );
             return;
         }
-        // Multi-line label: stack the lines as <tspan>s centered vertically on
-        // the baseline `y`, so <br>/\n behave like line breaks instead of
-        // leaking through as literal text. Line spacing tracks the font size so
-        // stacked lines don't crowd/overlap once `--font-size` grows.
+        // Multi-line and/or inline-HTML label: stack the lines as <tspan>s
+        // centered vertically on the baseline `y` (so <br>/\n break lines) and
+        // emit one styled <tspan> per run within a line (so <b>/<i>/<u>/<span>
+        // style inline, <a href> wraps a link). Line spacing tracks the font
+        // size so stacked lines don't crowd/overlap once `--font-size` grows.
         let line_h = LABEL_LINE_H * super::metrics::font_scale(self.font_size);
         let first_dy = -((lines.len() as f64 - 1.0) * line_h) / 2.0;
         let mut spans = String::new();
-        for (i, line) in lines.iter().enumerate() {
-            let dy = if i == 0 { first_dy } else { line_h };
-            let _ = write!(
-                spans,
-                "<tspan x=\"{}\" dy=\"{}\">{}</tspan>",
-                fnum(x),
-                fnum(dy),
-                escape(&decode_label(line))
-            );
+        for (li, line_spans) in parsed.iter().enumerate() {
+            for (si, span) in line_spans.iter().enumerate() {
+                // Only the first run of a line carries the x/dy that positions
+                // the line; later runs flow inline after it.
+                let pos = if si == 0 {
+                    let dy = if li == 0 { first_dy } else { line_h };
+                    format!(" x=\"{}\" dy=\"{}\"", fnum(x), fnum(dy))
+                } else {
+                    String::new()
+                };
+                let mut style = String::new();
+                if span.bold {
+                    style.push_str(" font-weight=\"bold\"");
+                }
+                if span.italic {
+                    style.push_str(" font-style=\"italic\"");
+                }
+                if span.underline {
+                    style.push_str(" text-decoration=\"underline\"");
+                }
+                if let Some(color) = &span.color {
+                    let _ = write!(style, " fill=\"{}\"", escape(color));
+                }
+                let tspan = format!("<tspan{pos}{style}>{}</tspan>", escape(&span.text));
+                match &span.href {
+                    Some(href) => {
+                        let _ = write!(spans, "<a href=\"{}\">{tspan}</a>", escape(href));
+                    }
+                    None => spans.push_str(&tspan),
+                }
+            }
         }
         let _ = write!(
             self.body,
@@ -408,6 +434,58 @@ mod tests {
         assert!(svg.contains(">line3</tspan>"));
         assert!(!svg.contains("br/"));
         assert!(!svg.contains("&lt;br"));
+    }
+
+    #[test]
+    fn inline_html_styles_render_as_tspans() {
+        let mut b = SvgBuilder::new(200.0, 40.0);
+        b.text(
+            50.0,
+            20.0,
+            "text-anchor=\"middle\"",
+            "<b>bold</b> <i>it</i> <u>u</u>",
+        );
+        let svg = b.finish();
+        assert!(svg.contains("font-weight=\"bold\">bold</tspan>"));
+        assert!(svg.contains("font-style=\"italic\">it</tspan>"));
+        assert!(svg.contains("text-decoration=\"underline\">u</tspan>"));
+        // The tags themselves never leak as literal text.
+        assert!(!svg.contains("&lt;b&gt;"));
+    }
+
+    #[test]
+    fn inline_html_color_span_and_link() {
+        let mut b = SvgBuilder::new(200.0, 40.0);
+        b.text(
+            50.0,
+            20.0,
+            "",
+            "<span style=\"color:red\">r</span><a href=\"http://x\">y</a>",
+        );
+        let svg = b.finish();
+        assert!(svg.contains("fill=\"red\">r</tspan>"));
+        assert!(svg.contains("<a href=\"http://x\"><tspan"));
+        assert!(svg.contains(">y</tspan></a>"));
+    }
+
+    #[test]
+    fn unknown_tags_strip_to_plain_text() {
+        let mut b = SvgBuilder::new(200.0, 40.0);
+        b.text(50.0, 20.0, "", "a<div>b</div>c");
+        let svg = b.finish();
+        // Stripped, merged, and kept on the single-line fast path (no tspans).
+        assert!(svg.contains(">abc</text>"));
+        assert!(!svg.contains("<tspan"));
+        assert!(!svg.contains("div"));
+    }
+
+    #[test]
+    fn plain_single_line_stays_bare_text() {
+        let mut b = SvgBuilder::new(200.0, 40.0);
+        b.text(50.0, 20.0, "", "just text");
+        let svg = b.finish();
+        assert!(svg.contains(">just text</text>"));
+        assert!(!svg.contains("<tspan"));
     }
 
     #[test]

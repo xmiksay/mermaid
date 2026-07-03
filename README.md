@@ -116,6 +116,9 @@ These work on every diagram type:
 - **Entity codes & markdown strings in labels** — `#quot;`, `#35;`, `#x2665;`
   etc. are decoded; backtick-fenced markdown emphasis (`**bold**`) is stripped
   to plain text.
+- **Inline HTML in labels** (`htmlLabels`) — `<b>`/`<strong>`, `<i>`/`<em>`,
+  `<u>`, `<span style="color:…">`, and `<a href>` style the label via `<tspan>`s
+  and SVG links; unknown tags degrade to plain text.
 
 Note: pie charts drop slices under 1% of the total, matching upstream.
 
