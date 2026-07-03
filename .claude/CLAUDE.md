@@ -209,12 +209,20 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - **The whole `config:` tree is flattened** (frontmatter YAML via `flatten_yaml`
   indentation, `%%{init}%%` via `parse_init_object`'s JSON-ish recursion) into
   `DiagramMeta.config`, a dotted `key → value` map (`themeVariables.primaryColor`,
-  `gitGraph.mainBranchName`, `kanban.ticketBaseUrl`, `flowchart.htmlLabels`, …;
-  frontmatter/first-init wins). `derive_typed_fields` reads the honored subset
-  out of it: `theme`, `theme_variables`, `font_family`, `font_size`,
-  `use_max_width`, `look`/`layout`/`security_level` (parsed, not yet honored),
-  `ticket_base_url`, `value_format`, `git_graph.*`. Closing a per-diagram config
-  gap is a `meta.config` lookup, not new scanning.
+  `gitGraph.mainBranchName`, `kanban.ticketBaseUrl`, `flowchart.htmlLabels`, …).
+  **Precedence matches upstream**: a directive overrides frontmatter and the
+  *last* `%%{init}%%` wins (`meta.config.insert`, last write wins — upstream's
+  `cleanAndMerge`/`assignWithDepth`); frontmatter is folded in first, before the
+  init loop. An `%%{init}%%` directive **may span multiple lines** (upstream's
+  directiveRegex matches newlines): `collect_init` gathers lines from the `%%{`
+  opener until the `}%%` closer before parsing, so a pretty-printed init object
+  no longer leaks continuation lines into dispatch. `derive_typed_fields` reads
+  the honored subset out of it: `theme`, `theme_variables`, `font_family`,
+  `font_size`, `use_max_width` (top-level *or* the per-diagram
+  `<diagram>.useMaxWidth` key — upstream's schema only defines it per diagram,
+  via `per_diagram_use_max_width`), `look`/`layout`/`security_level` (parsed, not
+  yet honored), `ticket_base_url`, `value_format`, `git_graph.*`. Closing a
+  per-diagram config gap is a `meta.config` lookup, not new scanning.
 - **Rendering is `parse_with_meta` → `render_body` (per-diagram match) →
   `decorate::apply`.** `theme_from_meta` builds the effective theme: a preamble
   `theme` overrides the caller's, then `themeVariables`/`fontFamily`/`fontSize`/
@@ -414,9 +422,11 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     `draw_edge`, needing a dash pattern — falls back to `8 8`); `curve: <name>`
     sets `FlowEdge.curve` (`EdgeCurve::from_name`). `linkStyle N interpolate
     <curve>` / `linkStyle default interpolate <curve>` fill
-    `FlowchartDiagram.edge_interpolate`/`default_interpolate`. The renderer
+    `FlowchartDiagram.edge_interpolate`/`default_interpolate`, while
+    `config.flowchart.curve` (frontmatter/`%%{init}%%`) fills
+    `FlowchartDiagram.config_curve` (the diagram-level default). The renderer
     resolves the effective curve per edge — `@{ curve }` → per-index
-    interpolate → default interpolate → basis — and `curve_basis_path`,
+    interpolate → default interpolate → `config_curve` → basis — and `curve_basis_path`,
     `curve_linear_path` (straight segments), and `curve_step_path` (orthogonal
     right-angle steps) in `src/svg/builder.rs` build the path. Any other
     upstream curve name (`cardinal`, `natural`, …) falls back to basis.

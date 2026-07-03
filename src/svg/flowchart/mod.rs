@@ -147,11 +147,13 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     for (ei, fedge) in d.edges.iter().enumerate() {
         let edge_style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
         // Curve precedence: per-edge `@{ curve }`, then `linkStyle N interpolate`,
-        // then `linkStyle default interpolate`, else the default basis.
+        // then `linkStyle default interpolate`, then the `config.flowchart.curve`
+        // diagram default, else the default basis.
         let curve = fedge
             .curve
             .or_else(|| d.edge_interpolate.get(&ei).copied())
             .or(d.default_interpolate)
+            .or(d.config_curve)
             .unwrap_or_default();
         let (Some(start), Some(end)) = (
             endpoint_clip(&fedge.from, &id_to_u32, &d.nodes, &node_sizes, &pos, &boxes),

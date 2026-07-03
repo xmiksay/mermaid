@@ -21,6 +21,9 @@ pub struct FlowchartDiagram {
     pub edge_interpolate: HashMap<usize, EdgeCurve>,
     /// `linkStyle default interpolate <curve>` applied to all edges.
     pub default_interpolate: Option<EdgeCurve>,
+    /// `config.flowchart.curve` — the diagram-level default curve, below any
+    /// `linkStyle` interpolate override in the per-edge precedence chain.
+    pub config_curve: Option<EdgeCurve>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

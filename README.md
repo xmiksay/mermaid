@@ -115,10 +115,14 @@ These work on every diagram type:
   `theme` (a built-in name; `base` aliases `default`), `themeVariables`
   (upstream's `theme: base` recoloring path — `primaryColor`, `lineColor`,
   `primaryBorderColor`, `noteBkgColor`, `fontFamily`, `fontSize`, …), top-level
-  `fontFamily`/`fontSize`, and `useMaxWidth: false` (emit a fixed-size SVG
-  instead of the responsive envelope). Every other key is still parsed into a
-  flattened dotted map (`DiagramMeta::config`, e.g. `flowchart.htmlLabels`,
-  `kanban.ticketBaseUrl`, `treemap.valueFormat`) for per-diagram consumers.
+  `fontFamily`/`fontSize`, `useMaxWidth: false` (top-level *or* per diagram —
+  `flowchart.useMaxWidth`, `sequence.useMaxWidth`, … — emit a fixed-size SVG
+  instead of the responsive envelope), and `flowchart.curve` (the diagram-level
+  default edge curve). A directive overrides frontmatter and the last
+  `%%{init}%%` wins, matching upstream; an `%%{init}%%` block may span multiple
+  lines. Every other key is still parsed into a flattened dotted map
+  (`DiagramMeta::config`, e.g. `flowchart.htmlLabels`, `kanban.ticketBaseUrl`,
+  `treemap.valueFormat`) for per-diagram consumers.
 - **`accTitle:` / `accDescr:`** (and the `accDescr { … }` block form) — emitted
   as `<title>`/`<desc>` and linked with `aria-labelledby`/`aria-describedby`;
   the root `<svg>` always carries `role` + `aria-roledescription`.
