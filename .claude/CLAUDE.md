@@ -18,9 +18,9 @@ src/
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
 │   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing
 │   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted
-│   ├── {sequence,flowchart,state,class,c4,block}/  multi-file per-diagram parsers (mod + submodules)
+│   ├── {sequence,flowchart,state,class,c4,block,zenuml}/  multi-file per-diagram parsers (mod + submodules)
 │   └── {pie,er,gantt,journey,timeline,sankey,quadrant,xychart,radar,packet,
-│        mindmap,gitgraph,requirement,architecture,kanban,treemap,zenuml}.rs
+│        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
@@ -625,7 +625,9 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   raw Font Awesome class string — `draw_mindmap_icon` maps `icon_name()` (the last
   `fa-`-prefixed token) onto a small builtin glyph set (book/star/clock/user/cog/
   cloud/database/check/heart), unknown names falling back to a generic tag glyph.
-- zenuml (`src/parse/zenuml.rs`) is a **brace-structured** translation to a
+- zenuml (`src/parse/zenuml/`: `mod.rs` header/tokenize/dispatch + declarations,
+  `message.rs` calls/returns/assignment, `blocks.rs` if/try chains) is a
+  **brace-structured** translation to a
   `SequenceDiagram` (reuses the sequence renderer). After the `zenuml` header the
   body is `tokenize`d into `{`/`}`/statement `Tok`s (braces inside `(…)`/quotes
   stay literal; `\n`/`;` end statements; `//` and `%%` are comments), then a
