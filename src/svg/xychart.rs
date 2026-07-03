@@ -46,11 +46,19 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
             vmax = vmax.max(*v);
         }
     }
-    if let Some(y) = &d.y_axis {
-        if let XyAxisKind::Range { min, max } = &y.kind {
-            vmin = *min;
-            vmax = *max;
-        }
+    let y_explicit = matches!(
+        d.y_axis.as_ref().map(|a| &a.kind),
+        Some(XyAxisKind::Range { .. })
+    );
+    if let Some(XyAxisKind::Range { min, max }) = d.y_axis.as_ref().map(|a| &a.kind) {
+        vmin = *min;
+        vmax = *max;
+    }
+    // Bar charts baseline at zero unless an explicit y-range says otherwise —
+    // an auto range spanning only the data would start bars mid-axis.
+    if !y_explicit && vmin.is_finite() && d.series.iter().any(|s| s.kind == XySeriesKind::Bar) {
+        vmin = vmin.min(0.0);
+        vmax = vmax.max(0.0);
     }
     if !vmin.is_finite() {
         vmin = 0.0;
@@ -67,6 +75,12 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         .max()
         .unwrap_or(0)
         .max(1);
+    // A numeric x-axis positions each point by its x value (its 1-based index)
+    // scaled through the range; otherwise points sit at category centers.
+    let x_range = match d.x_axis.as_ref().map(|a| &a.kind) {
+        Some(XyAxisKind::Range { min, max }) if (max - min).abs() > 1e-9 => Some((*min, *max)),
+        _ => None,
+    };
     let cats: Vec<String> = match d.x_axis.as_ref().map(|a| &a.kind) {
         Some(XyAxisKind::Categories(c)) if !c.is_empty() => c.clone(),
         _ => (1..=n).map(|i| i.to_string()).collect(),
@@ -94,17 +108,23 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
 
     // Category tick spacing along the category axis (bottom when vertical,
     // left when horizontal).
-    let step = if horiz {
-        CHART_H / cats.len() as f64
-    } else {
-        CHART_W / cats.len() as f64
+    let cat_axis_len = if horiz { CHART_H } else { CHART_W };
+    // For a numeric axis one step spans a single x unit; for categories it is
+    // the per-category slot width used for bar thickness.
+    let step = match x_range {
+        Some((xmin, xmax)) => cat_axis_len / (xmax - xmin),
+        None => cat_axis_len / cats.len() as f64,
     };
-    // Center coordinate of category `i` along its axis.
+    let cat_origin = if horiz { chart_top } else { chart_left };
+    // Center coordinate of point `i` along the category axis.
     let cat_center = |i: usize| -> f64 {
-        if horiz {
-            chart_top + (i as f64 + 0.5) * step
-        } else {
-            chart_left + (i as f64 + 0.5) * step
+        match x_range {
+            // Explicit x values are the point's 1-based index.
+            Some((xmin, xmax)) => {
+                let frac = ((i + 1) as f64 - xmin) / (xmax - xmin);
+                cat_origin + frac * cat_axis_len
+            }
+            None => cat_origin + (i as f64 + 0.5) * step,
         }
     };
     // Position of value `v` along the value axis.
@@ -166,23 +186,61 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Category labels along the category axis.
-    for (i, c) in cats.iter().enumerate() {
-        let p = cat_center(i);
-        if horiz {
-            svg.text(
-                chart_left - 8.0,
-                p + 4.0,
-                &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"11\""),
-                c,
-            );
-        } else {
-            svg.text(
-                p,
-                chart_bottom + 18.0,
-                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
-                c,
-            );
+    // Category axis labels: numeric ticks (5 divisions) for a range axis, or
+    // one label per category otherwise.
+    if let Some((xmin, xmax)) = x_range {
+        for i in 0..=5 {
+            let xv = xmin + (xmax - xmin) * (i as f64 / 5.0);
+            let frac = (xv - xmin) / (xmax - xmin);
+            let p = cat_origin + frac * cat_axis_len;
+            if horiz {
+                svg.line(
+                    chart_left - 4.0,
+                    p,
+                    chart_left,
+                    p,
+                    &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
+                );
+                svg.text(
+                    chart_left - 8.0,
+                    p + 4.0,
+                    &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"11\""),
+                    &fnum(xv),
+                );
+            } else {
+                svg.line(
+                    p,
+                    chart_bottom,
+                    p,
+                    chart_bottom + 4.0,
+                    &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
+                );
+                svg.text(
+                    p,
+                    chart_bottom + 18.0,
+                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+                    &fnum(xv),
+                );
+            }
+        }
+    } else {
+        for (i, c) in cats.iter().enumerate() {
+            let p = cat_center(i);
+            if horiz {
+                svg.text(
+                    chart_left - 8.0,
+                    p + 4.0,
+                    &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"11\""),
+                    c,
+                );
+            } else {
+                svg.text(
+                    p,
+                    chart_bottom + 18.0,
+                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+                    c,
+                );
+            }
         }
     }
 
@@ -362,5 +420,74 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert!(v[1].1 > v[0].1, "height should grow with value: {v:?}");
         assert!((v[0].0 - v[1].0).abs() < 1e-9, "bar width constant: {v:?}");
+    }
+
+    // Extract the `x` of every <rect> bar in document order.
+    fn bar_xs(svg: &str) -> Vec<f64> {
+        svg.match_indices("<rect ")
+            .filter_map(|(i, _)| {
+                let tag = &svg[i..svg[i..].find("/>").map(|e| i + e).unwrap_or(svg.len())];
+                let key = "x=\"";
+                let start = tag.find(key)? + key.len();
+                let end = tag[start..].find('"')? + start;
+                tag[start..end].parse().ok()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bar_auto_range_baselines_at_zero() {
+        // No y-axis: an auto range with a bar series must include zero, so the
+        // 40 and 80 bars stand in a 1:2 height ratio (not the 0:full a
+        // data-only 40..80 range would give).
+        let d = XyChartDiagram {
+            horizontal: false,
+            title: None,
+            x_axis: None,
+            y_axis: None,
+            series: vec![XySeries {
+                kind: XySeriesKind::Bar,
+                title: None,
+                values: vec![40.0, 80.0],
+            }],
+        };
+        let h = bar_dims(&render(&d, &Theme::default()));
+        assert_eq!(h.len(), 2);
+        assert!(h[0].1 > 1.0, "smaller bar must be zero-baselined: {h:?}");
+        assert!((h[1].1 / h[0].1 - 2.0).abs() < 1e-6, "1:2 ratio: {h:?}");
+    }
+
+    #[test]
+    fn numeric_x_axis_positions_and_ticks() {
+        let d = XyChartDiagram {
+            horizontal: false,
+            title: None,
+            x_axis: Some(XyAxis {
+                title: None,
+                kind: XyAxisKind::Range {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            }),
+            y_axis: None,
+            series: vec![XySeries {
+                kind: XySeriesKind::Bar,
+                title: None,
+                values: vec![3.0, 6.0],
+            }],
+        };
+        let svg = render(&d, &Theme::default());
+        // Numeric ticks are emitted along the x-axis (the range max is a tick).
+        assert!(svg.contains(">10<"), "numeric x tick missing");
+        // Points map through the range, not to category centers: the two bars
+        // (x = 1 and x = 2 over 0..10) sit in the left tenth of the chart, one
+        // step apart — not the ~half-chart spacing category centers would give.
+        let xs = bar_xs(&svg);
+        assert_eq!(xs.len(), 2);
+        let gap = xs[1] - xs[0];
+        assert!(
+            (gap - CHART_W / 10.0).abs() < 1e-6,
+            "points one x-unit apart: {xs:?}"
+        );
     }
 }
