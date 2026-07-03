@@ -212,13 +212,17 @@ fn write_label_block(
     muted: &str,
 ) {
     let cx = x + w / 2.0;
-    let kind_label = kind_text(el.kind, el.external);
+    // Entity-encode the literal `<<…>>` stereotype so the inline-HTML label pass
+    // doesn't read `<person>` as an (unknown, stripped) tag.
+    let kind_label = kind_text(el.kind, el.external)
+        .replace('<', "#lt;")
+        .replace('>', "#gt;");
     let top = y + 6.0;
     svg.text(
         cx,
         top + 12.0,
         &format!("text-anchor=\"middle\" fill=\"{muted}\" font-size=\"10\" font-style=\"italic\""),
-        kind_label,
+        &kind_label,
     );
     let title_y = top + 32.0;
     svg.text(

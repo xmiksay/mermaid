@@ -53,7 +53,10 @@ pub(super) fn convert_generics(s: &str) -> String {
             .map(|w| (w[0], w[1]))
             .next_back();
         let Some((a, b)) = chosen else { break };
-        s = format!("{}<{}>{}", &s[..a], &s[a + 1..b], &s[b + 1..]);
+        // Emit entity codes, not raw `<`/`>`: the inline-HTML label pass would
+        // otherwise read `List<int>` as an (unknown, stripped) `<int>` tag. The
+        // codes decode back to literal angle brackets at render time.
+        s = format!("{}#lt;{}#gt;{}", &s[..a], &s[a + 1..b], &s[b + 1..]);
     }
     s
 }
@@ -74,9 +77,15 @@ mod tests {
 
     #[test]
     fn generics_convert_to_angle_brackets() {
-        assert_eq!(convert_generics("List~int~"), "List<int>");
-        assert_eq!(convert_generics("Map~string, int~"), "Map<string, int>");
-        assert_eq!(convert_generics("List~List~int~~"), "List<List<int>>");
+        assert_eq!(convert_generics("List~int~"), "List#lt;int#gt;");
+        assert_eq!(
+            convert_generics("Map~string, int~"),
+            "Map#lt;string, int#gt;"
+        );
+        assert_eq!(
+            convert_generics("List~List~int~~"),
+            "List#lt;List#lt;int#gt;#gt;"
+        );
         // A lone unmatched tilde is left alone.
         assert_eq!(convert_generics("a~b"), "a~b");
     }
