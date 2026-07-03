@@ -23,6 +23,9 @@ pub struct State {
     pub classes: Vec<String>,
     /// Inline `style <id> …` properties.
     pub style: Style,
+    /// Interaction bound via a `click` directive, if any (reuses the flowchart
+    /// [`ClickAction`] model).
+    pub click: Option<ClickAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

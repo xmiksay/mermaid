@@ -448,7 +448,25 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - State aliasing `state "description" as X` binds `X`'s display label to the
   quoted text (`parse_quoted_as` in `parse_state_decl`), so the id stays clean
   and a later transition referencing `X` reuses the same state — no phantom box
-  named literally `"…" as X`.
+  named literally `"…" as X`. The composite header `state "label" as X {` reuses
+  the same `parse_quoted_as`, so the cluster id is `X` (labelled with the quoted
+  text) instead of the raw text becoming the id.
+- A **bare state-id** on its own line (`s1`) declares that state (upstream's
+  `statement: idStatement`); `is_bare_id` gates it to a single identifier token
+  so a genuinely unknown multi-word statement still hard-errors, and a bare id
+  inside a composite body joins the active region.
+- State stereotypes: `parse_stereotype` (`parse/state/decl.rs`) maps both the
+  `<<choice/fork/join/history>>` form and the `[[fork]]`/`[[join]]`/`[[choice]]`
+  bracket alternates (upstream lexes the brackets as exact aliases) onto
+  `StateKind`, so `state f [[fork]]` yields a real fork instead of a garbage
+  `f [[fork]]` state.
+- State `click X href "url"` / `click X call fn()` binds a `State.click`
+  (`ClickAction`, reusing the flowchart `parse_click` — now `pub(crate)` in
+  `parse/flowchart/click.rs`); the renderer wraps the state in the shared
+  `open_click`/`close_click` (`svg/interact.rs`) `<a>`/`<g onclick>`. Parsing the
+  `click` line before the `X : text` description branch keeps a URL's `://` colon
+  from misrouting into a phantom state. `hide empty description` is consumed as a
+  no-op (the static renderer always draws the id).
 - State history pseudo-states parse to `StateKind::History { deep }`:
   `<<history>>` and `[H]` are shallow (`deep: false`), `[H*]` is deep. The
   bracket forms are handled in `canonicalize` like `[*]` (unique `__hist_N`

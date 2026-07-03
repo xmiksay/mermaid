@@ -52,7 +52,7 @@ use std::collections::{HashMap, HashSet};
 use super::ast::{EdgeCurve, FlowDirection, FlowchartDiagram, Style, Subgraph};
 use super::{strip_comment, ParseError};
 
-mod click;
+pub(crate) mod click;
 mod directive;
 mod edge;
 mod node;
