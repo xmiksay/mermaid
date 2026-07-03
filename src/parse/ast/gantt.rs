@@ -1,11 +1,17 @@
 //! Gantt-chart AST types.
 
+use super::flowchart::ClickAction;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GanttDiagram {
     pub title: Option<String>,
     pub date_format: Option<String>,
     pub axis_format: Option<String>,
     pub excludes: Vec<String>,
+    /// `todayMarker <style>` / `todayMarker off` — controls the marker at the
+    /// *current* date. `off` (→ `Some("off")`) suppresses it; any other value
+    /// is a CSS style string applied to the marker line. When unset, a default
+    /// marker is still drawn at today (matching upstream).
     pub today_marker: Option<String>,
     /// `weekend friday|saturday` — which two days `excludes weekends` skips.
     /// `friday` → Fri+Sat, anything else (default) → Sat+Sun.
@@ -42,13 +48,21 @@ pub struct GanttTask {
     /// `milestone` tag — rendered as a diamond at the start date; the end is
     /// ignored. Orthogonal to `status` (combinable with `done`/`active`/`crit`).
     pub milestone: bool,
+    /// `vert` tag — rendered as a vertical marker line spanning the chart at
+    /// the task's start date; duration is ignored. Orthogonal to `status`.
+    pub vert: bool,
+    /// Interaction bound via a `click <taskId> …` directive, if any (reuses the
+    /// flowchart [`ClickAction`] model).
+    pub click: Option<ClickAction>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum TaskStart {
     Date(String),
-    AfterId(String),
+    /// `after <id> [<id> …]` — starts at the latest end of the named
+    /// predecessor tasks (upstream allows several space-separated ids).
+    AfterId(Vec<String>),
     AfterPrevious,
 }
 
@@ -57,7 +71,7 @@ pub enum TaskStart {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum TaskEnd {
-    /// Length in days (`Nd`/`Nw`/`Nh`/`Nm`).
+    /// Length in days (units `ms`/`s`/`m`/`h`/`d`/`w`/`M`/`y`, decimals allowed).
     Duration(f64),
     /// Explicit end date (string in the diagram's `dateFormat`).
     Date(String),

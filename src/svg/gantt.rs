@@ -8,8 +8,9 @@ use std::collections::HashMap;
 
 use crate::parse::{GanttDiagram, TaskEnd, TaskStart, TaskStatus};
 
-use super::builder::{fnum, SvgBuilder};
-use super::gantt_date::{format_date, parse_date, weekday, Excludes};
+use super::builder::{escape, fnum, SvgBuilder};
+use super::gantt_date::{format_date, parse_datetime, today_days, weekday, Excludes};
+use super::interact::{close_click, open_click};
 use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
@@ -122,26 +123,26 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Today marker
-    if let Some(today_raw) = &d.today_marker {
-        if let Some(today_day) = parse_date(today_raw, d.date_format.as_deref()) {
-            let rel = today_day as f64 - start_day;
-            if rel >= 0.0 && rel <= total_days {
-                let x = body_x + (rel / total_days) * body_w;
-                svg.line(
-                    x,
-                    axis_y,
-                    x,
-                    HEADER_H + AXIS_H + body_h,
-                    "stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\"",
-                );
-                svg.text(
-                    x + 4.0,
-                    axis_y + 12.0,
-                    "fill=\"#d33\" font-size=\"11\" font-weight=\"bold\"",
-                    "today",
-                );
-            }
+    // Today marker: positioned at the *current* date (system clock), drawn only
+    // when it falls inside the chart's range. `todayMarker off` suppresses it;
+    // any other value is a CSS style applied to the marker line; the default is
+    // a red dashed line (upstream always draws a marker at today).
+    let today_style = d.today_marker.as_deref();
+    if today_style != Some("off") {
+        let rel = today_days() as f64 - start_day;
+        if rel >= 0.0 && rel <= total_days {
+            let x = body_x + (rel / total_days) * body_w;
+            let attrs = match today_style {
+                Some(css) => format!("style=\"{}\"", css_style(css)),
+                None => "stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\"".to_string(),
+            };
+            svg.line(x, axis_y, x, HEADER_H + AXIS_H + body_h, &attrs);
+            svg.text(
+                x + 4.0,
+                axis_y + 12.0,
+                "fill=\"#d33\" font-size=\"11\" font-weight=\"bold\"",
+                "today",
+            );
         }
     }
 
@@ -170,7 +171,26 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
             let (fill, stroke) = colors_for(task.status, task.crit);
             let sw = if task.crit { 2 } else { 1 };
-            if task.milestone {
+            if let Some(click) = &task.click {
+                open_click(&mut svg, click);
+            }
+            if task.vert {
+                // Vertical marker line spanning the whole chart at the start
+                // date; duration is ignored (the label sits beside the line).
+                svg.line(
+                    x,
+                    axis_y,
+                    x,
+                    HEADER_H + AXIS_H + body_h,
+                    &format!("stroke=\"{stroke}\" stroke-width=\"1.5\" stroke-dasharray=\"2 2\""),
+                );
+                svg.text(
+                    x + 4.0,
+                    y + 14.0,
+                    &format!("fill=\"{fg}\" font-size=\"11\""),
+                    &task.name,
+                );
+            } else if task.milestone {
                 // Diamond centered on the start date; duration is ignored.
                 let cy = y + BAR_H / 2.0;
                 let rad = (BAR_H - 4.0) / 2.0;
@@ -205,6 +225,9 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                     &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" rx=\"3\""),
                 );
             }
+            if let Some(click) = &task.click {
+                close_click(&mut svg, click);
+            }
             y += BAR_H + ROW_GAP;
             flat_idx += 1;
         }
@@ -231,9 +254,20 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
     for section in &d.sections {
         for task in &section.tasks {
             let start = match &task.start {
-                TaskStart::Date(s) => parse_date(s, df).map(|v| v as f64).unwrap_or(last_end),
-                TaskStart::AfterId(id) => {
-                    id_to_start_end.get(id).map(|(_, e)| *e).unwrap_or(last_end)
+                TaskStart::Date(s) => parse_datetime(s, df).unwrap_or(last_end),
+                // `after a b …` starts at the *latest* end of the named
+                // predecessors; unknown ids are ignored, and if none resolve
+                // it falls back to the previous task's end (like a single ref).
+                TaskStart::AfterId(ids) => {
+                    let latest = ids
+                        .iter()
+                        .filter_map(|id| id_to_start_end.get(id).map(|(_, e)| *e))
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    if latest.is_finite() {
+                        latest
+                    } else {
+                        last_end
+                    }
                 }
                 TaskStart::AfterPrevious => last_end,
             };
@@ -242,7 +276,7 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
             // reference is a forward/unknown ref (matching `after`'s fallback).
             let dur = match &task.end {
                 TaskEnd::Duration(days) => stretched_duration(start, *days, &excludes),
-                TaskEnd::Date(s) => parse_date(s, df).map(|e| e as f64 - start).unwrap_or(1.0),
+                TaskEnd::Date(s) => parse_datetime(s, df).map(|e| e - start).unwrap_or(1.0),
                 TaskEnd::UntilId(id) => id_to_start_end
                     .get(id)
                     .map(|(s, _)| *s - start)
@@ -314,6 +348,19 @@ fn weekday_number(name: &str) -> Option<i64> {
         "saturday" => Some(6),
         _ => None,
     }
+}
+
+/// Turn a `todayMarker` CSS string into an SVG `style` attribute value.
+/// Upstream separates the CSS declarations with commas; SVG `style` uses
+/// semicolons, so the commas are swapped and the result is attribute-escaped.
+fn css_style(css: &str) -> String {
+    let joined = css
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ");
+    escape(&joined)
 }
 
 fn pick_tick_step(total_days: f64) -> f64 {
@@ -478,6 +525,59 @@ mod tests {
         use crate::svg::gantt_date::days_from_civil;
         assert!(ex.is_excluded(days_from_civil(2026, 1, 2))); // Friday
         assert!(!ex.is_excluded(days_from_civil(2026, 1, 4))); // Sunday now works
+    }
+
+    #[test]
+    fn vert_task_draws_marker_line_not_bar() {
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nBase : 2026-01-01, 10d\nFreeze : vert, v1, 2026-01-05, 0d\n");
+        let svg = render(&d, &Theme::default());
+        // The vertical marker is a dashed <line>; the label is drawn.
+        assert!(svg.contains("stroke-dasharray=\"2 2\""));
+        assert!(svg.contains(">Freeze<"));
+    }
+
+    #[test]
+    fn click_wraps_task_bar_in_anchor() {
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nA : a, 2026-01-01, 5d\nclick a href \"https://example.com\"\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("<a href=\"https://example.com\""));
+    }
+
+    #[test]
+    fn today_marker_off_draws_no_marker() {
+        // A chart around the present day with `todayMarker off` shows no marker.
+        let base = today_days();
+        use crate::svg::gantt_date::civil_from_days;
+        let (y, m, day) = civil_from_days(base - 1);
+        let src = format!(
+            "gantt\ndateFormat YYYY-MM-DD\ntodayMarker off\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
+        );
+        let svg = render(&build(&src), &Theme::default());
+        assert!(!svg.contains(">today<"));
+    }
+
+    #[test]
+    fn today_marker_style_applied_when_in_range() {
+        let base = today_days();
+        use crate::svg::gantt_date::civil_from_days;
+        let (y, m, day) = civil_from_days(base - 1);
+        let src = format!(
+            "gantt\ndateFormat YYYY-MM-DD\ntodayMarker stroke:cyan,stroke-width:5px\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
+        );
+        let svg = render(&build(&src), &Theme::default());
+        assert!(svg.contains(">today<"));
+        assert!(svg.contains("stroke:cyan; stroke-width:5px"));
+    }
+
+    #[test]
+    fn after_multiple_ids_uses_latest_end() {
+        // C follows the later of A (ends day 5) and B (ends day 10).
+        let d = build(
+            "gantt\ndateFormat YYYY-MM-DD\nsection S\nA : a, 2026-01-01, 5d\nB : b, 2026-01-01, 10d\nC : after a b, 2d\n",
+        );
+        let resolved = resolve_tasks(&d);
+        let b_end = resolved[1].start_day + resolved[1].duration;
+        assert!((resolved[2].start_day - b_end).abs() < 1e-6);
     }
 
     #[test]

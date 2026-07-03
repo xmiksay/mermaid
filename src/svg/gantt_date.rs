@@ -36,33 +36,68 @@ pub(crate) fn weekday(z: i64) -> i64 {
     (z + 4).rem_euclid(7)
 }
 
+/// The current date as a whole day count from the epoch (UTC), read from the
+/// system clock. Used only to position the `todayMarker`, which is drawn only
+/// when it falls inside the chart's date range — keeping deterministic output
+/// for charts that don't span the present day.
+pub(crate) fn today_days() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| (d.as_secs() / 86_400) as i64)
+        .unwrap_or(0)
+}
+
+#[derive(Clone, Copy)]
 enum Field {
     Year,
     Month,
     Day,
+    Hour,
+    Minute,
+    Second,
+    Milli,
 }
 
-/// Field order implied by a `dateFormat` string (e.g. `DD-MM-YYYY`); defaults
-/// to year-month-day when the tokens can't be located.
-fn field_order(fmt: &str) -> [Field; 3] {
-    let y = fmt.find(['Y', 'y']);
-    let m = fmt.find('M');
-    let d = fmt.find(['D', 'd']);
-    match (y, m, d) {
-        (Some(y), Some(m), Some(d)) => {
-            let mut v = [(y, Field::Year), (m, Field::Month), (d, Field::Day)];
-            v.sort_by_key(|(i, _)| *i);
-            let [(_, a), (_, b), (_, c)] = v;
-            [a, b, c]
-        }
-        _ => [Field::Year, Field::Month, Field::Day],
+/// Field order implied by a `dateFormat` string, honoring both the date tokens
+/// (`Y`/`M`/`D`) and any sub-day time tokens (`H` hour, lowercase `m` minute,
+/// lowercase `s` second, `S` millisecond). Defaults to year-month-day when the
+/// three date tokens can't be located.
+fn field_order(fmt: &str) -> Vec<Field> {
+    let candidates = [
+        (fmt.find(['Y', 'y']), Field::Year),
+        (fmt.find('M'), Field::Month),
+        (fmt.find(['D', 'd']), Field::Day),
+        (fmt.find(['H', 'h']), Field::Hour),
+        (fmt.find('m'), Field::Minute),
+        (fmt.find('s'), Field::Second),
+        (fmt.find('S'), Field::Milli),
+    ];
+    // A well-formed format has the three date tokens; otherwise fall back.
+    if candidates[0].0.is_none() || candidates[1].0.is_none() || candidates[2].0.is_none() {
+        return vec![Field::Year, Field::Month, Field::Day];
     }
+    let mut present: Vec<(usize, Field)> = candidates
+        .into_iter()
+        .filter_map(|(pos, f)| pos.map(|p| (p, f)))
+        .collect();
+    present.sort_by_key(|(i, _)| *i);
+    present.into_iter().map(|(_, f)| f).collect()
 }
 
-/// Parse a date string into a day count, honoring `date_format`'s field order.
-/// Any non-digit run separates fields, so `2026-01-05`, `2026/01/05` and
-/// `05.01.2026` (with `DD.MM.YYYY`) all parse.
+/// Parse a date string into a whole day count, honoring `date_format`'s field
+/// order. Any non-digit run separates fields, so `2026-01-05`, `2026/01/05` and
+/// `05.01.2026` (with `DD.MM.YYYY`) all parse. Sub-day time components are
+/// ignored — use [`parse_datetime`] to keep them.
 pub(crate) fn parse_date(s: &str, date_format: Option<&str>) -> Option<i64> {
+    parse_datetime(s, date_format).map(|d| d.floor() as i64)
+}
+
+/// Parse a date (optionally with a `HH:mm[:ss]` time) into a **fractional** day
+/// count from the epoch, honoring `date_format`'s field order. A `dateFormat`
+/// with time tokens (`HH:mm`) yields sub-day precision; a plain date yields an
+/// integer day count.
+pub(crate) fn parse_datetime(s: &str, date_format: Option<&str>) -> Option<f64> {
     let nums: Vec<i64> = s
         .split(|c: char| !c.is_ascii_digit())
         .filter(|p| !p.is_empty())
@@ -71,7 +106,8 @@ pub(crate) fn parse_date(s: &str, date_format: Option<&str>) -> Option<i64> {
     if nums.len() < 3 {
         return None;
     }
-    let (mut y, mut m, mut d) = (0, 1, 1);
+    let (mut y, mut m, mut d) = (0i64, 1i64, 1i64);
+    let (mut hh, mut mi, mut ss, mut ms) = (0i64, 0i64, 0i64, 0i64);
     for (field, &v) in field_order(date_format.unwrap_or("YYYY-MM-DD"))
         .iter()
         .zip(&nums)
@@ -80,9 +116,15 @@ pub(crate) fn parse_date(s: &str, date_format: Option<&str>) -> Option<i64> {
             Field::Year => y = v,
             Field::Month => m = v,
             Field::Day => d = v,
+            Field::Hour => hh = v,
+            Field::Minute => mi = v,
+            Field::Second => ss = v,
+            Field::Milli => ms = v,
         }
     }
-    Some(days_from_civil(y, m, d))
+    let frac =
+        hh as f64 / 24.0 + mi as f64 / 1440.0 + ss as f64 / 86_400.0 + ms as f64 / 86_400_000.0;
+    Some(days_from_civil(y, m, d) as f64 + frac)
 }
 
 const MONTHS_ABBR: [&str; 12] = [
@@ -260,6 +302,25 @@ mod tests {
         assert_eq!(
             parse_date("2026/01/05", Some("YYYY/MM/DD")),
             Some(days_from_civil(2026, 1, 5))
+        );
+    }
+
+    #[test]
+    fn parse_datetime_honors_subday_time_tokens() {
+        let noon = parse_datetime("2026-01-03 12:00", Some("YYYY-MM-DD HH:mm")).unwrap();
+        let midnight = parse_datetime("2026-01-03 00:00", Some("YYYY-MM-DD HH:mm")).unwrap();
+        assert!((noon - midnight - 0.5).abs() < 1e-9);
+        assert_eq!(midnight, days_from_civil(2026, 1, 3) as f64);
+        // Seconds and the `mm` minute token don't collide with `MM` (month).
+        let dt = parse_datetime("2026-01-03 06:30:00", Some("YYYY-MM-DD HH:mm:ss")).unwrap();
+        assert!((dt - days_from_civil(2026, 1, 3) as f64 - (6.5 / 24.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_date_floors_time_to_whole_day() {
+        assert_eq!(
+            parse_date("2026-01-03 18:00", Some("YYYY-MM-DD HH:mm")),
+            Some(days_from_civil(2026, 1, 3))
         );
     }
 
