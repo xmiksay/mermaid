@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use super::ast::{Cardinality, Entity, EntityAttribute, ErDiagram, ErRelation, FlowDirection};
 use super::style::parse_style_props;
+use super::token::{find_unquoted, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
@@ -96,43 +97,59 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
                 if id.is_empty() {
                     continue;
                 }
-                let i = entity_index(&mut diag, &mut by_name, id);
-                if !diag.entities[i].classes.iter().any(|c| c == class_name) {
-                    diag.entities[i].classes.push(class_name.to_string());
-                }
+                add_class(&mut diag, &mut by_name, id, class_name);
             }
             continue;
         }
         if let Some(rest) = line.strip_prefix("style ") {
-            let (id, props) = rest
+            // `style A,B fill:#f9f` — the id side is a comma-separated list.
+            let (ids, props) = rest
                 .trim()
                 .split_once(char::is_whitespace)
                 .ok_or_else(|| malformed("style", line_no))?;
-            let i = entity_index(&mut diag, &mut by_name, id.trim());
-            diag.entities[i].style = parse_style_props(props);
+            let style = parse_style_props(props);
+            for id in ids.split(',') {
+                let id = id.trim();
+                if id.is_empty() {
+                    continue;
+                }
+                let i = entity_index(&mut diag, &mut by_name, id);
+                diag.entities[i].style = style.clone();
+            }
             continue;
         }
 
-        // Entity block opener: `NAME {` (or `id[Alias] {`).
+        // Entity block opener: `NAME {` (or `id[Alias] {`, `NAME:::class {`).
         if let Some(head) = line.strip_suffix('{') {
-            let (name, label) = split_id_label(head.trim());
+            let (base, class) = split_style_class(head.trim());
+            let (name, label) = split_id_label(base);
             ensure_entity(&mut diag, &mut by_name, &name, Some(&label));
+            if let Some(c) = class {
+                add_class(&mut diag, &mut by_name, &name, c);
+            }
             current_entity = Some(name);
             continue;
         }
 
         // Relation line: `LEFT <card><line><card> RIGHT : label`
-        if let Some(rel) = parse_relation(line) {
+        if let Some((rel, classes)) = parse_relation(line) {
             ensure_entity(&mut diag, &mut by_name, &rel.left, None);
             ensure_entity(&mut diag, &mut by_name, &rel.right, None);
+            for (id, class) in &classes {
+                add_class(&mut diag, &mut by_name, id, class);
+            }
             diag.relations.push(rel);
             continue;
         }
 
-        // Bare entity declaration: `NAME` or `id[Alias]`.
+        // Bare entity declaration: `NAME`, `id[Alias]`, or `NAME:::class`.
         if is_entity_decl(line) {
-            let (name, label) = split_id_label(line);
+            let (base, class) = split_style_class(line);
+            let (name, label) = split_id_label(base);
             ensure_entity(&mut diag, &mut by_name, &name, Some(&label));
+            if let Some(c) = class {
+                add_class(&mut diag, &mut by_name, &name, c);
+            }
             continue;
         }
 
@@ -149,16 +166,23 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
 }
 
 /// A standalone entity declaration is a single identifier, optionally with an
-/// `[Alias]` suffix — no relation connector, no attribute block.
+/// `[Alias]` suffix and/or a `:::class` style separator — no relation
+/// connector, no attribute block. A fully quoted name (which may contain
+/// spaces) also counts.
 fn is_entity_decl(line: &str) -> bool {
-    let id = match line.split_once('[') {
+    let (base, _class) = split_style_class(line);
+    // A quoted name may hold spaces upstream refuses in a bare identifier.
+    if unquote(base) != base {
+        return true;
+    }
+    let id = match base.split_once('[') {
         Some((id, rest)) => {
             if !rest.ends_with(']') {
                 return false;
             }
             id.trim()
         }
-        None => line,
+        None => base,
     };
     !id.is_empty()
         && id
@@ -167,7 +191,8 @@ fn is_entity_decl(line: &str) -> bool {
 }
 
 /// Split an `id[Alias]` form into `(id, label)`; a plain id reuses itself as
-/// the label. Mirrors the flowchart node-label split.
+/// the label. A surrounding pair of quotes is stripped from both sides.
+/// Mirrors the flowchart node-label split.
 fn split_id_label(s: &str) -> (String, String) {
     let s = s.trim();
     if let Some(open) = s.find('[') {
@@ -175,10 +200,37 @@ fn split_id_label(s: &str) -> (String, String) {
             let id = s[..open].trim();
             let label = s[open + 1..s.len() - 1].trim();
             let id = if id.is_empty() { label } else { id };
-            return (id.to_string(), label.to_string());
+            return (unquote(id).to_string(), unquote(label).to_string());
         }
     }
+    let s = unquote(s);
     (s.to_string(), s.to_string())
+}
+
+/// Split a `:::className` style-separator suffix off an entity id.
+/// `A:::hot` → (`A`, Some(`hot`)); no separator → (s, None).
+fn split_style_class(s: &str) -> (&str, Option<&str>) {
+    match s.split_once(":::") {
+        Some((id, class)) => {
+            let class = class.trim();
+            (id.trim(), (!class.is_empty()).then_some(class))
+        }
+        None => (s.trim(), None),
+    }
+}
+
+/// Record `class_name` on the entity `id`, materializing a placeholder if the
+/// id is not yet declared. Deduplicates so repeated refs don't stack.
+fn add_class(
+    diag: &mut ErDiagram,
+    by_name: &mut HashMap<String, usize>,
+    id: &str,
+    class_name: &str,
+) {
+    let i = entity_index(diag, by_name, id);
+    if !diag.entities[i].classes.iter().any(|c| c == class_name) {
+        diag.entities[i].classes.push(class_name.to_string());
+    }
 }
 
 fn parse_attribute(line: &str) -> EntityAttribute {
@@ -219,15 +271,19 @@ fn parse_attribute(line: &str) -> EntityAttribute {
     }
 }
 
-fn parse_relation(line: &str) -> Option<ErRelation> {
-    // Split off the trailing `: label` first (entity ids never contain `:`).
-    let (spec, label) = match line.split_once(':') {
-        Some((a, b)) => (a.trim(), b.trim().trim_matches('"').to_string()),
+/// Parse a relation line, returning the relation plus any `(entity_id, class)`
+/// assignments from a `:::class` style separator on either endpoint.
+fn parse_relation(line: &str) -> Option<(ErRelation, Vec<(String, String)>)> {
+    // Split off the trailing `: label` first, skipping the `:::` style
+    // separator so `A:::hot ||--o{ B : x` isn't cut at the wrong colon.
+    let (spec, label) = match find_label_colon(line) {
+        Some(i) => (line[..i].trim(), unquote(line[i + 1..].trim()).to_string()),
         None => (line.trim(), String::new()),
     };
 
     // Locate the relationship connector between the two cardinalities. It is
-    // either a glyph line (`--`/`..`) or a verbal form (`to`/`optionally to`).
+    // either a glyph line (`--`/`..`/`.-`/`-.`) or a verbal form
+    // (`to`/`optionally to`).
     let (sep_start, sep_len, identifying) = find_reltype(spec)?;
     let left_part = spec[..sep_start].trim();
     let right_part = spec[sep_start + sep_len..].trim();
@@ -238,29 +294,65 @@ fn parse_relation(line: &str) -> Option<ErRelation> {
         return None;
     }
 
-    Some(ErRelation {
-        left: split_id_label(left_name).0,
-        right: split_id_label(right_name).0,
-        left_card,
-        right_card,
-        identifying,
-        label,
+    let (left_id, left_class) = split_entity_ref(left_name);
+    let (right_id, right_class) = split_entity_ref(right_name);
+    if left_id.is_empty() || right_id.is_empty() {
+        return None;
+    }
+
+    let mut classes = Vec::new();
+    if let Some(c) = left_class {
+        classes.push((left_id.clone(), c));
+    }
+    if let Some(c) = right_class {
+        classes.push((right_id.clone(), c));
+    }
+
+    Some((
+        ErRelation {
+            left: left_id,
+            right: right_id,
+            left_card,
+            right_card,
+            identifying,
+            label,
+        },
+        classes,
+    ))
+}
+
+/// Resolve an entity reference token — stripping a `:::class` separator, an
+/// `[Alias]`, and surrounding quotes — into `(id, class)`.
+fn split_entity_ref(token: &str) -> (String, Option<String>) {
+    let (base, class) = split_style_class(token);
+    let (id, _label) = split_id_label(base);
+    (id, class.map(str::to_string))
+}
+
+/// First lone `:` in `line` (the `: label` separator), skipping any `:::`
+/// style-separator run so its colons aren't mistaken for the label colon.
+fn find_label_colon(line: &str) -> Option<usize> {
+    let b = line.as_bytes();
+    (0..b.len()).find(|&i| {
+        b[i] == b':' && !(i > 0 && b[i - 1] == b':') && !(i + 1 < b.len() && b[i + 1] == b':')
     })
 }
 
 /// Locate the relationship connector, returning `(byte offset, length,
 /// identifying)`. Verbal forms take precedence over the glyph lines so an
-/// `optionally to` isn't mistaken for a bare `to`.
+/// `optionally to` isn't mistaken for a bare `to`. Scanning is quote-aware so
+/// a quoted entity name embedding a glyph doesn't split the line. Only `--` is
+/// identifying; `..`/`.-`/`-.` are all non-identifying (upstream lexer).
 fn find_reltype(spec: &str) -> Option<(usize, usize, bool)> {
     const VERBAL: &[(&str, bool)] = &[(" optionally to ", false), (" to ", true)];
     for (tok, identifying) in VERBAL {
-        if let Some(p) = spec.find(tok) {
+        if let Some(p) = find_unquoted(spec, tok) {
             return Some((p, tok.len(), *identifying));
         }
     }
-    ["--", ".."]
+    ["--", "..", ".-", "-."]
         .iter()
-        .filter_map(|s| spec.find(s).map(|p| (p, *s)))
+        .filter_map(|s| find_unquoted(spec, s).map(|p| (p, *s)))
         .min_by_key(|x| x.0)
         .map(|(p, s)| (p, s.len(), s == "--"))
 }
@@ -497,6 +589,81 @@ mod tests {
     #[test]
     fn classdef_without_props_errors() {
         assert!(parse("erDiagram\nA ||--|| B : x\nclassDef foo\n").is_err());
+    }
+
+    #[test]
+    fn style_class_shorthand_on_relation() {
+        // `:::class` on an entity ref must not hard-error or swallow the label.
+        let d = parse("erDiagram\nA:::hot ||--o{ B : places\n").unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.left, "A");
+        assert_eq!(r.right, "B");
+        assert_eq!(r.label, "places");
+        let a = d.entities.iter().find(|e| e.name == "A").unwrap();
+        assert_eq!(a.classes, vec!["hot".to_string()]);
+        // The undecorated endpoint keeps no class.
+        assert!(d
+            .entities
+            .iter()
+            .find(|e| e.name == "B")
+            .unwrap()
+            .classes
+            .is_empty());
+    }
+
+    #[test]
+    fn style_class_shorthand_on_both_ends_and_bare() {
+        let d = parse("erDiagram\nA:::hot ||--o{ B:::cold : x\nC:::warm\n").unwrap();
+        assert_eq!(
+            d.entities.iter().find(|e| e.name == "B").unwrap().classes,
+            vec!["cold".to_string()]
+        );
+        assert_eq!(
+            d.entities.iter().find(|e| e.name == "C").unwrap().classes,
+            vec!["warm".to_string()]
+        );
+    }
+
+    #[test]
+    fn quoted_entity_names_are_unquoted() {
+        let d = parse("erDiagram\n\"HELLO WORLD\" ||--o{ ORDER : places\n").unwrap();
+        let r = &d.relations[0];
+        assert_eq!(r.left, "HELLO WORLD");
+        assert_eq!(r.right, "ORDER");
+        let e = d.entities.iter().find(|e| e.name == "HELLO WORLD").unwrap();
+        assert_eq!(e.label, "HELLO WORLD");
+    }
+
+    #[test]
+    fn quoted_entity_block_and_bare_decl() {
+        let d = parse("erDiagram\n\"HELLO WORLD\" {\nstring name\n}\n").unwrap();
+        let e = d.entities.iter().find(|e| e.name == "HELLO WORLD").unwrap();
+        assert_eq!(e.attributes.len(), 1);
+    }
+
+    #[test]
+    fn multi_id_style_no_ghost_entity() {
+        let d = parse("erDiagram\nA ||--o{ B : x\nstyle A,B fill:#f9f\n").unwrap();
+        assert!(d.entities.iter().all(|e| e.name != "A,B"));
+        let a = d.entities.iter().find(|e| e.name == "A").unwrap();
+        let b = d.entities.iter().find(|e| e.name == "B").unwrap();
+        assert_eq!(a.style, vec![("fill".to_string(), "#f9f".to_string())]);
+        assert_eq!(b.style, vec![("fill".to_string(), "#f9f".to_string())]);
+    }
+
+    #[test]
+    fn dash_dot_line_forms_are_nonidentifying() {
+        for src in [
+            "erDiagram\nA ||.-o{ B : uses\n",
+            "erDiagram\nA ||-.o{ B : uses\n",
+        ] {
+            let d = parse(src).unwrap();
+            let r = &d.relations[0];
+            assert!(!r.identifying, "{src} should be non-identifying");
+            assert_eq!(r.left_card, Cardinality::ExactlyOne);
+            assert_eq!(r.right_card, Cardinality::ZeroOrMore);
+            assert_eq!(r.right, "B");
+        }
     }
 
     #[test]
