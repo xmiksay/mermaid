@@ -188,6 +188,9 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
             p.legend_position = meta.pie_legend_position.clone();
         }
     }
+    if let Diagram::Radar(r) = &mut diagram {
+        apply_radar_config(r, &meta.config);
+    }
     Ok((diagram, meta))
 }
 
@@ -307,6 +310,23 @@ fn apply_xychart_config(
             .filter(|s| !s.is_empty())
             .collect();
     }
+}
+
+/// Copy honored `config.radar.*` keys onto the radar diagram (dimensions,
+/// margins, axis scale, curve tension).
+fn apply_radar_config(
+    r: &mut ast::RadarDiagram,
+    config: &std::collections::BTreeMap<String, String>,
+) {
+    let num = |k: &str| config.get(k).and_then(|v| v.trim().parse::<f64>().ok());
+    r.width = num("radar.width");
+    r.height = num("radar.height");
+    r.margin_top = num("radar.marginTop");
+    r.margin_bottom = num("radar.marginBottom");
+    r.margin_left = num("radar.marginLeft");
+    r.margin_right = num("radar.marginRight");
+    r.axis_scale_factor = num("radar.axisScaleFactor");
+    r.curve_tension = num("radar.curveTension");
 }
 
 fn dispatch(input: &str) -> Result<Diagram, ParseError> {

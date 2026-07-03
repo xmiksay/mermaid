@@ -198,6 +198,23 @@ pub struct RadarDiagram {
     pub graticule: RadarGraticule,
     /// Whether to draw the curve legend; `None` defaults to true.
     pub show_legend: Option<bool>,
+    /// `config.radar.width` — overall SVG width; `None` uses the derived default.
+    pub width: Option<f64>,
+    /// `config.radar.height` — overall SVG height; `None` uses the derived default.
+    pub height: Option<f64>,
+    /// `config.radar.marginTop` — top margin; `None` defaults to `PAD`.
+    pub margin_top: Option<f64>,
+    /// `config.radar.marginBottom` — bottom margin; `None` defaults to `PAD`.
+    pub margin_bottom: Option<f64>,
+    /// `config.radar.marginLeft` — left margin; `None` defaults to `PAD`.
+    pub margin_left: Option<f64>,
+    /// `config.radar.marginRight` — right margin; `None` defaults to `PAD`.
+    pub margin_right: Option<f64>,
+    /// `config.radar.axisScaleFactor` — scales the curve plot radius; `None` = 1.
+    pub axis_scale_factor: Option<f64>,
+    /// `config.radar.curveTension` — cardinal-spline tension for the closed
+    /// curve (circle graticule); `None` defaults to upstream's 0.17.
+    pub curve_tension: Option<f64>,
 }
 
 /// Shape of the radar graticule (background grid rings).
