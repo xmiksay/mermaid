@@ -114,7 +114,7 @@ fn dispatch(input: &str) -> Result<Diagram, ParseError> {
         "sequenceDiagram" => sequence::parse(input).map(Diagram::Sequence),
         "flowchart" | "graph" => flowchart::parse(input).map(Diagram::Flowchart),
         "stateDiagram" | "stateDiagram-v2" => state::parse(input).map(Diagram::State),
-        "classDiagram" => class::parse(input).map(Diagram::Class),
+        "classDiagram" | "classDiagram-v2" => class::parse(input).map(Diagram::Class),
         "erDiagram" => er::parse(input).map(Diagram::Er),
         "gantt" => gantt::parse(input).map(Diagram::Gantt),
         "journey" => journey::parse(input).map(Diagram::Journey),
