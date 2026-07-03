@@ -58,11 +58,26 @@ pub struct SankeyDiagram {
     pub links: Vec<SankeyLink>,
     /// `config.sankey.linkColor` — how each link's stroke color is derived:
     /// `source`/`target` (the node's palette color), `gradient` (source→target
-    /// gradient), or a literal hex. `None` defaults to `source`.
+    /// gradient), or a literal hex. `None` defaults to `gradient` (upstream).
     pub link_color: Option<String>,
     /// `config.sankey.nodeAlignment` — `justify`/`center`/`left`/`right`.
     /// `None` defaults to `justify`.
     pub node_alignment: Option<String>,
+    /// `config.sankey.showValues` — append each node's throughput value to its
+    /// label. `None` defaults to `true` (upstream).
+    pub show_values: Option<bool>,
+    /// `config.sankey.prefix` — string prepended to a shown value.
+    pub prefix: Option<String>,
+    /// `config.sankey.suffix` — string appended to a shown value.
+    pub suffix: Option<String>,
+    /// `config.sankey.width` — overrides the per-column horizontal spacing.
+    pub width: Option<f64>,
+    /// `config.sankey.height` — overrides the stacking chart height.
+    pub height: Option<f64>,
+    /// `config.sankey.nodeWidth` — node rectangle width (upstream default `10`).
+    pub node_width: Option<f64>,
+    /// `config.sankey.nodePadding` — vertical gap between stacked nodes.
+    pub node_padding: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -14,13 +14,23 @@ use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
-const NODE_W: f64 = 18.0;
 const COL_GAP: f64 = 180.0;
+// Upstream defaults (config.schema.yaml SankeyDiagramConfig).
+const NODE_W: f64 = 10.0;
 const CHART_H: f64 = 380.0;
 const ROW_GAP: f64 = 6.0;
 
 pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
+
+    // Geometry is config-driven (`config.sankey.*`); each falls back to the
+    // upstream-faithful default when unset.
+    let node_w = d.node_width.unwrap_or(NODE_W);
+    let row_gap = d.node_padding.unwrap_or(ROW_GAP);
+    let chart_h = d.height.unwrap_or(CHART_H);
+    let show_values = d.show_values.unwrap_or(true);
+    let prefix = d.prefix.as_deref().unwrap_or("");
+    let suffix = d.suffix.as_deref().unwrap_or("");
 
     if d.links.is_empty() {
         let mut svg = SvgBuilder::new(200.0, 80.0).theme(theme);
@@ -62,6 +72,13 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
     let max_col = *col.values().max().unwrap_or(&0);
     let cols: usize = (max_col + 1) as usize;
 
+    // `config.sankey.width` sets the total node-area span; without it fall back
+    // to a fixed per-column gap.
+    let col_gap = match d.width {
+        Some(w) if cols > 1 => ((w - node_w) / (cols - 1) as f64).max(node_w + 20.0),
+        _ => COL_GAP,
+    };
+
     // Group nodes by column.
     let mut by_col: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for n in &order {
@@ -92,30 +109,30 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         .cloned()
         .fold(0.0_f64, f64::max)
         .max(1.0);
-    let scale = (CHART_H
+    let scale = (chart_h
         - (by_col
             .values()
             .map(|v| v.len())
             .max()
             .unwrap_or(1)
             .saturating_sub(1) as f64)
-            * ROW_GAP)
+            * row_gap)
         / col_max;
 
     // Position rectangles: x by column, y stacked.
     let mut rects: BTreeMap<String, (f64, f64, f64)> = BTreeMap::new(); // id -> (x, y, h)
     for (c, ns) in &by_col {
-        let x = PAD + *c as f64 * COL_GAP;
+        let x = PAD + *c as f64 * col_gap;
         let mut y = PAD + 10.0;
         for n in ns {
             let h = (through(n) * scale).max(2.0);
             rects.insert(n.clone(), (x, y, h));
-            y += h + ROW_GAP;
+            y += h + row_gap;
         }
     }
 
-    let width = PAD * 2.0 + (cols.saturating_sub(1) as f64) * COL_GAP + NODE_W + 120.0;
-    let height = PAD * 2.0 + CHART_H + 30.0;
+    let width = PAD * 2.0 + (cols.saturating_sub(1) as f64) * col_gap + node_w + 120.0;
+    let height = PAD * 2.0 + chart_h + 30.0;
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     let link_color = LinkColor::parse(d.link_color.as_deref());
@@ -136,7 +153,7 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
             + sw / 2.0;
         *so += l.value;
         *to += l.value;
-        let x1 = sx + NODE_W;
+        let x1 = sx + node_w;
         let x2 = tx;
         let mx = (x1 + x2) / 2.0;
         // Derive the stroke from `linkColor`; `gradient` needs a per-link
@@ -186,19 +203,23 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         svg.rect(
             *x,
             *y,
-            NODE_W,
+            node_w,
             *h,
             &format!("fill=\"{}\" stroke=\"#fff\"", node_color(id)),
         );
         let label_x = if col[id] == max_col {
             *x - 6.0
         } else {
-            *x + NODE_W + 6.0
+            *x + node_w + 6.0
         };
         let anchor = if col[id] == max_col { "end" } else { "start" };
-        // Upstream shows the node throughput after the name (`showValues`,
-        // on by default): `Name\n42`.
-        let label = format!("{id}\n{}", fnum(through(id)));
+        // Upstream `showValues` (on by default) shows the node throughput after
+        // the name (`Name\n<prefix>42<suffix>`); `false` shows only the name.
+        let label = if show_values {
+            format!("{id}\n{prefix}{}{suffix}", fnum(through(id)))
+        } else {
+            id.clone()
+        };
         svg.text(
             label_x,
             y + h / 2.0 + 4.0,
@@ -212,11 +233,11 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
 
 /// How a link's stroke color is derived (`config.sankey.linkColor`).
 enum LinkColor {
-    /// The source node's palette color (upstream default).
+    /// The source node's palette color.
     Source,
     /// The target node's palette color.
     Target,
-    /// A source→target `<linearGradient>` per link.
+    /// A source→target `<linearGradient>` per link (upstream default).
     Gradient,
     /// A literal color (any hex the config supplies).
     Fixed(String),
@@ -225,9 +246,9 @@ enum LinkColor {
 impl LinkColor {
     fn parse(s: Option<&str>) -> Self {
         match s.map(str::trim) {
+            Some("source") => LinkColor::Source,
             Some("target") => LinkColor::Target,
-            Some("gradient") => LinkColor::Gradient,
-            Some("source") | None => LinkColor::Source,
+            Some("gradient") | None => LinkColor::Gradient,
             // Anything else is treated as a literal color (e.g. `#a1b2c3`).
             Some(other) => LinkColor::Fixed(other.to_string()),
         }
@@ -405,12 +426,50 @@ mod tests {
     }
 
     #[test]
-    fn default_link_color_is_source() {
+    fn default_link_color_is_gradient() {
         let theme = Theme::default();
         let svg = render(&chain(), &theme);
+        // Upstream default is `gradient`: each link is a per-link gradient.
+        assert!(svg.contains("<linearGradient id=\"sankey-grad-0\""));
+        assert!(svg.contains("stroke=\"url(#sankey-grad-0)\""));
+    }
+
+    #[test]
+    fn link_color_source_tints_from_source_node() {
+        let mut d = chain();
+        d.link_color = Some("source".into());
+        let theme = Theme::default();
+        let svg = render(&d, &theme);
         // A→B tinted from A (node 0), B→C tinted from B (node 1).
         assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(0))));
         assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(1))));
+    }
+
+    #[test]
+    fn show_values_false_omits_value() {
+        let mut d = chain();
+        d.show_values = Some(false);
+        let svg = render(&d, &Theme::default());
+        // Node label carries only the name, no throughput second line.
+        assert!(svg.contains(">A<"));
+        assert!(!svg.contains(">5<"));
+    }
+
+    #[test]
+    fn prefix_and_suffix_wrap_value() {
+        let mut d = chain();
+        d.prefix = Some("$".into());
+        d.suffix = Some(" USD".into());
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">$5 USD<"));
+    }
+
+    #[test]
+    fn node_width_config_sets_rect_width() {
+        let mut d = chain();
+        d.node_width = Some(24.0);
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("width=\"24\""));
     }
 
     #[test]

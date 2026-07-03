@@ -305,6 +305,13 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.timeline_disable_multicolor = get("timeline.disableMulticolor")
         .as_deref()
         .and_then(parse_flag);
+    meta.sankey_show_values = get("sankey.showValues").as_deref().and_then(parse_flag);
+    meta.sankey_prefix = get("sankey.prefix");
+    meta.sankey_suffix = get("sankey.suffix");
+    meta.sankey_width = get("sankey.width").as_deref().and_then(parse_dim);
+    meta.sankey_height = get("sankey.height").as_deref().and_then(parse_dim);
+    meta.sankey_node_width = get("sankey.nodeWidth").as_deref().and_then(parse_dim);
+    meta.sankey_node_padding = get("sankey.nodePadding").as_deref().and_then(parse_dim);
 
     for (k, v) in &meta.config {
         if let Some(name) = k.strip_prefix("themeVariables.") {
@@ -341,6 +348,14 @@ fn parse_font_size(s: &str) -> Option<f64> {
     let s = s.trim();
     let num = s.strip_suffix("px").unwrap_or(s).trim();
     num.parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && *n > 0.0)
+}
+
+/// Parse a positive numeric dimension (`width`/`height`/`nodeWidth`/…).
+fn parse_dim(s: &str) -> Option<f64> {
+    s.trim()
+        .parse::<f64>()
         .ok()
         .filter(|n| n.is_finite() && *n > 0.0)
 }

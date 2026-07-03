@@ -119,4 +119,19 @@ mod tests {
         assert_eq!(d.link_color.as_deref(), Some("gradient"));
         assert_eq!(d.node_alignment.as_deref(), Some("right"));
     }
+
+    #[test]
+    fn config_show_values_prefix_suffix_and_geometry() {
+        let src = "---\nconfig:\n  sankey:\n    showValues: false\n    prefix: \"$\"\n    suffix: \" USD\"\n    width: 600\n    height: 400\n    nodeWidth: 12\n    nodePadding: 8\n---\nsankey-beta\nA,B,5\n";
+        let crate::parse::ast::Diagram::Sankey(d) = crate::parse::parse(src).unwrap() else {
+            panic!("expected sankey");
+        };
+        assert_eq!(d.show_values, Some(false));
+        assert_eq!(d.prefix.as_deref(), Some("$"));
+        assert_eq!(d.suffix.as_deref(), Some(" USD"));
+        assert_eq!(d.width, Some(600.0));
+        assert_eq!(d.height, Some(400.0));
+        assert_eq!(d.node_width, Some(12.0));
+        assert_eq!(d.node_padding, Some(8.0));
+    }
 }
