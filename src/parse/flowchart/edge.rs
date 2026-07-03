@@ -161,7 +161,7 @@ pub(super) fn parse_arrow(
     sc.skip_ws();
     let label = if sc.try_consume("|") {
         let txt = sc
-            .read_until("|")
+            .read_until_unquoted("|")
             .ok_or_else(|| ParseError::unclosed(line_no, "unclosed edge label"))?;
         sc.try_consume("|");
         Some(unquote(txt.trim()).to_string())
@@ -367,6 +367,13 @@ mod tests {
     fn edge_label() {
         let d = parse("flowchart TD\nA -->|yes| B\n").unwrap();
         assert_eq!(d.edges[0].label.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn quoted_pipe_label_may_contain_pipe() {
+        let d = parse("flowchart LR\nA -->|\"a|b\"| B\n").unwrap();
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edges[0].label.as_deref(), Some("a|b"));
     }
 
     #[test]

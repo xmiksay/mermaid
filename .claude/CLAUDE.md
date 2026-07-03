@@ -356,6 +356,18 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   TD;`, `A-->B;`, and `graph LR; A-->B` (header + statements on one line) all
   parse. A `;` inside a quoted string, a shape bracket, or an edge-label `|…|`
   run is left intact (so `["a;b"]` and `#59;` entity codes survive).
+- Flowchart **scanner robustness** (upstream NODE_STRING / string-lexer parity):
+  `read_ident` (`src/parse/flowchart/scanner.rs`) keeps a `-`/`/` inside a node id
+  (`a-node`, `x/y`) — consumed only when the next char continues the id, so an
+  arrow opener (`-->`, `-.->`) still breaks it. Shape/label text and pipe labels
+  scan **quote-aware** (`read_until_unquoted`/`find_unquoted`), so a quoted label
+  may embed its own closer: `A["a ] b"]`, `A("call (x)")`, `-->|"a|b"|`. A `%%`
+  inside a `"…"` label is content, not a comment — `strip_comment`
+  (`src/parse/mod.rs`) uses `find_unquoted` (fix shared by every diagram).
+  A bracket-less `subgraph one two three` keeps all its words as the id (renderer
+  shows it) instead of truncating at the first space; `id [Label]` still splits on
+  the `[`. `click A call handler(arg one, arg two)` keeps the whole `(…)` argument
+  list (`click_tokens` tracks paren depth, upstream CALLBACKARGS `[^)]*`).
 - Flowchart `~~~` is the **invisible link** (`EdgeLine::Invisible`): `parse_arrow`
   accepts `~` as an opener, requires ≥3 tildes, and forbids any head/tail. It is
   a real edge (so it shapes the sugiyama layout) but `draw_edge` returns early
