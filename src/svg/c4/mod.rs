@@ -55,8 +55,8 @@ const V_GAP: f64 = 40.0;
 pub(super) const C4_LINE: &str = "#444444";
 
 pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
 
     let origin_x = PAD;
@@ -89,7 +89,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
 
     let width = (max_x + PAD).max(600.0);
     let height = (max_y + PAD).max(220.0);
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     let arrow_color = C4_LINE;
     svg.defs_raw(&format!(
@@ -329,7 +329,7 @@ fn draw_boundary_rect(
     let fg = style
         .and_then(|s| s.font_color.clone())
         .unwrap_or_else(|| theme.fg.to_string());
-    let fg_muted = theme.fg_muted;
+    let fg_muted = &theme.fg_muted;
     // Upstream draws a `Deployment_Node` (any boundary with a `nodeType`) with a
     // solid border and every other boundary kind dashed `7.0,7.0`.
     let dash = if matches!(b.kind, C4BoundaryKind::Deployment) {

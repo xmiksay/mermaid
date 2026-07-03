@@ -28,9 +28,9 @@ struct Box {
 }
 
 pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let stroke = theme.flow_node_stroke;
-    let fill = theme.flow_node_fill;
+    let fg = &theme.fg;
+    let stroke = &theme.flow_node_stroke;
+    let fill = &theme.flow_node_fill;
 
     let mut boxes: Vec<Box> = Vec::new();
 
@@ -154,8 +154,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     let width = max_x + PAD;
     let height = max_y + PAD;
 
-    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0))
-        .font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0)).theme(theme);
 
     svg.defs_raw(&format!(
         "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
@@ -259,7 +258,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             16.0,
             &format!(
                 "fill=\"{}\" stroke=\"{stroke}\" stroke-width=\"0.5\" rx=\"3\"",
-                theme.flow_label_bg
+                &theme.flow_label_bg
             ),
         );
         svg.text(

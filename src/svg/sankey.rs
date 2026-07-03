@@ -20,10 +20,10 @@ const CHART_H: f64 = 380.0;
 const ROW_GAP: f64 = 6.0;
 
 pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
+    let fg = &theme.fg;
 
     if d.links.is_empty() {
-        let mut svg = SvgBuilder::new(200.0, 80.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(200.0, 80.0).theme(theme);
         svg.text(
             100.0,
             40.0,
@@ -103,7 +103,7 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
 
     let width = PAD * 2.0 + (cols.saturating_sub(1) as f64) * COL_GAP + NODE_W + 120.0;
     let height = PAD * 2.0 + CHART_H + 30.0;
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     // Track per-node offset cursors for stacking link stubs.
     let mut out_cursor: BTreeMap<String, f64> = BTreeMap::new();
@@ -154,7 +154,7 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
             *y,
             NODE_W,
             *h,
-            &format!("fill=\"{}\" stroke=\"#fff\"", theme.flow_node_stroke),
+            &format!("fill=\"{}\" stroke=\"#fff\"", &theme.flow_node_stroke),
         );
         let label_x = if depth[id] == max_depth {
             *x - 6.0

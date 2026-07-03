@@ -11,8 +11,8 @@ const SIZE: f64 = 460.0;
 const TITLE_GAP: f64 = 32.0;
 
 pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let width = PAD * 2.0 + SIZE + 60.0;
@@ -20,7 +20,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     let chart_left = PAD + 30.0;
     let chart_top = PAD + title_h;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

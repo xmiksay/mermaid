@@ -100,8 +100,8 @@ pub(super) fn draw_edge(
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
-    let stroke = theme.flow_edge_stroke;
-    let fg = theme.fg;
+    let stroke = &theme.flow_edge_stroke;
+    let fg = &theme.fg;
     let (Some(a), Some(b)) = (nodes.get(&e.from), nodes.get(&e.to)) else {
         return;
     };

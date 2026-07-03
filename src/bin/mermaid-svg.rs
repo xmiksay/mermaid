@@ -95,8 +95,7 @@ fn run() -> Result<(), String> {
         format!("unknown theme '{theme_name}' (valid: default (alias base), dark, forest, neutral)")
     })?;
     if let Some(font) = font {
-        // Leak: the process is short-lived and `Theme` holds `&'static str`.
-        theme = theme.with_font(Box::leak(font.into_boxed_str()));
+        theme = theme.with_font(font);
     }
     if let Some(size) = font_size {
         theme = theme.with_font_size(size);

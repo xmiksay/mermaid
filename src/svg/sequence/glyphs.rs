@@ -54,8 +54,8 @@ fn draw_stereotype(
     theme: &Theme,
     glyph: Glyph,
 ) {
-    let stroke = theme.actor_stroke;
-    let fill = theme.actor_fill;
+    let stroke = &theme.actor_stroke;
+    let fill = &theme.actor_fill;
     let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
     let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
     let path_attrs = format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
@@ -136,7 +136,7 @@ fn draw_stereotype(
 /// Draw a participant's name lines below its glyph, clamped inside the actor's
 /// allotted height. Shared by the stick-figure actor and the stereotype glyphs.
 fn draw_figure_name(svg: &mut SvgBuilder, cx: f64, top: f64, h: f64, label: &str, theme: &Theme) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     let lines = label_lines(label);
     let mut y = (top + h - (lines.len() as f64 - 1.0) * ACTOR_LINE_H - 2.0).max(top + 34.0);
     for line in &lines {
@@ -159,9 +159,9 @@ fn draw_actor_box(
     label: &str,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let actor_fill = theme.actor_fill;
-    let actor_stroke = theme.actor_stroke;
+    let fg = &theme.fg;
+    let actor_fill = &theme.actor_fill;
+    let actor_stroke = &theme.actor_stroke;
     let x = cx - w / 2.0;
     svg.rect(
         x,
@@ -186,9 +186,9 @@ fn draw_actor_box(
 /// Draw an `actor` as a stick figure (head + body + arms + legs) with the name
 /// underneath — mirrors upstream `drawActorTypeActor`.
 fn draw_actor_figure(svg: &mut SvgBuilder, cx: f64, top: f64, h: f64, label: &str, theme: &Theme) {
-    let fg = theme.fg;
-    let stroke = theme.actor_stroke;
-    let fill = theme.actor_fill;
+    let fg = &theme.fg;
+    let stroke = &theme.actor_stroke;
+    let fill = &theme.actor_fill;
     let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
     let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
 

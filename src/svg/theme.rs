@@ -3,144 +3,166 @@
 //! Custom themes: construct a [`Theme`] directly (typically via struct-update
 //! syntax from a built-in) and pass it to
 //! [`render_with`][crate::render_with].
+//!
+//! Color/font fields are [`Cow<'static, str>`] so the built-ins stay
+//! zero-allocation `const` values while source-level `themeVariables` /
+//! `fontFamily` config can override them with owned runtime strings
+//! ([`apply_theme_variables`][Theme::apply_theme_variables]).
 
-#[derive(Debug, Clone, Copy)]
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+/// A borrowed-or-owned color/font string. Built-ins use `Cow::Borrowed`;
+/// `themeVariables` overrides use `Cow::Owned`.
+type Str = Cow<'static, str>;
+
+#[derive(Debug, Clone)]
 pub struct Theme {
-    pub fg: &'static str,
-    pub fg_muted: &'static str,
-    pub bg: &'static str,
-    pub actor_fill: &'static str,
-    pub actor_stroke: &'static str,
-    pub lifeline: &'static str,
-    pub arrow_stroke: &'static str,
+    pub fg: Str,
+    pub fg_muted: Str,
+    pub bg: Str,
+    pub actor_fill: Str,
+    pub actor_stroke: Str,
+    pub lifeline: Str,
+    pub arrow_stroke: Str,
     /// Fill of a sequence `note` box.
-    pub note_fill: &'static str,
+    pub note_fill: Str,
     /// Border stroke of a sequence `note` box.
-    pub note_stroke: &'static str,
+    pub note_stroke: Str,
     /// Fill of a sequence activation band.
-    pub activation_fill: &'static str,
+    pub activation_fill: Str,
     /// Border stroke of a sequence activation band.
-    pub activation_stroke: &'static str,
+    pub activation_stroke: Str,
     /// Fill of an alt/loop/par block-frame label tab.
-    pub frame_label_fill: &'static str,
-    pub flow_node_fill: &'static str,
-    pub flow_node_stroke: &'static str,
-    pub flow_edge_stroke: &'static str,
-    pub flow_label_bg: &'static str,
+    pub frame_label_fill: Str,
+    pub flow_node_fill: Str,
+    pub flow_node_stroke: Str,
+    pub flow_edge_stroke: Str,
+    pub flow_label_bg: Str,
     /// Background fill of a flowchart/subgraph cluster frame.
-    pub flow_cluster_fill: &'static str,
+    pub flow_cluster_fill: Str,
     /// Border stroke of a flowchart/subgraph cluster frame.
-    pub flow_cluster_stroke: &'static str,
+    pub flow_cluster_stroke: Str,
     pub pie_palette: &'static [&'static str],
     /// CSS `font-family` applied to the root `<svg>`; cascades to all text.
-    pub font_family: &'static str,
+    pub font_family: Str,
     /// Base `font-size` (px) on the root `<svg>`; individual labels may
     /// override it with their own `font-size`.
     pub font_size: f64,
+    /// Emit the responsive `width="100%"` + `max-width` envelope (upstream
+    /// default). `config.useMaxWidth: false` clears this so [`SvgBuilder`]
+    /// emits a fixed pixel `width`/`height` instead.
+    ///
+    /// [`SvgBuilder`]: crate::svg::builder::SvgBuilder
+    pub responsive: bool,
 }
 
 impl Theme {
     pub const fn default_theme() -> Self {
         Self {
-            fg: "#333",
-            fg_muted: "#666",
-            bg: "#fff",
-            actor_fill: "#ECECFF",
-            actor_stroke: "#9370DB",
-            lifeline: "#999",
-            arrow_stroke: "#333",
-            note_fill: "#FFF5AD",
-            note_stroke: "#aaaa33",
-            activation_fill: "#ECECFF",
-            activation_stroke: "#9370DB",
-            frame_label_fill: "#EEE",
-            flow_node_fill: "#ECECFF",
-            flow_node_stroke: "#9370DB",
-            flow_edge_stroke: "#333",
-            flow_label_bg: "#fff",
-            flow_cluster_fill: "#ffffde",
-            flow_cluster_stroke: "#aaaa33",
+            fg: Cow::Borrowed("#333"),
+            fg_muted: Cow::Borrowed("#666"),
+            bg: Cow::Borrowed("#fff"),
+            actor_fill: Cow::Borrowed("#ECECFF"),
+            actor_stroke: Cow::Borrowed("#9370DB"),
+            lifeline: Cow::Borrowed("#999"),
+            arrow_stroke: Cow::Borrowed("#333"),
+            note_fill: Cow::Borrowed("#FFF5AD"),
+            note_stroke: Cow::Borrowed("#aaaa33"),
+            activation_fill: Cow::Borrowed("#ECECFF"),
+            activation_stroke: Cow::Borrowed("#9370DB"),
+            frame_label_fill: Cow::Borrowed("#EEE"),
+            flow_node_fill: Cow::Borrowed("#ECECFF"),
+            flow_node_stroke: Cow::Borrowed("#9370DB"),
+            flow_edge_stroke: Cow::Borrowed("#333"),
+            flow_label_bg: Cow::Borrowed("#fff"),
+            flow_cluster_fill: Cow::Borrowed("#ffffde"),
+            flow_cluster_stroke: Cow::Borrowed("#aaaa33"),
             pie_palette: &PALETTE_DEFAULT,
-            font_family: "sans-serif",
+            font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
+            responsive: true,
         }
     }
 
     pub const fn dark() -> Self {
         Self {
-            fg: "#E0E0E0",
-            fg_muted: "#A0A0A0",
-            bg: "#1E1E1E",
-            actor_fill: "#3B3B5B",
-            actor_stroke: "#B58CE0",
-            lifeline: "#666",
-            arrow_stroke: "#E0E0E0",
-            note_fill: "#3B3B22",
-            note_stroke: "#AAAA55",
-            activation_fill: "#3B3B5B",
-            activation_stroke: "#B58CE0",
-            frame_label_fill: "#2A2A3C",
-            flow_node_fill: "#3B3B5B",
-            flow_node_stroke: "#B58CE0",
-            flow_edge_stroke: "#E0E0E0",
-            flow_label_bg: "#1E1E1E",
-            flow_cluster_fill: "#2A2A3C",
-            flow_cluster_stroke: "#9A9ABF",
+            fg: Cow::Borrowed("#E0E0E0"),
+            fg_muted: Cow::Borrowed("#A0A0A0"),
+            bg: Cow::Borrowed("#1E1E1E"),
+            actor_fill: Cow::Borrowed("#3B3B5B"),
+            actor_stroke: Cow::Borrowed("#B58CE0"),
+            lifeline: Cow::Borrowed("#666"),
+            arrow_stroke: Cow::Borrowed("#E0E0E0"),
+            note_fill: Cow::Borrowed("#3B3B22"),
+            note_stroke: Cow::Borrowed("#AAAA55"),
+            activation_fill: Cow::Borrowed("#3B3B5B"),
+            activation_stroke: Cow::Borrowed("#B58CE0"),
+            frame_label_fill: Cow::Borrowed("#2A2A3C"),
+            flow_node_fill: Cow::Borrowed("#3B3B5B"),
+            flow_node_stroke: Cow::Borrowed("#B58CE0"),
+            flow_edge_stroke: Cow::Borrowed("#E0E0E0"),
+            flow_label_bg: Cow::Borrowed("#1E1E1E"),
+            flow_cluster_fill: Cow::Borrowed("#2A2A3C"),
+            flow_cluster_stroke: Cow::Borrowed("#9A9ABF"),
             pie_palette: &PALETTE_DARK,
-            font_family: "sans-serif",
+            font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
+            responsive: true,
         }
     }
 
     pub const fn forest() -> Self {
         Self {
-            fg: "#1E3A1E",
-            fg_muted: "#5A7A5A",
-            bg: "#F0F8F0",
-            actor_fill: "#CDE7CD",
-            actor_stroke: "#4E8A4E",
-            lifeline: "#7BAA7B",
-            arrow_stroke: "#1E3A1E",
-            note_fill: "#E8F0C8",
-            note_stroke: "#4E8A4E",
-            activation_fill: "#CDE7CD",
-            activation_stroke: "#4E8A4E",
-            frame_label_fill: "#E4F0E4",
-            flow_node_fill: "#CDE7CD",
-            flow_node_stroke: "#4E8A4E",
-            flow_edge_stroke: "#1E3A1E",
-            flow_label_bg: "#F0F8F0",
-            flow_cluster_fill: "#E4F0E4",
-            flow_cluster_stroke: "#4E8A4E",
+            fg: Cow::Borrowed("#1E3A1E"),
+            fg_muted: Cow::Borrowed("#5A7A5A"),
+            bg: Cow::Borrowed("#F0F8F0"),
+            actor_fill: Cow::Borrowed("#CDE7CD"),
+            actor_stroke: Cow::Borrowed("#4E8A4E"),
+            lifeline: Cow::Borrowed("#7BAA7B"),
+            arrow_stroke: Cow::Borrowed("#1E3A1E"),
+            note_fill: Cow::Borrowed("#E8F0C8"),
+            note_stroke: Cow::Borrowed("#4E8A4E"),
+            activation_fill: Cow::Borrowed("#CDE7CD"),
+            activation_stroke: Cow::Borrowed("#4E8A4E"),
+            frame_label_fill: Cow::Borrowed("#E4F0E4"),
+            flow_node_fill: Cow::Borrowed("#CDE7CD"),
+            flow_node_stroke: Cow::Borrowed("#4E8A4E"),
+            flow_edge_stroke: Cow::Borrowed("#1E3A1E"),
+            flow_label_bg: Cow::Borrowed("#F0F8F0"),
+            flow_cluster_fill: Cow::Borrowed("#E4F0E4"),
+            flow_cluster_stroke: Cow::Borrowed("#4E8A4E"),
             pie_palette: &PALETTE_FOREST,
-            font_family: "sans-serif",
+            font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
+            responsive: true,
         }
     }
 
     pub const fn neutral() -> Self {
         Self {
-            fg: "#222",
-            fg_muted: "#777",
-            bg: "#fff",
-            actor_fill: "#EEE",
-            actor_stroke: "#777",
-            lifeline: "#BBB",
-            arrow_stroke: "#222",
-            note_fill: "#F0F0D8",
-            note_stroke: "#AAAAAA",
-            activation_fill: "#EEE",
-            activation_stroke: "#777",
-            frame_label_fill: "#F4F4F4",
-            flow_node_fill: "#EEE",
-            flow_node_stroke: "#777",
-            flow_edge_stroke: "#222",
-            flow_label_bg: "#fff",
-            flow_cluster_fill: "#F4F4F4",
-            flow_cluster_stroke: "#AAAAAA",
+            fg: Cow::Borrowed("#222"),
+            fg_muted: Cow::Borrowed("#777"),
+            bg: Cow::Borrowed("#fff"),
+            actor_fill: Cow::Borrowed("#EEE"),
+            actor_stroke: Cow::Borrowed("#777"),
+            lifeline: Cow::Borrowed("#BBB"),
+            arrow_stroke: Cow::Borrowed("#222"),
+            note_fill: Cow::Borrowed("#F0F0D8"),
+            note_stroke: Cow::Borrowed("#AAAAAA"),
+            activation_fill: Cow::Borrowed("#EEE"),
+            activation_stroke: Cow::Borrowed("#777"),
+            frame_label_fill: Cow::Borrowed("#F4F4F4"),
+            flow_node_fill: Cow::Borrowed("#EEE"),
+            flow_node_stroke: Cow::Borrowed("#777"),
+            flow_edge_stroke: Cow::Borrowed("#222"),
+            flow_label_bg: Cow::Borrowed("#fff"),
+            flow_cluster_fill: Cow::Borrowed("#F4F4F4"),
+            flow_cluster_stroke: Cow::Borrowed("#AAAAAA"),
             pie_palette: &PALETTE_NEUTRAL,
-            font_family: "sans-serif",
+            font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
+            responsive: true,
         }
     }
 
@@ -159,8 +181,8 @@ impl Theme {
     }
 
     /// Override the root `font-family` (e.g. `"Inter, sans-serif"`).
-    pub const fn with_font(mut self, family: &'static str) -> Self {
-        self.font_family = family;
+    pub fn with_font(mut self, family: impl Into<Str>) -> Self {
+        self.font_family = family.into();
         self
     }
 
@@ -169,6 +191,78 @@ impl Theme {
         self.font_size = size;
         self
     }
+
+    /// Recolor `self` from upstream `themeVariables` (the documented
+    /// `theme: base` customization path). `vars` maps the upstream variable
+    /// name (e.g. `primaryColor`, `lineColor`, `fontFamily`) to its value.
+    /// Each recognized variable overrides the derived diagram-specific fields;
+    /// unknown variables are ignored.
+    pub fn apply_theme_variables(&mut self, vars: &BTreeMap<String, String>) {
+        let get = |k: &str| vars.get(k).map(String::as_str);
+
+        if let Some(v) = get("primaryColor").or_else(|| get("mainBkg")) {
+            self.flow_node_fill = own(v);
+            self.actor_fill = own(v);
+            self.activation_fill = own(v);
+        }
+        if let Some(v) = get("primaryBorderColor").or_else(|| get("nodeBorder")) {
+            self.flow_node_stroke = own(v);
+            self.actor_stroke = own(v);
+            self.activation_stroke = own(v);
+        }
+        if let Some(v) = get("primaryTextColor") {
+            self.fg = own(v);
+        }
+        if let Some(v) = get("lineColor") {
+            self.arrow_stroke = own(v);
+            self.flow_edge_stroke = own(v);
+            self.lifeline = own(v);
+        }
+        if let Some(v) = get("textColor") {
+            self.fg = own(v);
+        }
+        if let Some(v) = get("secondaryColor") {
+            self.flow_cluster_fill = own(v);
+        }
+        if let Some(v) = get("tertiaryColor") {
+            self.frame_label_fill = own(v);
+        }
+        if let Some(v) = get("background").or_else(|| get("bg")) {
+            self.bg = own(v);
+        }
+        if let Some(v) = get("noteBkgColor") {
+            self.note_fill = own(v);
+        }
+        if let Some(v) = get("noteBorderColor") {
+            self.note_stroke = own(v);
+        }
+        if let Some(v) = get("clusterBkg") {
+            self.flow_cluster_fill = own(v);
+        }
+        if let Some(v) = get("clusterBorder") {
+            self.flow_cluster_stroke = own(v);
+        }
+        if let Some(v) = get("fontFamily") {
+            self.font_family = own(v);
+        }
+        if let Some(v) = get("fontSize").and_then(parse_font_size_px) {
+            self.font_size = v;
+        }
+    }
+}
+
+/// Own a `themeVariables` value into the theme's `Cow` field.
+fn own(v: &str) -> Str {
+    Cow::Owned(v.to_string())
+}
+
+/// Parse a `fontSize` value that may carry a `px` suffix (`"16px"` / `"16"`).
+fn parse_font_size_px(v: &str) -> Option<f64> {
+    let v = v.trim();
+    let num = v.strip_suffix("px").unwrap_or(v).trim();
+    num.parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && *n > 0.0)
 }
 
 impl Default for Theme {
@@ -195,3 +289,42 @@ const PALETTE_FOREST: [&str; 10] = [
 const PALETTE_NEUTRAL: [&str; 10] = [
     "#444", "#666", "#888", "#AAA", "#555", "#777", "#999", "#BBB", "#5E5E5E", "#7E7E7E",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_variables_recolor_base() {
+        let mut t = Theme::default_theme();
+        let mut vars = BTreeMap::new();
+        vars.insert("primaryColor".to_string(), "#ff0000".to_string());
+        vars.insert("lineColor".to_string(), "#00ff00".to_string());
+        vars.insert("fontFamily".to_string(), "Courier".to_string());
+        vars.insert("fontSize".to_string(), "20px".to_string());
+        t.apply_theme_variables(&vars);
+        assert_eq!(t.flow_node_fill, "#ff0000");
+        assert_eq!(t.actor_fill, "#ff0000");
+        assert_eq!(t.flow_edge_stroke, "#00ff00");
+        assert_eq!(t.arrow_stroke, "#00ff00");
+        assert_eq!(t.font_family, "Courier");
+        assert_eq!(t.font_size, 20.0);
+    }
+
+    #[test]
+    fn unknown_variables_ignored() {
+        let mut t = Theme::default_theme();
+        let mut vars = BTreeMap::new();
+        vars.insert("nonsense".to_string(), "x".to_string());
+        t.apply_theme_variables(&vars);
+        assert_eq!(t.flow_node_fill, "#ECECFF");
+    }
+
+    #[test]
+    fn font_size_rejects_garbage() {
+        assert_eq!(parse_font_size_px("16px"), Some(16.0));
+        assert_eq!(parse_font_size_px("16"), Some(16.0));
+        assert_eq!(parse_font_size_px("-4"), None);
+        assert_eq!(parse_font_size_px("big"), None);
+    }
+}

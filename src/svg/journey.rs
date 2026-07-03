@@ -23,8 +23,8 @@ const FACE_R: f64 = 14.0;
 const LEGEND_ROW: f64 = 24.0;
 
 pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let actors = collect_actors(d);
     let title_h = if d.title.is_some() { TITLE_H } else { 0.0 };
@@ -45,7 +45,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     let legend_bottom = content_top + actors.len() as f64 * LEGEND_ROW;
     let height = task_bottom.max(legend_bottom) + MARGIN;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(
@@ -148,8 +148,8 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
 /// Draw a score-driven face glyph: eyes plus a mouth that smiles (score ≥ 4),
 /// stays flat (score = 3), or frowns (score ≤ 2).
 fn draw_face(svg: &mut SvgBuilder, cx: f64, cy: f64, score: i32, theme: &Theme) {
-    let stroke = theme.fg_muted;
-    let fill = theme.bg;
+    let stroke = &theme.fg_muted;
+    let fill = &theme.bg;
 
     svg.circle(
         cx,

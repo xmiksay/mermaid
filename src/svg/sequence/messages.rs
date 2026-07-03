@@ -15,8 +15,8 @@ pub(super) fn draw_message(
     text: &str,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let arrow_stroke = theme.arrow_stroke;
+    let fg = &theme.fg;
+    let arrow_stroke = &theme.arrow_stroke;
     let (dash, start_marker, end_marker) = stroke_for(arrow);
     let dash_attr = if dash.is_empty() {
         String::new()
@@ -156,9 +156,9 @@ pub(super) fn draw_note(
     x_of: &HashMap<String, f64>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let note_fill = theme.note_fill;
-    let note_stroke = theme.note_stroke;
+    let fg = &theme.fg;
+    let note_fill = &theme.note_fill;
+    let note_stroke = &theme.note_stroke;
     let Some(g) = note_geometry(note, x_of) else {
         return;
     };
@@ -201,7 +201,7 @@ fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'sta
 }
 
 pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
-    let arrow_stroke = theme.arrow_stroke;
+    let arrow_stroke = &theme.arrow_stroke;
     let h = ARROW_HEAD;
     let filled = format!(
         "<marker id=\"arrow-filled\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
@@ -298,7 +298,7 @@ mod tests {
         );
         // Dark theme must not emit the light-yellow default note fill.
         assert!(!svg.contains("#FFF5AD"));
-        assert!(svg.contains(Theme::dark().note_fill));
+        assert!(svg.contains(Theme::dark().note_fill.as_ref()));
     }
 
     #[test]

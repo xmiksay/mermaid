@@ -28,9 +28,9 @@ const MIN_W: f64 = 110.0;
 const CANVAS_PAD: f64 = 24.0;
 
 pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     if d.classes.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(40.0, 40.0).theme(theme);
         define_markers(&mut svg, theme);
         return svg.finish();
     }
@@ -114,7 +114,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         height = ny + row_h + CANVAS_PAD;
     }
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_markers(&mut svg, theme);
 
     // Relations first.
@@ -221,7 +221,7 @@ fn note_size(text: &str, font_size: f64) -> (f64, f64) {
 }
 
 fn draw_note(svg: &mut SvgBuilder, nb: &NoteBox, theme: &Theme) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     svg.rect(
         nb.x,
         nb.y,
@@ -313,11 +313,11 @@ fn draw_class(
         open_click(svg, action);
     }
     let rs = resolve_style(class_defs, &c.classes, &c.style);
-    let fg = rs.label_fill(theme.fg);
-    let flow_node_stroke = rs.stroke_or(theme.flow_node_stroke);
+    let fg = rs.label_fill(&theme.fg);
+    let flow_node_stroke = rs.stroke_or(&theme.flow_node_stroke);
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
-    let base = rs.shape_attrs(theme.flow_node_fill, theme.flow_node_stroke, "1.5");
+    let base = rs.shape_attrs(&theme.flow_node_fill, &theme.flow_node_stroke, "1.5");
     svg.rect(x, y, w, h, &format!("{base} rx=\"2\""));
 
     let mut cursor = y;

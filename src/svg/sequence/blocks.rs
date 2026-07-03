@@ -307,7 +307,7 @@ pub(super) fn draw_block_frames(
     x_of: &HashMap<String, f64>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     let close_of = pair_blocks(events);
     // Each open records its own participant extents so branch dividers (drawn
     // before the close) and the closing frame share the same span.
@@ -364,8 +364,8 @@ fn draw_block_frame(
     y_bot: f64,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let frame_label_fill = theme.frame_label_fill;
+    let fg = &theme.fg;
+    let frame_label_fill = &theme.frame_label_fill;
     let frame_x = min_x - 16.0;
     let frame_w = (max_x + 16.0) - frame_x;
     let frame_h = y_bot - y_top;
@@ -504,7 +504,7 @@ mod tests {
             &Theme::dark(),
         );
         assert!(!svg.contains("fill=\"#EEE\""));
-        assert!(svg.contains(Theme::dark().frame_label_fill));
+        assert!(svg.contains(Theme::dark().frame_label_fill.as_ref()));
     }
 
     #[test]

@@ -33,10 +33,10 @@ struct Placed {
 }
 
 pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
-    let stroke = theme.flow_node_stroke;
-    let fill = theme.flow_node_fill;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
+    let stroke = &theme.flow_node_stroke;
+    let fill = &theme.flow_node_fill;
 
     // Collect node ids per parent group (None = top-level).
     let mut by_parent: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
@@ -211,13 +211,13 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
 
     let width = (max_x + PAD).max(300.0);
     let height = (group_y - GROUP_GAP + PAD).max(160.0);
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     svg.defs_raw(&format!(
         "<marker id=\"arch-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
          markerWidth=\"8\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
          <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{}\"/></marker>",
-        theme.flow_edge_stroke
+        &theme.flow_edge_stroke
     ));
 
     for (x, y, w, h, label) in &placed_groups {
@@ -288,7 +288,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             &polyline_path(&pts),
             &format!(
                 "fill=\"none\" stroke=\"{}\" stroke-width=\"1.5\"{dashed}{marker}{marker_start}",
-                theme.flow_edge_stroke
+                &theme.flow_edge_stroke
             ),
         );
     }

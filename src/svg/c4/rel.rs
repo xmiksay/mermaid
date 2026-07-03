@@ -17,8 +17,10 @@ pub(super) fn draw_rel(
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
-    let fg: &str = ov.and_then(|s| s.text_color.as_deref()).unwrap_or(theme.fg);
-    let fg_muted = theme.fg_muted;
+    let fg: &str = ov
+        .and_then(|s| s.text_color.as_deref())
+        .unwrap_or(&theme.fg);
+    let fg_muted = &theme.fg_muted;
     let stroke: &str = ov.and_then(|s| s.line_color.as_deref()).unwrap_or(C4_LINE);
 
     let Some(&(ax, ay, aw, ah)) = pos.get(&r.from) else {

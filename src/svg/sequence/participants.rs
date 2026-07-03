@@ -18,7 +18,7 @@ pub(super) fn draw_boxes(
     bottom: f64,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     for item in &d.items {
         let SequenceItem::Box(b) = item else { continue };
         let mut min_l = f64::INFINITY;
@@ -101,8 +101,8 @@ fn draw_activation_band(
     level: usize,
     theme: &Theme,
 ) {
-    let activation_fill = theme.activation_fill;
-    let activation_stroke = theme.activation_stroke;
+    let activation_fill = &theme.activation_fill;
+    let activation_stroke = &theme.activation_stroke;
     if let Some(&cx) = x_of.get(id) {
         let offset = level as f64 * 3.0;
         svg.rect(
@@ -119,7 +119,7 @@ fn draw_activation_band(
 
 /// Draw the `×` that terminates a destroyed participant's lifeline.
 pub(super) fn draw_destroy_cross(svg: &mut SvgBuilder, cx: f64, cy: f64, theme: &Theme) {
-    let stroke = theme.arrow_stroke;
+    let stroke = &theme.arrow_stroke;
     let r = DESTROY_CROSS;
     let attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
     svg.line(cx - r, cy - r, cx + r, cy + r, &attrs);
@@ -179,7 +179,7 @@ mod tests {
         );
         // Dark theme must not fall back to the default light activation fill.
         assert!(!svg.contains("#ECECFF"));
-        assert!(svg.contains(Theme::dark().activation_fill));
+        assert!(svg.contains(Theme::dark().activation_fill.as_ref()));
     }
 
     #[test]

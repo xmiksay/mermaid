@@ -44,6 +44,10 @@ pub type Style = Vec<(String, String)>;
 ///
 /// `title` is also copied onto the concrete diagram's own `title` field when it
 /// has one; the accessibility fields and `theme` only live here.
+///
+/// [`config`](Self::config) is the generic, flattened view of the whole
+/// `config:` tree (dotted keys, e.g. `flowchart.htmlLabels`); the typed fields
+/// below are the subset the renderer currently honors, derived from it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DiagramMeta {
     /// `title:` from YAML frontmatter (diagram title).
@@ -54,6 +58,22 @@ pub struct DiagramMeta {
     pub acc_descr: Option<String>,
     /// Theme name from `%%{init: {theme: …}}%%` or frontmatter `config.theme`.
     pub theme: Option<String>,
+    /// `config.themeVariables.*` — upstream's `theme: base` recoloring path
+    /// (`primaryColor`, `lineColor`, `fontFamily`, …), keyed by variable name.
+    pub theme_variables: std::collections::BTreeMap<String, String>,
+    /// `config.fontFamily` — CSS `font-family` for all text.
+    pub font_family: Option<String>,
+    /// `config.fontSize` — base font size in px (a `px` suffix is stripped).
+    pub font_size: Option<f64>,
+    /// `config.useMaxWidth` — `false` emits a fixed-size SVG instead of the
+    /// responsive `width="100%"` envelope.
+    pub use_max_width: Option<bool>,
+    /// `config.look` (`classic`/`handDrawn`/…) — parsed, not yet honored.
+    pub look: Option<String>,
+    /// `config.layout` (`dagre`/`elk`/…) — parsed, not yet honored.
+    pub layout: Option<String>,
+    /// `config.securityLevel` — parsed, not yet honored.
+    pub security_level: Option<String>,
     /// `config.kanban.ticketBaseUrl` from frontmatter — copied onto a
     /// [`KanbanDiagram`] to build per-card ticket links.
     pub ticket_base_url: Option<String>,
@@ -62,6 +82,10 @@ pub struct DiagramMeta {
     pub value_format: Option<String>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
+    /// The whole `config:` tree flattened to dotted `key → value` entries
+    /// (both frontmatter and `%%{init}%%`). The typed fields above are derived
+    /// from this; per-diagram renderers can read further keys as needed.
+    pub config: std::collections::BTreeMap<String, String>,
 }
 
 /// `config.gitGraph.*` keys pulled from the preamble; each is `None` when the

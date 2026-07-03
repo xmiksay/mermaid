@@ -3,9 +3,11 @@
 //! We do not depend on quick-xml: SVG output is write-only, escaping is
 //! cheap, and a string builder keeps the dependency tree small.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use super::markup::{parse_spans, Span};
+use super::theme::Theme;
 
 /// Baseline-to-baseline spacing used when a label is split across lines.
 pub const LABEL_LINE_H: f64 = 18.0;
@@ -15,8 +17,11 @@ pub struct SvgBuilder {
     pub defs: String,
     pub width: f64,
     pub height: f64,
-    pub font_family: &'static str,
+    pub font_family: Cow<'static, str>,
     pub font_size: f64,
+    /// Emit the responsive `width="100%"` + `max-width` envelope. When `false`
+    /// (`config.useMaxWidth: false`) a fixed pixel `width`/`height` is emitted.
+    pub responsive: bool,
 }
 
 impl SvgBuilder {
@@ -26,16 +31,18 @@ impl SvgBuilder {
             defs: String::new(),
             width,
             height,
-            font_family: "sans-serif",
+            font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
+            responsive: true,
         }
     }
 
-    /// Set the root `font-family`/`font-size` from a theme. Chainable so call
-    /// sites read `SvgBuilder::new(w, h).font(theme.font_family, theme.font_size)`.
-    pub fn font(mut self, family: &'static str, size: f64) -> Self {
-        self.font_family = family;
-        self.font_size = size;
+    /// Adopt the theme's font and responsiveness in one call. Chainable so call
+    /// sites read `SvgBuilder::new(w, h).theme(theme)`.
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.font_family = theme.font_family.clone();
+        self.font_size = theme.font_size;
+        self.responsive = theme.responsive;
         self
     }
 
@@ -44,14 +51,25 @@ impl SvgBuilder {
         // Responsive envelope, matching upstream Mermaid: a fluid `width="100%"`
         // capped by `max-width`, with the intrinsic size carried by `viewBox`
         // (no fixed `height`, so the aspect ratio is preserved when scaled).
+        // `config.useMaxWidth: false` instead pins a fixed pixel `width`/`height`.
+        let sizing = if self.responsive {
+            format!(
+                "width=\"100%\" viewBox=\"0 0 {w} {h}\" style=\"max-width: {w}px;\"",
+                w = fnum(self.width),
+                h = fnum(self.height),
+            )
+        } else {
+            format!(
+                "width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"",
+                w = fnum(self.width),
+                h = fnum(self.height),
+            )
+        };
         let _ = write!(
             out,
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
-             width=\"100%\" viewBox=\"0 0 {w} {h}\" style=\"max-width: {w}px;\" \
-             font-family=\"{ff}\" font-size=\"{fs}\">",
-            w = fnum(self.width),
-            h = fnum(self.height),
-            ff = escape(self.font_family),
+             {sizing} font-family=\"{ff}\" font-size=\"{fs}\">",
+            ff = escape(&self.font_family),
             fs = fnum(self.font_size),
         );
         if !self.defs.is_empty() {
@@ -426,11 +444,23 @@ mod tests {
 
     #[test]
     fn applies_custom_font() {
-        let svg = SvgBuilder::new(10.0, 10.0)
-            .font("Inter, sans-serif", 16.0)
-            .finish();
+        let theme = Theme::default_theme()
+            .with_font("Inter, sans-serif")
+            .with_font_size(16.0);
+        let svg = SvgBuilder::new(10.0, 10.0).theme(&theme).finish();
         assert!(svg.contains("font-family=\"Inter, sans-serif\""));
         assert!(svg.contains("font-size=\"16\""));
+    }
+
+    #[test]
+    fn non_responsive_emits_fixed_size() {
+        let mut b = SvgBuilder::new(120.0, 80.0);
+        b.responsive = false;
+        let svg = b.finish();
+        assert!(svg.contains("width=\"120\""));
+        assert!(svg.contains("height=\"80\""));
+        assert!(!svg.contains("max-width"));
+        assert!(!svg.contains("width=\"100%\""));
     }
 
     #[test]

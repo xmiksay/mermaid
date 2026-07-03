@@ -23,9 +23,7 @@ const KEY_CHAR_W: f64 = 8.0; // PK/FK are bold — wider per char
 
 pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     if d.entities.is_empty() {
-        return SvgBuilder::new(40.0, 40.0)
-            .font(theme.font_family, theme.font_size)
-            .finish();
+        return SvgBuilder::new(40.0, 40.0).theme(theme).finish();
     }
 
     let dir = d.direction;
@@ -86,7 +84,7 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.left), id_to_u32.get(&rel.right)) else {
@@ -154,9 +152,9 @@ fn draw_entity(
     e: &Entity,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_node_fill = theme.flow_node_fill;
-    let flow_node_stroke = theme.flow_node_stroke;
+    let fg = &theme.fg;
+    let flow_node_fill = &theme.flow_node_fill;
+    let flow_node_stroke = &theme.flow_node_stroke;
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
     svg.rect(
@@ -233,9 +231,9 @@ fn draw_relation(
     id_to_u32: &HashMap<String, NodeId>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_edge_stroke = theme.flow_edge_stroke;
-    let flow_label_bg = theme.flow_label_bg;
+    let fg = &theme.fg;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
+    let flow_label_bg = &theme.flow_label_bg;
     let src = id_to_u32[&rel.left] as usize;
     let dst = id_to_u32[&rel.right] as usize;
     let n = pts.len();
@@ -300,7 +298,7 @@ fn draw_cardinality(
     card: Cardinality,
     theme: &Theme,
 ) {
-    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
     let (ax, ay) = anchor;
     let dx = away.0 - ax;
     let dy = away.1 - ay;

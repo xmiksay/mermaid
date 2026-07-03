@@ -50,8 +50,8 @@ fn assign_col(
 }
 
 pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let main_branch = d.config.main_branch_name.as_str();
 
@@ -198,7 +198,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     };
     let width = PAD * 2.0 + chart_w + 80.0;
     let height = PAD * 2.0 + title_h + chart_h;
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

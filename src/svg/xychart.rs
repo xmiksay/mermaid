@@ -15,8 +15,8 @@ const CHART_W: f64 = 600.0;
 const CHART_H: f64 = 320.0;
 
 pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
 
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let width = PAD * 2.0 + AXIS_LEFT + CHART_W + 20.0;
@@ -26,7 +26,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     let chart_bottom = chart_top + CHART_H;
     let chart_right = chart_left + CHART_W;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     if let Some(t) = &d.title {
         svg.text(

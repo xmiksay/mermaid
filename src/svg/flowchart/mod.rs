@@ -30,7 +30,7 @@ const TITLE_BAND: f64 = 34.0;
 
 pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     if d.nodes.is_empty() {
-        let mut svg = SvgBuilder::new(40.0, 40.0).font(theme.font_family, theme.font_size);
+        let mut svg = SvgBuilder::new(40.0, 40.0).theme(theme);
         define_markers(&mut svg, theme);
         return svg.finish();
     }
@@ -127,11 +127,11 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         width = width.max(title_w);
     }
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_markers(&mut svg, theme);
 
     if let Some(t) = &d.title {
-        let fg = theme.fg;
+        let fg = &theme.fg;
         svg.text(
             width / 2.0,
             CANVAS_PAD + 6.0,

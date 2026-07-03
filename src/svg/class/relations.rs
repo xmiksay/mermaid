@@ -19,9 +19,9 @@ pub(super) fn draw_relation(
     id_to_u32: &HashMap<String, NodeId>,
     theme: &Theme,
 ) {
-    let fg = theme.fg;
-    let flow_edge_stroke = theme.flow_edge_stroke;
-    let flow_label_bg = theme.flow_label_bg;
+    let fg = &theme.fg;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
+    let flow_label_bg = &theme.flow_label_bg;
     let src = id_to_u32[&rel.from] as usize;
     let dst = id_to_u32[&rel.to] as usize;
     let n = pts.len();
@@ -95,7 +95,7 @@ pub(super) fn draw_relation(
 /// Draw a small multiplicity label near an edge endpoint. `end` is the point on
 /// the node boundary; `toward` is the next waypoint, giving the edge direction.
 fn draw_card(svg: &mut SvgBuilder, end: (f64, f64), toward: (f64, f64), text: &str, theme: &Theme) {
-    let fg = theme.fg;
+    let fg = &theme.fg;
     let dx = toward.0 - end.0;
     let dy = toward.1 - end.1;
     let len = (dx * dx + dy * dy).sqrt().max(1e-6);
@@ -141,7 +141,7 @@ fn style_for(
 }
 
 pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
-    let flow_edge_stroke = theme.flow_edge_stroke;
+    let flow_edge_stroke = &theme.flow_edge_stroke;
     // Triangle (hollow) for inheritance/realization — drawn at the parent end
     let triangle = format!(
         "<marker id=\"cls-triangle\" viewBox=\"0 0 12 12\" refX=\"11\" refY=\"6\" \

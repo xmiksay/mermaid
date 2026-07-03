@@ -153,6 +153,34 @@ fn frontmatter_no_longer_errors_and_sets_title() {
 }
 
 #[test]
+fn config_theme_variables_recolor_and_set_font() {
+    // `theme: base` + `themeVariables` is upstream's primary recoloring path.
+    let src = "---\nconfig:\n  theme: base\n  themeVariables:\n    primaryColor: \"#ffcc00\"\n    lineColor: \"#cc0000\"\n    fontFamily: \"Courier New\"\n---\nflowchart TD\nA --> B\n";
+    let svg = render(src).unwrap();
+    assert!(
+        svg.contains("fill=\"#ffcc00\""),
+        "node fill from primaryColor"
+    );
+    assert!(svg.contains("stroke=\"#cc0000\""), "edge from lineColor");
+    assert!(svg.contains("font-family=\"Courier New\""));
+}
+
+#[test]
+fn config_use_max_width_false_pins_fixed_size() {
+    let responsive = render("flowchart TD\nA --> B\n").unwrap();
+    assert!(responsive.contains("width=\"100%\""));
+
+    let src = "---\nconfig:\n  useMaxWidth: false\n---\nflowchart TD\nA --> B\n";
+    let fixed = render(src).unwrap();
+    assert!(!fixed.contains("width=\"100%\""));
+    assert!(!fixed.contains("max-width"));
+    assert!(
+        fixed.contains("height=\""),
+        "fixed mode emits a pixel height"
+    );
+}
+
+#[test]
 fn acc_title_and_descr_emit_title_desc_and_aria() {
     let src = "flowchart TD\naccTitle: Accessible Title\naccDescr: A short description\nA --> B\n";
     let svg = render(src).unwrap();

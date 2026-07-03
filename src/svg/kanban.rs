@@ -13,17 +13,17 @@ const CARD_H: f64 = 60.0;
 const CARD_GAP: f64 = 10.0;
 
 pub(crate) fn render(d: &KanbanDiagram, theme: &Theme) -> String {
-    let fg = theme.fg;
-    let fg_muted = theme.fg_muted;
-    let stroke = theme.flow_node_stroke;
-    let fill = theme.flow_node_fill;
+    let fg = &theme.fg;
+    let fg_muted = &theme.fg_muted;
+    let stroke: &str = &theme.flow_node_stroke;
+    let fill = &theme.flow_node_fill;
 
     let cols = d.columns.len().max(1);
     let max_tasks = d.columns.iter().map(|c| c.tasks.len()).max().unwrap_or(0);
     let width = PAD * 2.0 + cols as f64 * COL_W + (cols.saturating_sub(1) as f64) * COL_GAP;
     let height = PAD * 2.0 + HEAD_H + max_tasks.max(1) as f64 * (CARD_H + CARD_GAP) + 30.0;
 
-    let mut svg = SvgBuilder::new(width, height).font(theme.font_family, theme.font_size);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     for (i, col) in d.columns.iter().enumerate() {
         let x = PAD + i as f64 * (COL_W + COL_GAP);
