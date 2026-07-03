@@ -171,6 +171,11 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let Diagram::GitGraph(g) = &mut diagram {
         apply_git_graph_config(&mut g.config, &meta.git_graph);
     }
+    if let Diagram::Flowchart(f) = &mut diagram {
+        if let Some(curve) = meta.config.get("flowchart.curve") {
+            f.config_curve = Some(ast::EdgeCurve::from_name(curve));
+        }
+    }
     if let Diagram::Packet(p) = &mut diagram {
         apply_packet_config(&mut p.config, &meta.config);
     }
@@ -476,6 +481,16 @@ mod tests {
             panic!("expected packet diagram")
         };
         assert_eq!(p.config, ast::PacketConfig::default());
+    }
+
+    #[test]
+    fn flowchart_config_curve_reaches_diagram() {
+        let src = "%%{init: {\"flowchart\": {\"curve\": \"linear\"}}}%%\nflowchart TD\nA --> B\n";
+        let (d, _) = parse_with_meta(src).unwrap();
+        let Diagram::Flowchart(f) = d else {
+            panic!("expected flowchart diagram")
+        };
+        assert_eq!(f.config_curve, Some(ast::EdgeCurve::Linear));
     }
 
     #[test]

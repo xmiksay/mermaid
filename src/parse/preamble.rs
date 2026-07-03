@@ -35,15 +35,20 @@ pub fn strip(input: &str) -> (DiagramMeta, String) {
         let line = lines[i];
         let trimmed = line.trim();
 
-        if let Some(inner) = init_inner(trimmed) {
-            // A `%%{init}%%` directive line: fold its config object into the
-            // flattened map (first occurrence / frontmatter wins) and drop the
-            // line so the per-diagram scanner never sees it.
-            for (k, v) in parse_init_object(inner) {
-                meta.config.entry(k).or_insert(v);
+        if trimmed.starts_with("%%{") {
+            // A `%%{init}%%` directive, possibly wrapping across lines (upstream's
+            // directiveRegex spans newlines). Fold its config object into the
+            // flattened map — a directive overrides frontmatter and the last init
+            // wins (upstream cleanAndMerge / assignWithDepth), so plain `insert`
+            // (last write wins) — and drop the whole directive so the per-diagram
+            // scanner never sees it.
+            if let Some((inner, next)) = collect_init(&lines, i) {
+                for (k, v) in parse_init_object(&inner) {
+                    meta.config.insert(k, v);
+                }
+                i = next;
+                continue;
             }
-            i += 1;
-            continue;
         }
 
         if let Some(rest) = strip_prefix_ci(trimmed, "accTitle:") {
@@ -181,6 +186,26 @@ fn collect_descr_block(lines: &[&str], i: usize, first: &str, meta: &mut Diagram
     j
 }
 
+/// Collect a possibly multi-line `%%{init: … }%%` directive starting at line
+/// `i` (whose trimmed text opens with `%%{`). Upstream's directive regex spans
+/// newlines, so a pretty-printed init object may wrap across several lines.
+/// Returns the joined inner fragment and the index just past the closing `}%%`.
+fn collect_init(lines: &[&str], i: usize) -> Option<(String, usize)> {
+    let mut joined = String::new();
+    let mut j = i;
+    while j < lines.len() {
+        if !joined.is_empty() {
+            joined.push('\n');
+        }
+        joined.push_str(lines[j]);
+        j += 1;
+        if joined.contains("}%%") {
+            return Some((init_inner(joined.trim())?.to_string(), j));
+        }
+    }
+    None
+}
+
 /// If `line` is a `%%{init: … }%%` directive, return its inner fragment.
 fn init_inner(line: &str) -> Option<&str> {
     let inner = line.strip_prefix("%%{")?;
@@ -293,7 +318,10 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.theme = get("theme");
     meta.font_family = get("fontFamily");
     meta.font_size = get("fontSize").as_deref().and_then(parse_font_size);
-    meta.use_max_width = get("useMaxWidth").as_deref().and_then(parse_flag);
+    meta.use_max_width = get("useMaxWidth")
+        .or_else(|| per_diagram_use_max_width(&meta.config))
+        .as_deref()
+        .and_then(parse_flag);
     meta.look = get("look");
     meta.layout = get("layout");
     meta.security_level = get("securityLevel");
@@ -353,6 +381,21 @@ fn derive_typed_fields(meta: &mut DiagramMeta) {
         .config
         .get("gitGraph.mainBranchOrder")
         .and_then(|v| v.trim().parse().ok());
+}
+
+/// Find a per-diagram `<diagram>.useMaxWidth` value. Upstream's schema defines
+/// `useMaxWidth` only per diagram (`flowchart.useMaxWidth`, `sequence.useMaxWidth`,
+/// …), never at the top level; a static render targets a single diagram, so the
+/// first such key applies.
+fn per_diagram_use_max_width(
+    config: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    config
+        .iter()
+        .find(|(k, _)| {
+            k.ends_with(".useMaxWidth") && !k[..k.len() - ".useMaxWidth".len()].contains('.')
+        })
+        .map(|(_, v)| v.clone())
 }
 
 /// Parse a `fontSize` value that may carry a `px` suffix (`"16px"` / `"16"`).
@@ -561,6 +604,38 @@ mod tests {
             m.ticket_base_url.as_deref(),
             Some("https://example.com/#TICKET#")
         );
+    }
+
+    #[test]
+    fn multiline_init_directive() {
+        let src = "%%{init: {\n  \"theme\": \"dark\",\n  \"flowchart\": { \"useMaxWidth\": false }\n}}%%\nflowchart TD\nA --> B\n";
+        let (m, s) = strip(src);
+        assert_eq!(m.theme.as_deref(), Some("dark"));
+        assert_eq!(m.use_max_width, Some(false));
+        // The continuation lines must be stripped, not leaked into dispatch.
+        assert_eq!(s, "flowchart TD\nA --> B");
+    }
+
+    #[test]
+    fn per_diagram_use_max_width() {
+        let (m, _) =
+            strip("%%{init: {\"flowchart\": {\"useMaxWidth\": false}}}%%\nflowchart TD\nA --> B\n");
+        assert_eq!(m.use_max_width, Some(false));
+        assert_eq!(
+            config_of("---\nconfig:\n  sequence:\n    useMaxWidth: false\n---\nsequenceDiagram\nA->>B: hi\n")
+                .get("sequence.useMaxWidth")
+                .map(String::as_str),
+            Some("false")
+        );
+    }
+
+    #[test]
+    fn directive_overrides_frontmatter_and_last_init_wins() {
+        // Frontmatter sets the theme; a later init directive overrides it, and
+        // among multiple inits the last one wins.
+        let src = "---\nconfig:\n  theme: forest\n---\n%%{init: {'theme': 'dark'}}%%\n%%{init: {'theme': 'neutral'}}%%\nflowchart TD\nA --> B\n";
+        let (m, _) = strip(src);
+        assert_eq!(m.theme.as_deref(), Some("neutral"));
     }
 
     #[test]
