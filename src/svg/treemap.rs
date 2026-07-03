@@ -1,9 +1,13 @@
 //! Treemap renderer. Simple slice-and-dice layout (alternating direction by
 //! depth). Produces nested rectangles sized by value.
 
+use std::collections::HashMap;
+
+use crate::parse::ast::Style;
 use crate::parse::{TreemapDiagram, TreemapNode};
 
 use super::builder::SvgBuilder;
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const PAD: f64 = 24.0;
@@ -30,7 +34,17 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
 
     let x0 = PAD;
     let y0 = PAD + title_h;
-    layout(&d.root, x0, y0, CHART_W, CHART_H, 0, &mut svg, theme);
+    layout(
+        &d.root,
+        x0,
+        y0,
+        CHART_W,
+        CHART_H,
+        0,
+        &mut svg,
+        theme,
+        &d.class_defs,
+    );
 
     svg.finish()
 }
@@ -57,6 +71,7 @@ fn layout(
     depth: usize,
     svg: &mut SvgBuilder,
     theme: &Theme,
+    class_defs: &HashMap<String, Style>,
 ) {
     if nodes.is_empty() || w <= 2.0 || h <= 2.0 {
         return;
@@ -77,14 +92,21 @@ fn layout(
             offset += nh;
             r
         };
-        let color = theme.pie_color(i + depth);
+        // A `:::class` reference overrides the palette fill/stroke.
+        let classes: Vec<String> = n.class_name.iter().cloned().collect();
+        let rs = resolve_style(class_defs, &classes, &Style::new());
+        let color = rs
+            .fill
+            .clone()
+            .unwrap_or_else(|| theme.pie_color(i + depth).to_string());
+        let stroke = rs.stroke.as_deref().unwrap_or("#fff");
         svg.rect(
             nx,
             ny,
             nw,
             nh,
             &format!(
-                "fill=\"{color}\" fill-opacity=\"{op}\" stroke=\"#fff\" stroke-width=\"1.5\"",
+                "fill=\"{color}\" fill-opacity=\"{op}\" stroke=\"{stroke}\" stroke-width=\"1.5\"",
                 op = if n.children.is_empty() {
                     "0.85"
                 } else {
@@ -129,6 +151,7 @@ fn layout(
                 depth + 1,
                 svg,
                 theme,
+                class_defs,
             );
         }
     }
@@ -150,18 +173,48 @@ mod tests {
                         label: "A1".into(),
                         value: Some(3.0),
                         children: vec![],
+                        class_name: None,
                     },
                     TreemapNode {
                         label: "A2".into(),
                         value: Some(7.0),
                         children: vec![],
+                        class_name: None,
                     },
                 ],
+                class_name: None,
             }],
+            class_defs: HashMap::new(),
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Tree<"));
         assert!(svg.contains(">A1<"));
+    }
+
+    #[test]
+    fn class_fill_overrides_palette() {
+        let mut class_defs = HashMap::new();
+        class_defs.insert(
+            "hot".to_string(),
+            vec![("fill".to_string(), "#ff0000".to_string())],
+        );
+        let d = TreemapDiagram {
+            title: None,
+            root: vec![TreemapNode {
+                label: "A".into(),
+                value: Some(5.0),
+                children: vec![],
+                class_name: Some("hot".into()),
+            }],
+            class_defs,
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(
+            svg.contains("fill=\"#ff0000\""),
+            "class fill not applied: {svg}"
+        );
+        // The `:::hot` reference must not leak into the rendered label text.
+        assert!(!svg.contains(":::"));
     }
 }

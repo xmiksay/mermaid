@@ -13,7 +13,7 @@
 //! ```
 
 use super::ast::{XyAxis, XyAxisKind, XyChartDiagram, XySeries, XySeriesKind};
-use super::token::unquote;
+use super::token::{split_unquoted, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
@@ -47,14 +47,18 @@ pub(crate) fn parse(input: &str) -> Result<XyChartDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix("y-axis") {
             d.y_axis = Some(parse_axis(rest, line_no)?);
         } else if let Some(rest) = line.strip_prefix("bar") {
+            let (title, values) = parse_series(rest, line_no)?;
             d.series.push(XySeries {
                 kind: XySeriesKind::Bar,
-                values: parse_value_list(rest, line_no)?,
+                title,
+                values,
             });
         } else if let Some(rest) = line.strip_prefix("line") {
+            let (title, values) = parse_series(rest, line_no)?;
             d.series.push(XySeries {
                 kind: XySeriesKind::Line,
-                values: parse_value_list(rest, line_no)?,
+                title,
+                values,
             });
         } else {
             return Err(ParseError::Syntax {
@@ -94,8 +98,9 @@ fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
         XyAxisKind::Range { min, max }
     } else if body.starts_with('[') {
         let inner = body.trim_start_matches('[').trim_end_matches(']');
-        let cats: Vec<String> = inner
-            .split(',')
+        // Quote-aware so a category containing a comma (`"a,b"`) stays one cell.
+        let cats: Vec<String> = split_unquoted(inner, ',')
+            .iter()
             .map(|s| unquote(s.trim()).to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -109,6 +114,22 @@ fn parse_axis(rest: &str, line_no: usize) -> Result<XyAxis, ParseError> {
         });
     };
     Ok(XyAxis { title, kind })
+}
+
+/// Parse a `bar`/`line` body: an optional quoted series title followed by the
+/// `[..]` value list — `bar "Revenue" [10, 20]` or `line [1, 2]`.
+fn parse_series(rest: &str, line_no: usize) -> Result<(Option<String>, Vec<f64>), ParseError> {
+    let rest = rest.trim();
+    let (title, list) = if let Some(after) = rest.strip_prefix('"') {
+        let end = after.find('"').ok_or_else(|| ParseError::Syntax {
+            message: "unterminated string in series title".into(),
+            line: line_no,
+        })?;
+        (Some(after[..end].to_string()), after[end + 1..].trim())
+    } else {
+        (None, rest)
+    };
+    Ok((title, parse_value_list(list, line_no)?))
 }
 
 fn parse_value_list(rest: &str, line_no: usize) -> Result<Vec<f64>, ParseError> {
@@ -144,6 +165,31 @@ mod tests {
         }
         assert_eq!(d.series.len(), 2);
         assert_eq!(d.series[0].values, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn parses_quoted_series_title() {
+        let d =
+            parse("xychart-beta\nbar \"Revenue\" [10, 20, 30]\nline \"Trend\" [5, 15]\n").unwrap();
+        assert_eq!(d.series.len(), 2);
+        assert_eq!(d.series[0].title.as_deref(), Some("Revenue"));
+        assert_eq!(d.series[0].values, vec![10.0, 20.0, 30.0]);
+        assert_eq!(d.series[1].title.as_deref(), Some("Trend"));
+        assert_eq!(d.series[1].kind, XySeriesKind::Line);
+    }
+
+    #[test]
+    fn category_with_quoted_comma_stays_one_cell() {
+        let d = parse("xychart-beta\nx-axis [jan, \"a, b\", mar]\nbar [1, 2, 3]\n").unwrap();
+        match &d.x_axis.as_ref().unwrap().kind {
+            XyAxisKind::Categories(c) => {
+                assert_eq!(
+                    c,
+                    &vec!["jan".to_string(), "a, b".to_string(), "mar".to_string()]
+                );
+            }
+            _ => panic!(),
+        }
     }
 
     #[test]

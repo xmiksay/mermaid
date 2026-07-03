@@ -166,11 +166,14 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         } else {
             "start"
         };
+        // Upstream shows the node throughput after the name (`showValues`,
+        // on by default): `Name\n42`.
+        let label = format!("{id}\n{}", fnum(through(id)));
         svg.text(
             label_x,
             y + h / 2.0 + 4.0,
             &format!("text-anchor=\"{anchor}\" fill=\"{fg}\" font-size=\"12\""),
-            id,
+            &label,
         );
     }
 
