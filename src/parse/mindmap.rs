@@ -4,12 +4,14 @@
 //! an icon to the most-recent node at that indent level.
 
 use super::ast::{MindmapDiagram, MindmapNode, MindmapShape};
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
     let mut header_seen = false;
     let mut stack: Vec<(usize, MindmapNode)> = Vec::new();
     let mut root: Option<MindmapNode> = None;
+    let mut diag = MindmapDiagram::default();
 
     for (idx, raw) in input.lines().enumerate() {
         let line_no = idx + 1;
@@ -34,6 +36,21 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
             .count();
         let body = content.trim();
         if body.is_empty() {
+            continue;
+        }
+
+        // `classDef <name>[,<name2>] <props>` — style classes referenced by a
+        // node's `:::class` attachment (shared with the flowchart path).
+        if let Some(rest) = body.strip_prefix("classDef ") {
+            if let Some((names, props)) = rest.trim().split_once(char::is_whitespace) {
+                let style = parse_style_props(props);
+                for name in names.split(',') {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        diag.class_defs.insert(name.to_string(), style.clone());
+                    }
+                }
+            }
             continue;
         }
 
@@ -96,7 +113,8 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
     if !header_seen {
         return Err(ParseError::Empty);
     }
-    Ok(MindmapDiagram { root })
+    diag.root = root;
+    Ok(diag)
 }
 
 fn parse_node(body: &str) -> MindmapNode {
@@ -166,6 +184,22 @@ mod tests {
         let d = parse("mindmap\nroot\n  A\n  ::icon(fa fa-book)\n").unwrap();
         let r = d.root.unwrap();
         assert_eq!(r.children[0].icon.as_deref(), Some("fa fa-book"));
+    }
+
+    #[test]
+    fn classdef_collected() {
+        let d = parse(
+            "mindmap\nroot(Root)\n  A[Node]\n  :::urgent\nclassDef urgent fill:#f00,color:#fff\n",
+        )
+        .unwrap();
+        assert!(d.class_defs.contains_key("urgent"));
+        assert_eq!(
+            d.class_defs["urgent"],
+            vec![
+                ("fill".to_string(), "#f00".to_string()),
+                ("color".to_string(), "#fff".to_string()),
+            ]
+        );
     }
 
     #[test]

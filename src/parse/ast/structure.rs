@@ -9,6 +9,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MindmapDiagram {
     pub root: Option<MindmapNode>,
+    /// `classDef <name> <props>` style classes, referenced by node `:::` classes.
+    pub class_defs: HashMap<String, Style>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

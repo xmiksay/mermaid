@@ -260,6 +260,19 @@ fn color_prop_sets_label_fill() {
     assert!(svg.contains("fill=\"#fff\""));
 }
 
+#[test]
+fn font_weight_style_and_opacity_pass_through() {
+    let svg = render(
+        &parse_flow(
+            "flowchart TD\nA --> B\nstyle A font-weight:bold,font-style:italic,opacity:0.5\n",
+        ),
+        &Theme::default(),
+    );
+    assert!(svg.contains("font-weight=\"bold\""));
+    assert!(svg.contains("font-style=\"italic\""));
+    assert!(svg.contains("opacity=\"0.5\""));
+}
+
 /// True if any `<path d="…">` value contains a cubic-bezier `C` command.
 fn any_bezier_path(svg: &str) -> bool {
     svg.split("d=\"").skip(1).any(|seg| {

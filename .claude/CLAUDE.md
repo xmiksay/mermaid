@@ -499,6 +499,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   relation already materialized the entity.
 - ER `direction TB/BT/LR/RL` fills `ErDiagram.direction`; the renderer drives
   the same size-swap/transpose the flowchart and class renderers use.
+- ER styling: `classDef <name> <props>` fills `ErDiagram.class_defs`, `class
+  <ids> <name>` fills `Entity.classes`, and `style <id> <props>` fills
+  `Entity.style` (`entity_index` materializes a placeholder for a
+  forward-referenced id, like the flowchart). The renderer resolves them
+  through the shared `resolve_style` — the entity box fill/stroke, header text
+  color, and separator/attribute stroke follow the class; unstyled entities
+  stay byte-identical to the theme defaults.
 - Gantt dates are **exact civil day-counts from the Unix epoch**
   (`src/svg/gantt_date.rs`: `days_from_civil`/`civil_from_days`/`weekday`, the
   Hinnant algorithms) — no more `365.25`-day drift. `parse_date` honors the
@@ -682,7 +689,10 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   centre and flags them `dir = -1`), so the map fans out on both sides instead of
   only rightward. `draw_edges` picks the parent's right or left edge by the
   child's `dir`; `bounds` frames both halves (plus icon glyphs) into positive
-  space.
+  space. A top-level `classDef <name> <props>` line fills
+  `MindmapDiagram.class_defs`; `draw_nodes` resolves each node's `:::` classes
+  through the shared `resolve_style`, overriding the node fill/stroke and label
+  color (unstyled nodes stay byte-identical).
 - zenuml (`src/parse/zenuml/`: `mod.rs` header/tokenize/dispatch + declarations,
   `message.rs` calls/returns/assignment, `blocks.rs` if/try chains) is a
   **brace-structured** translation to a

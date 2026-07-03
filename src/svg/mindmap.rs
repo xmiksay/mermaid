@@ -2,10 +2,14 @@
 
 use std::fmt::Write as _;
 
+use std::collections::HashMap;
+
+use crate::parse::ast::Style;
 use crate::parse::{MindmapDiagram, MindmapNode, MindmapShape};
 
 use super::builder::{fnum, SvgBuilder};
 use super::metrics::text_width;
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const NODE_PAD_X: f64 = 12.0;
@@ -86,7 +90,7 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     draw_edges(&laid, &mut svg, theme);
-    draw_nodes(&laid, &mut svg, theme, 0);
+    draw_nodes(&laid, &mut svg, theme, &d.class_defs, 0);
 
     svg.finish()
 }
@@ -205,11 +209,24 @@ fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
     }
 }
 
-fn draw_nodes(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme, depth: usize) {
-    let fg = &theme.fg;
-    let fill = &theme.flow_node_fill;
-    let stroke = &theme.flow_node_stroke;
+fn draw_nodes(
+    laid: &Laid,
+    svg: &mut SvgBuilder,
+    theme: &Theme,
+    class_defs: &HashMap<String, Style>,
+    depth: usize,
+) {
     let n = &laid.node;
+    let rs = resolve_style(class_defs, &n.classes, &Style::new());
+    let fg = rs.label_fill(&theme.fg).to_string();
+    let fg = fg.as_str();
+    let fill = rs
+        .fill
+        .clone()
+        .unwrap_or_else(|| theme.flow_node_fill.to_string());
+    let fill = fill.as_str();
+    let stroke = rs.stroke_or(&theme.flow_node_stroke).to_string();
+    let stroke = stroke.as_str();
     let cx = laid.x + laid.w / 2.0;
     let cy = laid.y;
     let half_w = laid.w / 2.0;
@@ -292,7 +309,10 @@ fn draw_nodes(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme, depth: usize) {
     svg.text(
         cx,
         cy + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\""),
+        &format!(
+            "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\"{}",
+            rs.text_attrs()
+        ),
         &n.text,
     );
 
@@ -304,7 +324,7 @@ fn draw_nodes(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme, depth: usize) {
     }
 
     for c in &laid.children {
-        draw_nodes(c, svg, theme, depth + 1);
+        draw_nodes(c, svg, theme, class_defs, depth + 1);
     }
 }
 
@@ -375,6 +395,7 @@ mod tests {
     #[test]
     fn produces_svg() {
         let d = MindmapDiagram {
+            class_defs: Default::default(),
             root: Some(MindmapNode {
                 text: "root".into(),
                 shape: MindmapShape::Circle,
@@ -408,6 +429,7 @@ mod tests {
             children: vec![],
         };
         let d = MindmapDiagram {
+            class_defs: Default::default(),
             root: Some(MindmapNode {
                 text: "root".into(),
                 shape: MindmapShape::Circle,
@@ -432,6 +454,22 @@ mod tests {
         // Both labels still make it into the rendered document.
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(">Right<") && svg.contains(">Left<"));
+    }
+
+    #[test]
+    fn classdef_recolors_node() {
+        use crate::parse::parse;
+        let d = match parse(
+            "mindmap\nroot(Root)\n  A[Node]\n  :::hot\nclassDef hot fill:#abc123,color:#ffffff\n",
+        )
+        .unwrap()
+        {
+            crate::parse::Diagram::Mindmap(m) => m,
+            _ => panic!("not mindmap"),
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#abc123\""));
+        assert!(svg.contains("fill=\"#ffffff\""));
     }
 
     #[test]

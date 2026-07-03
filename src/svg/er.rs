@@ -9,6 +9,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 use super::builder::{curve_basis_path, SvgBuilder};
 use super::geometry::{clip_rect, polyline_midpoint};
 use super::metrics::text_width;
+use super::style::resolve_style;
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -102,7 +103,7 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 
     for (i, e) in d.entities.iter().enumerate() {
         let center = transform(layout.node_pos[&(i as NodeId)]);
-        draw_entity(&mut svg, center, sizes[i], e, theme);
+        draw_entity(&mut svg, center, sizes[i], e, &d.class_defs, theme);
     }
 
     svg.finish()
@@ -150,28 +151,28 @@ fn draw_entity(
     (cx, cy): (f64, f64),
     (w, h): (f64, f64),
     e: &Entity,
+    class_defs: &HashMap<String, crate::parse::ast::Style>,
     theme: &Theme,
 ) {
-    let fg = &theme.fg;
-    let flow_node_fill = &theme.flow_node_fill;
+    let rs = resolve_style(class_defs, &e.classes, &e.style);
     let flow_node_stroke = &theme.flow_node_stroke;
+    let fg = rs.label_fill(&theme.fg).to_string();
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
-    svg.rect(
-        x,
-        y,
-        w,
-        h,
-        &format!(
-            "fill=\"{flow_node_fill}\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\" rx=\"2\""
-        ),
-    );
+    let mut box_attrs = rs.shape_attrs(&theme.flow_node_fill, flow_node_stroke, "1.5");
+    box_attrs.push_str(" rx=\"2\"");
+    svg.rect(x, y, w, h, &box_attrs);
     svg.text(
         cx,
         y + 19.0,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\""),
+        &format!(
+            "text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\"{}",
+            rs.text_attrs()
+        ),
         &e.label,
     );
+    let stroke_col = rs.stroke_or(flow_node_stroke).to_string();
+    let flow_node_stroke = stroke_col.as_str();
     if !e.attributes.is_empty() {
         svg.line(
             x,
@@ -440,5 +441,25 @@ mod tests {
         let d = build("erDiagram\np[Person] {\nstring name\n}\n");
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(">Person<"));
+    }
+
+    #[test]
+    fn classdef_recolors_entity() {
+        let d = build(
+            "erDiagram\nCUSTOMER ||--o{ ORDER : places\nclassDef hot fill:#ff0000,stroke:#990000\nclass CUSTOMER hot\n",
+        );
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#ff0000\""));
+        assert!(svg.contains("stroke=\"#990000\""));
+    }
+
+    #[test]
+    fn unstyled_entity_uses_theme() {
+        // Without any classDef the entity box uses the theme fill (regression:
+        // the styling path must stay byte-compatible for unstyled diagrams).
+        let d = build("erDiagram\nA ||--|| B : x\n");
+        let svg = render(&d, &Theme::default());
+        let theme = Theme::default();
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.flow_node_fill)));
     }
 }

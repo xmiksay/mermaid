@@ -245,7 +245,7 @@ pub(super) fn draw_node(
     }
     let fg = rs.label_fill(&theme.fg);
     let font = rs.font_size.as_deref();
-    draw_label(svg, (cx, cy), &node.text, fg, font);
+    draw_label(svg, (cx, cy), &node.text, fg, font, &rs.text_attrs());
     if let Some(action) = &node.click {
         close_click(svg, action);
     }
@@ -257,6 +257,7 @@ fn draw_label(
     text: &str,
     fg: &str,
     font_size: Option<&str>,
+    extra: &str,
 ) {
     let lines = split_label_lines(text);
     let n = lines.len() as f64;
@@ -270,7 +271,7 @@ fn draw_label(
         svg.text(
             cx,
             y0 + i as f64 * line_h,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\"{fs}"),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\"{fs}{extra}"),
             line,
         );
     }

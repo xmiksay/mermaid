@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 
 use super::ast::{Cardinality, Entity, EntityAttribute, ErDiagram, ErRelation, FlowDirection};
+use super::style::parse_style_props;
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
@@ -65,6 +66,53 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
                     })
                 }
             };
+            continue;
+        }
+
+        // Styling directives (upstream `erDiagram` grammar): `classDef`,
+        // `class`, `style` — shared with the flowchart's resolve_style path.
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            let (names, props) = rest
+                .trim()
+                .split_once(char::is_whitespace)
+                .ok_or_else(|| malformed("classDef", line_no))?;
+            let style = parse_style_props(props);
+            for name in names.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    diag.class_defs.insert(name.to_string(), style.clone());
+                }
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("class ") {
+            let (ids, class_name) = rest
+                .trim()
+                .rsplit_once(char::is_whitespace)
+                .ok_or_else(|| malformed("class", line_no))?;
+            let class_name = class_name.trim();
+            if class_name.is_empty() {
+                return Err(malformed("class", line_no));
+            }
+            for id in ids.split(',') {
+                let id = id.trim();
+                if id.is_empty() {
+                    continue;
+                }
+                let i = entity_index(&mut diag, &mut by_name, id);
+                if !diag.entities[i].classes.iter().any(|c| c == class_name) {
+                    diag.entities[i].classes.push(class_name.to_string());
+                }
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("style ") {
+            let (id, props) = rest
+                .trim()
+                .split_once(char::is_whitespace)
+                .ok_or_else(|| malformed("style", line_no))?;
+            let i = entity_index(&mut diag, &mut by_name, id.trim());
+            diag.entities[i].style = parse_style_props(props);
             continue;
         }
 
@@ -309,7 +357,24 @@ fn ensure_entity(
         name: name.to_string(),
         label: label.unwrap_or(name).to_string(),
         attributes: Vec::new(),
+        classes: Vec::new(),
+        style: Vec::new(),
     });
+}
+
+/// Index of the entity with `name`, materializing a placeholder if a styling
+/// directive references it before it is declared (mirrors the flowchart).
+fn entity_index(diag: &mut ErDiagram, by_name: &mut HashMap<String, usize>, name: &str) -> usize {
+    ensure_entity(diag, by_name, name, None);
+    by_name[name]
+}
+
+/// A `ParseError::Syntax` for a recognized directive keyword with a malformed body.
+fn malformed(keyword: &str, line_no: usize) -> ParseError {
+    ParseError::Syntax {
+        message: format!("malformed '{keyword}' statement"),
+        line: line_no,
+    }
 }
 
 #[cfg(test)]
@@ -413,6 +478,31 @@ mod tests {
         let d = parse("erDiagram\nORDER {\nstring id PK, FK\n}\n").unwrap();
         let o = d.entities.iter().find(|e| e.name == "ORDER").unwrap();
         assert_eq!(o.attributes[0].key.as_deref(), Some("PK, FK"));
+    }
+
+    #[test]
+    fn classdef_and_class_apply() {
+        let s = "erDiagram\nCUSTOMER ||--o{ ORDER : places\nclassDef hot fill:#f00,stroke:#900\nclass CUSTOMER hot\n";
+        let d = parse(s).unwrap();
+        assert_eq!(d.class_defs.len(), 1);
+        assert!(d.class_defs.contains_key("hot"));
+        let c = d.entities.iter().find(|e| e.name == "CUSTOMER").unwrap();
+        assert_eq!(c.classes, vec!["hot".to_string()]);
+        // The other entity carries no class.
+        let o = d.entities.iter().find(|e| e.name == "ORDER").unwrap();
+        assert!(o.classes.is_empty());
+    }
+
+    #[test]
+    fn style_directive_on_entity() {
+        let d = parse("erDiagram\nORDER {\nstring id\n}\nstyle ORDER fill:#0f0\n").unwrap();
+        let o = d.entities.iter().find(|e| e.name == "ORDER").unwrap();
+        assert_eq!(o.style, vec![("fill".to_string(), "#0f0".to_string())]);
+    }
+
+    #[test]
+    fn classdef_without_props_errors() {
+        assert!(parse("erDiagram\nA ||--|| B : x\nclassDef foo\n").is_err());
     }
 
     #[test]
