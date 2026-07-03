@@ -116,11 +116,13 @@ impl SvgBuilder {
         }
         // Multi-line label: stack the lines as <tspan>s centered vertically on
         // the baseline `y`, so <br>/\n behave like line breaks instead of
-        // leaking through as literal text.
-        let first_dy = -((lines.len() as f64 - 1.0) * LABEL_LINE_H) / 2.0;
+        // leaking through as literal text. Line spacing tracks the font size so
+        // stacked lines don't crowd/overlap once `--font-size` grows.
+        let line_h = LABEL_LINE_H * super::metrics::font_scale(self.font_size);
+        let first_dy = -((lines.len() as f64 - 1.0) * line_h) / 2.0;
         let mut spans = String::new();
         for (i, line) in lines.iter().enumerate() {
-            let dy = if i == 0 { first_dy } else { LABEL_LINE_H };
+            let dy = if i == 0 { first_dy } else { line_h };
             let _ = write!(
                 spans,
                 "<tspan x=\"{}\" dy=\"{}\">{}</tspan>",

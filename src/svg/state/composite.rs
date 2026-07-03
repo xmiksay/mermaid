@@ -293,8 +293,7 @@ pub(super) fn draw_state_note(
     } else {
         return;
     };
-    let chars = note.text.chars().count() as f64;
-    let nw = (chars * 7.0 + 20.0).max(80.0);
+    let nw = (crate::svg::metrics::text_width(&note.text, 7.0, theme.font_size) + 20.0).max(80.0);
     let nh = 32.0;
     let (nx, ny) = match note.position {
         NotePosition::RightOf => (cx + w / 2.0 + 14.0, cy - nh / 2.0),

@@ -23,6 +23,7 @@ use crate::parse::{
 };
 
 use super::builder::{fnum, SvgBuilder};
+use super::metrics::text_width;
 use super::theme::Theme;
 
 mod rel;
@@ -64,7 +65,8 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     // Row-flow knobs are overridable via `UpdateLayoutConfig` (see #14).
     let shape_in_row = d.layout.shape_in_row.unwrap_or(SHAPE_IN_ROW).max(1);
     let boundary_in_row = d.layout.boundary_in_row.unwrap_or(BOUNDARY_IN_ROW).max(1);
-    let (nodes, _cw, _ch) = flow_layout(&d.elements, shape_in_row, boundary_in_row);
+    let (nodes, _cw, _ch) =
+        flow_layout(&d.elements, shape_in_row, boundary_in_row, theme.font_size);
 
     let mut pos: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     let mut boundaries: Vec<BoundaryBox> = Vec::new();
@@ -186,12 +188,14 @@ fn flow_layout(
     items: &[C4Element],
     shape_in_row: usize,
     boundary_in_row: usize,
+    font_size: f64,
 ) -> (Vec<LayoutNode>, f64, f64) {
     let mut nodes: Vec<LayoutNode> = items
         .iter()
         .map(|item| {
             if item.boundary_kind.is_some() {
-                let (mut kids, cw, ch) = flow_layout(&item.members, shape_in_row, boundary_in_row);
+                let (mut kids, cw, ch) =
+                    flow_layout(&item.members, shape_in_row, boundary_in_row, font_size);
                 let dx = BOUNDARY_PAD;
                 let dy = BOUNDARY_PAD + BOUNDARY_HDR;
                 for k in &mut kids {
@@ -200,7 +204,7 @@ fn flow_layout(
                 }
                 let w = (cw + 2.0 * BOUNDARY_PAD)
                     .max(BOUNDARY_MIN_W)
-                    .max(header_min_w(item));
+                    .max(header_min_w(item, font_size));
                 let h = ch + 2.0 * BOUNDARY_PAD + BOUNDARY_HDR;
                 LayoutNode {
                     el: item.clone(),
@@ -292,10 +296,10 @@ fn shape_size(_kind: C4ElementKind) -> (f64, f64) {
 
 /// Minimum boundary width so the header label and the `[kind]` tag (stacked
 /// below it) don't get clipped.
-fn header_min_w(b: &C4Element) -> f64 {
+fn header_min_w(b: &C4Element, font_size: f64) -> f64 {
     let kind = boundary_kind_label(b.boundary_kind.unwrap_or(C4BoundaryKind::Generic));
-    let label_w = b.label.chars().count() as f64 * 8.0;
-    let kind_w = kind.chars().count() as f64 * 6.0;
+    let label_w = text_width(&b.label, 8.0, font_size);
+    let kind_w = text_width(kind, 6.0, font_size);
     label_w.max(kind_w) + 28.0
 }
 

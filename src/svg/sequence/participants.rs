@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use crate::parse::ParticipantKind;
+use crate::svg::metrics::text_width;
 
 use super::*;
 
@@ -161,10 +162,13 @@ fn label_lines(label: &str) -> Vec<String> {
 
 /// Measure a participant box from its label: width grows to fit the widest
 /// line, height grows with line count. Both clamp to sane minimums.
-pub(super) fn actor_size(label: &str) -> (f64, f64) {
+pub(super) fn actor_size(label: &str, font_size: f64) -> (f64, f64) {
     let lines = label_lines(label);
-    let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    let w = (max_chars as f64 * ACTOR_CHAR_W + ACTOR_PAD_X * 2.0).max(ACTOR_MIN_W);
+    let widest = lines
+        .iter()
+        .map(|l| text_width(l, ACTOR_CHAR_W, font_size))
+        .fold(0.0_f64, f64::max);
+    let w = (widest + ACTOR_PAD_X * 2.0).max(ACTOR_MIN_W);
     let h = (lines.len() as f64 * ACTOR_LINE_H + 14.0).max(ACTOR_H);
     (w, h)
 }
@@ -273,8 +277,8 @@ mod tests {
 
     #[test]
     fn actor_size_matches_label() {
-        assert_eq!(actor_size("A"), (ACTOR_MIN_W, ACTOR_H));
-        let (w, h) = actor_size("one<br/>two<br/>three");
+        assert_eq!(actor_size("A", 14.0), (ACTOR_MIN_W, ACTOR_H));
+        let (w, h) = actor_size("one<br/>two<br/>three", 14.0);
         assert!(h > ACTOR_H, "multi-line label should be taller");
         assert_eq!(w, ACTOR_MIN_W, "short lines keep the minimum width");
     }

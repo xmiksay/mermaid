@@ -251,7 +251,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         );
 
         let (mx, my) = polyline_midpoint(&clipped);
-        let lw = (label.chars().count() as f64 * 5.5 + 14.0).max(60.0);
+        let lw = (super::metrics::text_width(label, 5.5, theme.font_size) + 14.0).max(60.0);
         svg.rect(
             mx - lw / 2.0,
             my - 9.0,

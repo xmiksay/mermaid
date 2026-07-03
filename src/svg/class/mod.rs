@@ -9,6 +9,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 use super::builder::{split_label_lines, SvgBuilder};
 use super::geometry::clip_rect;
 use super::interact::{close_click, open_click};
+use super::metrics::font_scale;
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -35,7 +36,11 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     }
 
     let dir = d.direction;
-    let sizes: Vec<(f64, f64)> = d.classes.iter().map(class_size).collect();
+    let sizes: Vec<(f64, f64)> = d
+        .classes
+        .iter()
+        .map(|c| class_size(c, theme.font_size))
+        .collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .classes
         .iter()
@@ -94,7 +99,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         let ny = height + NOTE_GAP;
         let mut row_h: f64 = 0.0;
         for note in &d.notes {
-            let (nw, nh) = note_size(&note.text);
+            let (nw, nh) = note_size(&note.text, theme.font_size);
             notes.push(NoteBox {
                 note,
                 x: nx,
@@ -207,10 +212,10 @@ struct NoteBox<'a> {
     h: f64,
 }
 
-fn note_size(text: &str) -> (f64, f64) {
+fn note_size(text: &str, font_size: f64) -> (f64, f64) {
     let lines = split_label_lines(text);
     let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    let w = (max_chars as f64 * CHAR_W + NOTE_PAD * 2.0).max(60.0);
+    let w = (max_chars as f64 * CHAR_W * font_scale(font_size) + NOTE_PAD * 2.0).max(60.0);
     let h = lines.len().max(1) as f64 * LINE_H + NOTE_PAD * 2.0;
     (w, h)
 }
@@ -243,7 +248,7 @@ fn class_display(c: &UmlClass) -> String {
     c.label.clone().unwrap_or_else(|| convert_generics(&c.name))
 }
 
-fn class_size(c: &UmlClass) -> (f64, f64) {
+fn class_size(c: &UmlClass, font_size: f64) -> (f64, f64) {
     let mut max_chars = class_display(c).chars().count();
     if let Some(s) = &c.stereotype {
         max_chars = max_chars.max(s.chars().count() + 4);
@@ -264,7 +269,7 @@ fn class_size(c: &UmlClass) -> (f64, f64) {
             max_chars = len;
         }
     }
-    let w = (max_chars as f64 * CHAR_W + PAD_X * 2.0).max(MIN_W);
+    let w = (max_chars as f64 * CHAR_W * font_scale(font_size) + PAD_X * 2.0).max(MIN_W);
     let header_h = if c.stereotype.is_some() {
         HEADER_PAD + LINE_H
     } else {

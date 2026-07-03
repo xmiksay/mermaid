@@ -8,6 +8,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
 use super::geometry::{clip_rect, polyline_midpoint};
+use super::metrics::text_width;
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
@@ -28,7 +29,11 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     }
 
     let dir = d.direction;
-    let sizes: Vec<(f64, f64)> = d.entities.iter().map(entity_size).collect();
+    let sizes: Vec<(f64, f64)> = d
+        .entities
+        .iter()
+        .map(|e| entity_size(e, theme.font_size))
+        .collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .entities
         .iter()
@@ -105,8 +110,8 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-fn entity_size(e: &Entity) -> (f64, f64) {
-    let (tw, nw, kw, cw) = col_widths(e);
+fn entity_size(e: &Entity, font_size: f64) -> (f64, f64) {
+    let (tw, nw, kw, cw) = col_widths(e, font_size);
     // Sum only the columns that carry content, one COL_GAP between each pair.
     let mut content = tw + COL_GAP + nw;
     if kw > 0.0 {
@@ -115,7 +120,7 @@ fn entity_size(e: &Entity) -> (f64, f64) {
     if cw > 0.0 {
         content += COL_GAP + cw;
     }
-    let title_w = e.label.chars().count() as f64 * CHAR_W;
+    let title_w = text_width(&e.label, CHAR_W, font_size);
     let w = (content.max(title_w) + PAD_X * 2.0).max(MIN_W);
     let h = HEADER_H
         + e.attributes.len() as f64 * LINE_H
@@ -123,35 +128,22 @@ fn entity_size(e: &Entity) -> (f64, f64) {
     (w, h)
 }
 
-fn col_widths(e: &Entity) -> (f64, f64, f64, f64) {
-    let tw = e
-        .attributes
-        .iter()
-        .map(|a| a.type_.chars().count())
-        .max()
-        .unwrap_or(0) as f64
-        * CHAR_W;
-    let nw = e
-        .attributes
-        .iter()
-        .map(|a| a.name.chars().count())
-        .max()
-        .unwrap_or(0) as f64
-        * CHAR_W;
-    let kw = e
-        .attributes
-        .iter()
-        .filter_map(|a| a.key.as_ref().map(|k| k.chars().count()))
-        .max()
-        .unwrap_or(0) as f64
-        * KEY_CHAR_W;
-    let cw = e
-        .attributes
-        .iter()
-        .filter_map(|a| a.comment.as_ref().map(|c| c.chars().count()))
-        .max()
-        .unwrap_or(0) as f64
-        * CHAR_W;
+fn col_widths(e: &Entity, font_size: f64) -> (f64, f64, f64, f64) {
+    let widest = |texts: &mut dyn Iterator<Item = &str>, char_w: f64| {
+        texts
+            .map(|t| text_width(t, char_w, font_size))
+            .fold(0.0_f64, f64::max)
+    };
+    let tw = widest(&mut e.attributes.iter().map(|a| a.type_.as_str()), CHAR_W);
+    let nw = widest(&mut e.attributes.iter().map(|a| a.name.as_str()), CHAR_W);
+    let kw = widest(
+        &mut e.attributes.iter().filter_map(|a| a.key.as_deref()),
+        KEY_CHAR_W,
+    );
+    let cw = widest(
+        &mut e.attributes.iter().filter_map(|a| a.comment.as_deref()),
+        CHAR_W,
+    );
     (tw, nw, kw, cw)
 }
 
@@ -192,7 +184,7 @@ fn draw_entity(
         );
         // Columns run left-to-right: type, name, key, comment — each present
         // only when some attribute populates it (upstream shows a comment col).
-        let (tw, nw, kw, _cw) = col_widths(e);
+        let (tw, nw, kw, _cw) = col_widths(e, theme.font_size);
         let type_x = x + PAD_X;
         let name_x = type_x + tw + COL_GAP;
         let key_x = name_x + nw + COL_GAP;
@@ -282,8 +274,7 @@ fn draw_relation(
 
     if !rel.label.is_empty() {
         let mid = polyline_midpoint(&clipped);
-        let chars = rel.label.chars().count() as f64;
-        let w = chars * 7.0 + 8.0;
+        let w = text_width(&rel.label, 7.0, theme.font_size) + 8.0;
         let h = 16.0;
         svg.rect(
             mid.0 - w / 2.0,

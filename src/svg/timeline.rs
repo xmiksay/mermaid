@@ -68,7 +68,10 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
         .max()
         .unwrap_or(1)
         .max(1);
-    let event_box_h = EVENT_BOX_H + (max_lines as f64 - 1.0) * LABEL_LINE_H;
+    // Line spacing tracks the font size (the builder scales tspan `dy` the same
+    // way), so a taller `--font-size` reserves enough room for wrapped events.
+    let line_h = LABEL_LINE_H * super::metrics::font_scale(theme.font_size);
+    let event_box_h = EVENT_BOX_H + (max_lines as f64 - 1.0) * line_h;
 
     let chart_w = (total_periods.max(1) as f64) * PERIOD_GAP;
     let width = PAD * 2.0 + chart_w;

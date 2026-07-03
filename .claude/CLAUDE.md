@@ -26,6 +26,7 @@ src/
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
 │   ├── label.rs     decode_label: `#…;` entity codes + markdown-string emphasis
+│   ├── metrics.rs   shared text_width/font_scale (per-glyph widths track font_size)
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
 │   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*
 │   ├── style.rs     resolves classDef/style/linkStyle into inline fill/stroke
@@ -473,6 +474,16 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
   `<tspan>`s for multi-line labels, so every renderer honors `<br>` for free;
   flowchart also sizes nodes from the resulting line count / widest line.
+- Text width scales with the font size: `src/svg/metrics.rs` owns the shared
+  `text_width(s, base_char_w, font_size)` / `font_scale(font_size)` helpers
+  (`= font_size / BASE_FONT_SIZE`, `BASE_FONT_SIZE = 14`). Every renderer keeps
+  its own per-glyph `base_char_w` (flowchart/er/class/state `7.5`, sequence
+  actor `8.0`, ER bold PK/FK `8.0`, mindmap `7.0`, requirement label `5.5`,
+  edge labels `7.0`) but routes the estimate through `text_width` so node/label
+  boxes grow with `--font-size` instead of overflowing (#122). `SvgBuilder::text`
+  and timeline scale the `LABEL_LINE_H` line spacing by `font_scale` the same
+  way. Because `font_scale(14) == 1`, every default-theme render — and the whole
+  gallery — is byte-identical; only a non-default font size changes.
 - C4 supports the full `{System,Container,Component} × {Db,Queue} × {_Ext}`
   element matrix; the `_Ext` variants reuse the same shape with the gray
   external palette. `UpdateElementStyle` / `UpdateRelStyle` /

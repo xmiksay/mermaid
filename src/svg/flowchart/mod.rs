@@ -37,7 +37,11 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     let dir = d.direction;
     // Reserve a band at the top for a frontmatter title, if present.
     let title_h = if d.title.is_some() { TITLE_BAND } else { 0.0 };
-    let node_sizes: Vec<(f64, f64)> = d.nodes.iter().map(node_size).collect();
+    let node_sizes: Vec<(f64, f64)> = d
+        .nodes
+        .iter()
+        .map(|n| node_size(n, theme.font_size))
+        .collect();
     let id_to_u32: HashMap<String, NodeId> = d
         .nodes
         .iter()
@@ -117,7 +121,8 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
 
     // A long title can be wider than the graph itself; grow the canvas to fit.
     if let Some(t) = &d.title {
-        let title_w = t.chars().count() as f64 * (CHAR_W + 2.0) + CANVAS_PAD * 2.0;
+        let title_w =
+            crate::svg::metrics::text_width(t, CHAR_W + 2.0, theme.font_size) + CANVAS_PAD * 2.0;
         width = width.max(title_w);
     }
 
