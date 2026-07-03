@@ -143,6 +143,27 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
         if meta.sankey_node_alignment.is_some() {
             s.node_alignment = meta.sankey_node_alignment.clone();
         }
+        if meta.sankey_show_values.is_some() {
+            s.show_values = meta.sankey_show_values;
+        }
+        if meta.sankey_prefix.is_some() {
+            s.prefix = meta.sankey_prefix.clone();
+        }
+        if meta.sankey_suffix.is_some() {
+            s.suffix = meta.sankey_suffix.clone();
+        }
+        if meta.sankey_width.is_some() {
+            s.width = meta.sankey_width;
+        }
+        if meta.sankey_height.is_some() {
+            s.height = meta.sankey_height;
+        }
+        if meta.sankey_node_width.is_some() {
+            s.node_width = meta.sankey_node_width;
+        }
+        if meta.sankey_node_padding.is_some() {
+            s.node_padding = meta.sankey_node_padding;
+        }
     }
     if let (Diagram::Timeline(t), Some(true)) = (&mut diagram, meta.timeline_disable_multicolor) {
         t.disable_multicolor = true;

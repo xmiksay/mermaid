@@ -267,16 +267,20 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   set the rest. Inline attrs override the array radius and the class default;
   the renderer falls back to `r=6`, the palette fill, and a white 1.5px stroke.
 - Sankey nodes render their **throughput value** after the name
-  (`Name\n42`, upstream `showValues` — on by default). The value is the node's
-  `max(in, out)` flow; the `SvgBuilder::text` multi-line path stacks it as a
-  second `<tspan>`. Each node gets its **own palette color** (`pie_color(node
-  index)`), no longer one flat fill. `config.sankey.linkColor` and
-  `config.sankey.nodeAlignment` (frontmatter/`%%{init}%%`) flow through the
-  preamble → `DiagramMeta.sankey_link_color`/`sankey_node_alignment` → copied
-  onto `SankeyDiagram` in `parse_with_meta`. `linkColor` (`LinkColor::parse`,
-  default `source`): `source`/`target` tint each link from that node's color,
+  (`Name\n<prefix>42<suffix>`, upstream `showValues` — on by default; the value
+  is the node's `max(in, out)` flow, wrapped by `config.sankey.prefix`/`suffix`;
+  `showValues: false` shows only the name). The `SvgBuilder::text` multi-line
+  path stacks the value as a second `<tspan>`. Each node gets its **own palette
+  color** (`pie_color(node index)`), no longer one flat fill.
+  `config.sankey.{linkColor,nodeAlignment,showValues,prefix,suffix,width,height,
+  nodeWidth,nodePadding}` (frontmatter/`%%{init}%%`) flow through the preamble →
+  the matching `DiagramMeta.sankey_*` fields → copied onto `SankeyDiagram` in
+  `parse_with_meta`. `linkColor` (`LinkColor::parse`, **default `gradient`** to
+  match upstream): `source`/`target` tint each link from that node's color,
   `gradient` emits a per-link `<linearGradient>` in `<defs>`, any other value is
-  a literal stroke color. `nodeAlignment` (`Alignment::parse`, default
+  a literal stroke color. Geometry is config-driven: `nodeWidth` (`NODE_W`,
+  upstream default `10`), `nodePadding` (`ROW_GAP`), `height` (`CHART_H`), and
+  `width` (recomputes the per-column gap). `nodeAlignment` (`Alignment::parse`, default
   `justify`) maps onto the column-assignment step (`assign_columns`, using
   `column_depths`/`column_heights`): `left` = depth from source, `right` =
   distance to sink, `justify` pushes sinks to the last column, `center` nudges

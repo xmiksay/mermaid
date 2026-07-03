@@ -92,6 +92,18 @@ pub struct DiagramMeta {
     /// `config.timeline.disableMulticolor` from frontmatter — copied onto a
     /// [`TimelineDiagram`] to keep a sectionless timeline one flat color.
     pub timeline_disable_multicolor: Option<bool>,
+    /// `config.sankey.showValues` from frontmatter — copied onto a
+    /// [`SankeyDiagram`] to toggle the per-node value label.
+    pub sankey_show_values: Option<bool>,
+    /// `config.sankey.prefix`/`suffix` from frontmatter — wrap the shown value.
+    pub sankey_prefix: Option<String>,
+    pub sankey_suffix: Option<String>,
+    /// `config.sankey.{width,height,nodeWidth,nodePadding}` from frontmatter —
+    /// copied onto a [`SankeyDiagram`] to drive geometry.
+    pub sankey_width: Option<f64>,
+    pub sankey_height: Option<f64>,
+    pub sankey_node_width: Option<f64>,
+    pub sankey_node_padding: Option<f64>,
     /// `config.gitGraph.*` keys — copied onto a [`GitGraphDiagram`]'s config.
     pub git_graph: GitGraphMeta,
     /// The whole `config:` tree flattened to dotted `key → value` entries
