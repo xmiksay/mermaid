@@ -1,7 +1,7 @@
 //! Class diagram parser (v0.1 subset).
 //!
 //! Supports:
-//!   * Header: `classDiagram`.
+//!   * Header: `classDiagram` (or the `classDiagram-v2` alias).
 //!   * Class blocks: `class X { ... }` with member lines inside.
 //!   * Member shorthand: `X : +method()`, `X : -attr int`.
 //!   * Stereotype: `class X { <<interface>> ... }` or `X <<abstract>>`.
@@ -45,7 +45,7 @@ pub(crate) fn parse(input: &str) -> Result<ClassDiagram, ParseError> {
         }
 
         if !header_seen {
-            if line != "classDiagram" {
+            if line != "classDiagram" && line != "classDiagram-v2" {
                 return Err(ParseError::Syntax {
                     message: "expected 'classDiagram' header".into(),
                     line: line_no,
@@ -385,6 +385,18 @@ fn get_class<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v2_header_alias() {
+        // `classDiagram-v2` is an upstream alias for `classDiagram`.
+        let d = parse("classDiagram-v2\nAnimal <|-- Dog\n").unwrap();
+        assert_eq!(d.relations.len(), 1);
+        // The dispatcher accepts the alias too.
+        assert!(matches!(
+            crate::parse("classDiagram-v2\nAnimal <|-- Dog\n").unwrap(),
+            crate::Diagram::Class(_)
+        ));
+    }
 
     #[test]
     fn block_class_members() {
