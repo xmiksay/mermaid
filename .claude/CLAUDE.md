@@ -722,6 +722,23 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `block:ID … end` group works) and clip to the node boundary (`clip`) so
   arrowheads land on the edge, not the center. `block:id:span` keeps the span on
   `BlockGroup.span` (min group width).
+  - Shape delimiters (`parse_shape`, via the `strip_pair` helper): beyond the
+    classic set, `[[..]]`→`Subroutine`, `(((..)))`→`DoubleCircle`, `>..]`→`Odd`
+    (asymmetric flag), and the parallelogram/trapezoid family `[/../]`→
+    `LeanRight`, `[\..\]`→`LeanLeft`, `[/..\]`→`Trapezoid`, `[\../]`→
+    `TrapezoidAlt`. Longest openers are matched first so `[[`/`(((` win over `[`/
+    `((`. The node tokenizer (`parse_block_line`) floors bracket depth at 0 so
+    the unmatched `]` of a `>text]` shape can't glue the rest of the line into
+    one token.
+  - Links carry a `BlockLinkStyle` (`Solid`/`Dotted`/`Thick`/`Invisible`):
+    `parse_edge` matches `~~~`/`-.->`/`-.-`/`==>`/`===`/`-->`/`---` longest-first
+    and reads an inline `-- / -. / ==` label opener off the tail. The renderer
+    draws dotted (`stroke-dasharray`) / thick (wider stroke) styles and skips
+    drawing an invisible link (which still shapes layout).
+  - `columns auto` (no longer a hard-error) packs every direct cell into one row
+    — `auto_column_count` sums block/group spans + space counts. `space` is a
+    keyword only as `space`/`space:N`, so ids like `spaceship` survive.
+    `style a,b <props>` takes a comma id-list like `class`.
 - mindmap `:::class1 class2` and `::icon(fa fa-book)` are **attachment lines**,
   not child nodes (`src/parse/mindmap.rs`): both attach to the most-recent node
   (`stack.last_mut()` / `root`), `:::` filling `MindmapNode.classes` and `::icon`
