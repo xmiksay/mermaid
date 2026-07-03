@@ -68,10 +68,12 @@ pub enum SequenceItem {
     Destroy(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AutoNumberConfig {
-    pub start: u32,
-    pub step: u32,
+    /// Starting number. Fractional since v11.15 (`autonumber 1.5 0.5`), so it is
+    /// an `f64` — an integral value still renders without a decimal point.
+    pub start: f64,
+    pub step: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,4 +151,8 @@ pub enum ArrowKind {
     BiSolidArrow,
     /// `<<-->>` dashed line, filled arrowhead at both ends (bidirectional)
     BiDashedArrow,
+    /// `-\` / `-/` solid line, half (single-barb) arrowhead (v11.12.3+)
+    HalfArrow,
+    /// `--\` / `--/` dashed line, half (single-barb) arrowhead (v11.12.3+)
+    DashedHalfArrow,
 }

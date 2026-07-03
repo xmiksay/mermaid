@@ -94,7 +94,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 
 ```bash
 cargo build              # library + binary
-cargo test               # unit + integration + doctest (639 tests: 623 lib + 15 integration + 1 doctest)
+cargo test               # unit + integration + doctest (689 tests: 673 lib + 15 integration + 1 doctest)
 cargo run --bin mermaid-svg -- --help
 cargo bench              # criterion benches: parse + render per diagram
 cargo package --allow-dirty
@@ -451,9 +451,25 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `SequenceItem::AutoNumber(Option<AutoNumberConfig>)` interleaved in `items`.
   `autonumber [start [step]]` → `Some{start,step}` (defaults 1/1) turns numbering
   on and resets the counter to `start`; `autonumber off` → `None` turns it off
-  for subsequent messages. The renderer threads a `&mut Numbering { on, step }`
-  plus a counter through `layout_items`, emitting `"{n}. {text}"` for numbered
-  messages. `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
+  for subsequent messages. `start`/`step` are **`f64`** (upstream v11.15+ accepts
+  decimals — `autonumber 1.5 0.5`); the renderer threads a `&mut Numbering { on,
+  step }` plus an `f64` counter through `layout_items`, emitting
+  `"{n}. {text}"` for numbered messages (`fmt_seq_number` drops the decimal point
+  for integral values, so `2.0` shows as `2`). A non-positive step falls back to
+  `1.0`. `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
+- Sequence **half arrows** (`-\`, `-/`, `-|\`, `-|/`, v11.12.3+) and their dashed
+  variants (extra leading dash) parse to `ArrowKind::HalfArrow`/`DashedHalfArrow`
+  (`ARROWS` table in `src/parse/sequence/message.rs`). The `\`/`/` are the two
+  barb directions and the `|` is an optional shaft form; all map to one
+  single-barb `arrow-half` marker (`define_markers`, `stroke_for`) drawn at the
+  head end.
+- Sequence `par_over <label>` (upstream's overlapping-par frame) reuses the
+  `par`/`and` `BlockFrame::Par` structure, so it accepts `and` branches and
+  renders as a normal par block (`handle_block_keyword` in
+  `src/parse/sequence/frames.rs`).
+- Sequence `properties <id>: {…}` / `details <id>: {…}` attach actor metadata;
+  like `link`/`links` they are consumed (not rendered) by `is_actor_menu` so they
+  don't hard-error.
 - Sequence `activate`/`deactivate` is paired and drawn as an activation band
   on the lifeline. `draw_activations` keeps a **stack** of open start-ys per
   participant (`HashMap<String, Vec<f64>>`) so nested/stacked activations (the

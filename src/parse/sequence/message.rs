@@ -14,10 +14,21 @@ const ARROWS: &[(&str, ArrowKind)] = &[
     ("-->", ArrowKind::Dashed),
     ("--x", ArrowKind::DashedCross),
     ("--)", ArrowKind::DashedOpen),
+    // v11.12.3+ half (single-barb) arrows. `\` and `/` are the two barb
+    // directions; the optional `|` shaft form is accepted too. Dashed forms
+    // carry the extra leading dash.
+    ("--|\\", ArrowKind::DashedHalfArrow),
+    ("--|/", ArrowKind::DashedHalfArrow),
+    ("--\\", ArrowKind::DashedHalfArrow),
+    ("--/", ArrowKind::DashedHalfArrow),
     ("->>", ArrowKind::SolidArrow),
     ("->", ArrowKind::Solid),
     ("-x", ArrowKind::Cross),
     ("-)", ArrowKind::Open),
+    ("-|\\", ArrowKind::HalfArrow),
+    ("-|/", ArrowKind::HalfArrow),
+    ("-\\", ArrowKind::HalfArrow),
+    ("-/", ArrowKind::HalfArrow),
 ];
 
 pub(super) fn parse_line_to_items(
@@ -71,8 +82,9 @@ pub(super) fn parse_line_to_items(
         return Ok(vec![SequenceItem::Destroy(rest.trim().to_string())]);
     }
 
-    // Actor menus (`link A: Label @ url`, `links A: {json}`) are consumed but
-    // not rendered — accepting the syntax keeps them from being hard errors.
+    // Actor metadata (`link A: Label @ url`, `links A: {json}`,
+    // `properties A: {json}`, `details A: {json}`) is consumed but not rendered
+    // — accepting the syntax keeps it from being a hard error.
     if is_actor_menu(line) {
         return Ok(Vec::new());
     }
@@ -122,8 +134,8 @@ fn parse_autonumber(line: &str) -> Option<AutoNumberConfig> {
     }
     let mut nums = rest.split_whitespace();
     Some(AutoNumberConfig {
-        start: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1),
-        step: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1),
+        start: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1.0),
+        step: nums.next().and_then(|s| s.parse().ok()).unwrap_or(1.0),
     })
 }
 
@@ -159,13 +171,14 @@ fn parse_note(line: &str) -> Option<SequenceNote> {
     })
 }
 
-/// `link <id>: <label> @ <url>` and `links <id>: {json}` declare actor popup
-/// menus. Recognize the shape (a `link`/`links` keyword, an id, then a colon)
-/// so the line is consumed rather than mistaken for a message.
+/// `link <id>: <label> @ <url>`, `links <id>: {json}`, `properties <id>: {json}`
+/// and `details <id>: {json}` attach popup-menu / metadata to an actor. Recognize
+/// the shape (one of those keywords, an id, then a colon) so the line is consumed
+/// rather than mistaken for a message.
 fn is_actor_menu(line: &str) -> bool {
-    let rest = line
-        .strip_prefix("links ")
-        .or_else(|| line.strip_prefix("link "));
+    let rest = ["links ", "link ", "properties ", "details "]
+        .iter()
+        .find_map(|kw| line.strip_prefix(kw));
     match rest {
         Some(rest) => rest.split_once(':').is_some_and(|(id, _)| {
             let id = id.trim();
@@ -369,6 +382,30 @@ mod tests {
     }
 
     #[test]
+    fn half_arrows_recognized() {
+        // v11.12.3+ single-barb half arrows: `\`/`/` barb directions, an optional
+        // `|` shaft, and dashed variants with the extra leading dash (#176).
+        let cases = [
+            ("A-\\B: t", ArrowKind::HalfArrow),
+            ("A-/B: t", ArrowKind::HalfArrow),
+            ("A-|\\B: t", ArrowKind::HalfArrow),
+            ("A-|/B: t", ArrowKind::HalfArrow),
+            ("A--\\B: t", ArrowKind::DashedHalfArrow),
+            ("A--/B: t", ArrowKind::DashedHalfArrow),
+            ("A--|\\B: t", ArrowKind::DashedHalfArrow),
+            ("A--|/B: t", ArrowKind::DashedHalfArrow),
+        ];
+        for (msg, expected) in cases {
+            let s = format!("sequenceDiagram\n{msg}\n");
+            let d = parse(&s).unwrap();
+            assert_eq!(first_msg(&d).arrow, expected, "case: {msg}");
+            // Clean endpoints — the barb never leaks into a participant id.
+            assert_eq!(first_msg(&d).from, "A", "case: {msg}");
+            assert_eq!(first_msg(&d).to, "B", "case: {msg}");
+        }
+    }
+
+    #[test]
     fn bidirectional_arrow_no_phantom_participant() {
         // `Alice<<->>Bob` is one message between two participants, not a
         // phantom `Alice<<` participant (issue #57).
@@ -477,7 +514,7 @@ mod tests {
         assert!(d.autonumber);
         assert!(matches!(
             d.items.first(),
-            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 1 && c.step == 1
+            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 1.0 && c.step == 1.0
         ));
     }
 
@@ -486,7 +523,18 @@ mod tests {
         let d = parse("sequenceDiagram\nautonumber 10 5\nA->>B: x\n").unwrap();
         assert!(matches!(
             d.items.first(),
-            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 10 && c.step == 5
+            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 10.0 && c.step == 5.0
+        ));
+    }
+
+    #[test]
+    fn autonumber_decimal_start_and_step() {
+        // v11.15+ accepts fractional start/step (#176) — previously these fell
+        // back to 1/1.
+        let d = parse("sequenceDiagram\nautonumber 1.5 0.5\nA->>B: x\n").unwrap();
+        assert!(matches!(
+            d.items.first(),
+            Some(SequenceItem::AutoNumber(Some(c))) if c.start == 1.5 && c.step == 0.5
         ));
     }
 
@@ -547,6 +595,23 @@ mod tests {
         )
         .unwrap();
         // Only the single message survives; the menu lines are dropped.
+        assert_eq!(
+            d.items
+                .iter()
+                .filter(|i| matches!(i, SequenceItem::Message(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn properties_and_details_lines_are_consumed() {
+        // `properties A: {..}` / `details A: {..}` attach actor metadata and must
+        // not hard-error (#176).
+        let d = parse(
+            "sequenceDiagram\nparticipant A\nproperties A: {\"class\": \"internal\"}\ndetails A: {\"key\": \"value\"}\nA->>A: x\n",
+        )
+        .unwrap();
         assert_eq!(
             d.items
                 .iter()

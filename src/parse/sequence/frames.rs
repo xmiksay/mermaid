@@ -120,10 +120,23 @@ pub(super) fn handle_block_keyword(
         return Ok(true);
     }
 
-    if let Some(rest) = line.strip_prefix("par ") {
+    // `par_over` is upstream's overlapping-par frame; it shares the `par`/`and`
+    // branch structure, so it reuses the same frame.
+    if let Some(rest) = line
+        .strip_prefix("par_over ")
+        .or_else(|| line.strip_prefix("par "))
+    {
         stack.push(BlockFrame::Par {
             branches: Vec::new(),
             current_label: rest.trim().to_string(),
+            current_items: Vec::new(),
+        });
+        return Ok(true);
+    }
+    if line == "par_over" {
+        stack.push(BlockFrame::Par {
+            branches: Vec::new(),
+            current_label: String::new(),
             current_items: Vec::new(),
         });
         return Ok(true);
