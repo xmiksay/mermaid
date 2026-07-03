@@ -79,7 +79,7 @@ flag uses the same lookup.
 |---|---|---|
 | Pie | `pie` | `showData`, title, entries (slices under 1% dropped) |
 | Sequence | `sequenceDiagram` | participants/actors, `autonumber [start [step]]`/`off`, `activate`/`deactivate`, nested `alt`/`par`/`critical`/`loop`/`opt`/`break`, `rect <color>` bands, notes |
-| Flowchart | `flowchart`, `graph` | directions TD/BT/LR/RL, all edge styles (`-->`, `---`, `-.->`, `==>`, `--o`, `--x` + no-head variants), invisible links (`~~~`), bidirectional edges (`<-->`, `o--o`, `x--x`), multi-source/target (`A & B --> C & D`), nested `subgraph`, `click` links/callbacks, v11 `A@{ shape: …, label: … }` node syntax, frontmatter `title` |
+| Flowchart | `flowchart`, `graph` | directions TD/BT/LR/RL, all edge styles (`-->`, `---`, `-.->`, `==>`, `--o`, `--x` + no-head variants), invisible links (`~~~`), bidirectional edges (`<-->`, `o--o`, `x--x`), multi-source/target (`A & B --> C & D`), nested `subgraph`, `click` links/callbacks, v11 `A@{ shape: …, label: … }` node syntax, v11 edge ids + `e1@{ animate, curve }` attributes, `linkStyle … interpolate`, frontmatter `title` |
 | State | `stateDiagram`, `stateDiagram-v2` | composite states with parallel regions (`--`), one-line and multi-line notes |
 | Class | `classDiagram` | namespaces, `direction` directive, visibility (`+`/`-`/`#`/`~`), full relation set (`<\|--`, `*--`, `o--`, `-->`, `..>`, `<\|..`), notes, standalone annotations, `Name["label"]`, `click`/`link`/`callback` |
 | ER | `erDiagram` | attribute keys (PK/FK/UK), Crow's Foot cardinality, attribute comments |
@@ -133,6 +133,11 @@ attributes (`fill`, `stroke`, `stroke-width`, `stroke-dasharray`, text `color`,
   attach it (multiple classes layer in order).
 - **`<id>:::<name>`** — shorthand class attachment inline on a node.
 - **`linkStyle <n> stroke:#f00,…`** — style the n-th edge.
+- **`linkStyle <n> interpolate linear|step|basis …`** — set the n-th edge's
+  curve interpolation (also `linkStyle default interpolate …`).
+- **`A e1@--> B` + `e1@{ animate: true, curve: step }`** — v11 edge id and
+  attributes: `animate` draws a flowing dash animation, `curve` sets the
+  per-edge interpolation.
 
 Layering is `default` classDef → each named class in order → the node's inline
 `style` (later layers win per property).

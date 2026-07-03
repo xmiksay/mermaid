@@ -39,10 +39,12 @@ pub(super) fn parse_statement(
         if sc.eof() {
             break;
         }
-        // Optional v11 edge id prefix `e1@` before the connector — recorded then
-        // ignored (the edge itself is unchanged).
-        if let Some(eid) = consume_edge_id(&mut sc) {
-            edge_ids.insert(eid);
+        // Optional v11 edge id prefix `e1@` before the connector — recorded so a
+        // later `e1@{ … }` statement is recognized, and carried onto the edge(s)
+        // this arrow creates so those attributes can be applied.
+        let edge_id = consume_edge_id(&mut sc);
+        if let Some(eid) = &edge_id {
+            edge_ids.insert(eid.clone());
         }
         let Some((line_style, tail, head, label)) = parse_arrow(&mut sc, line_no)? else {
             return Err(ParseError::Syntax {
@@ -67,6 +69,9 @@ pub(super) fn parse_statement(
                     line: line_style,
                     tail,
                     head,
+                    id: edge_id.clone(),
+                    animate: false,
+                    curve: None,
                 });
             }
         }
