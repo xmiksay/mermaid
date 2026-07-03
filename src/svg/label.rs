@@ -2,19 +2,18 @@
 //! [`SvgBuilder::text`][super::builder::SvgBuilder::text] before XML escaping.
 //!
 //! Ports the pre-render text handling upstream Mermaid does: resolving
-//! `#`-prefixed entity codes and stripping lightweight markdown emphasis from
-//! backtick-fenced markdown *strings*.
+//! `#`-prefixed entity codes. Backtick-fenced markdown *strings* and their
+//! `**bold**`/`*italic*` emphasis are handled one layer up, in
+//! [`markup::parse_spans`][super::markup::parse_spans], which emits styled
+//! `<tspan>`s rather than flattening the emphasis to plain text.
 
 /// Decode a display label the way upstream Mermaid does before rendering text:
-/// resolve `#`-prefixed entity codes and strip lightweight markdown emphasis.
+/// resolve `#`-prefixed entity codes.
 ///
 /// Mermaid uses `#` (not `&`) as the entity sentinel in diagram source, so
-/// `#quot;` → `"`, `#35;` → `#`, `#9829;`/`#x2665;` → `♥`. Markdown *strings*
-/// (`"`**bold**`"`) survive parsing as a backtick-fenced value; we drop the
-/// fence and the `**`/`__`/`*`/`_` emphasis markers, rendering the plain text
-/// (a partial port — no bold/italic styling yet).
+/// `#quot;` → `"`, `#35;` → `#`, `#9829;`/`#x2665;` → `♥`.
 pub fn decode_label(s: &str) -> String {
-    strip_markdown(&decode_entities(s))
+    decode_entities(s)
 }
 
 fn decode_entities(s: &str) -> String {
@@ -67,33 +66,6 @@ fn decode_entity(s: &str) -> Option<(String, usize)> {
     Some((ch.to_string(), len))
 }
 
-/// For a backtick-fenced markdown *string*, drop the fence and inline
-/// `**`/`__`/`*`/`_` emphasis markers, leaving the plain text. Non-fenced input
-/// is returned untouched, so ordinary labels containing `_` or `*` (e.g.
-/// `snake_case`, `a*b`) are never mangled.
-fn strip_markdown(s: &str) -> String {
-    let trimmed = s.trim();
-    let Some(inner) = trimmed.strip_prefix('`').and_then(|t| t.strip_suffix('`')) else {
-        return s.to_string();
-    };
-    let mut out = String::with_capacity(inner.len());
-    let bytes = inner.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if (bytes[i] == b'*' || bytes[i] == b'_') && i + 1 < bytes.len() && bytes[i + 1] == bytes[i]
-        {
-            i += 2; // `**` / `__`
-        } else if bytes[i] == b'*' || bytes[i] == b'_' {
-            i += 1; // `*` / `_`
-        } else {
-            let ch = inner[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,10 +82,9 @@ mod tests {
     }
 
     #[test]
-    fn strips_markdown_only_when_fenced() {
-        assert_eq!(decode_label("`**bold**`"), "bold");
-        assert_eq!(decode_label("`a *b* c`"), "a b c");
-        // Bare labels with `_`/`*` are never mangled.
+    fn leaves_markdown_and_backticks_to_the_span_layer() {
+        // decode_label no longer touches markdown fences/markers — that is the
+        // span layer's job (markup::parse_spans). Bare `_`/`*` are never mangled.
         assert_eq!(decode_label("snake_case"), "snake_case");
         assert_eq!(decode_label("a * b"), "a * b");
     }
