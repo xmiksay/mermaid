@@ -20,3 +20,10 @@ Parser: `src/parse/mindmap.rs` · Renderer: `src/svg/mindmap.rs`.
   `MindmapDiagram.class_defs`; `draw_nodes` resolves each node's `:::` classes
   through the shared `resolve_style`, overriding the node fill/stroke and label
   color (unstyled nodes stay byte-identical).
+- **Multi-line labels**: the grammar is line-oriented, but a `"…"` label —
+  including a `` "`**bold**\nmore`" `` markdown string — may span source lines.
+  Before parsing a node the loop reassembles them: if a line opens a `"` that
+  does not close, following lines are appended (joined with `\n`) until the
+  quote count balances, then the joined label flows through the normal
+  `unquote_any` + markdown-fence path. Without this the closing `"`/backticks
+  and `]` leaked into the label and the trailing line became a bogus sibling.
