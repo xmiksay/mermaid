@@ -429,9 +429,14 @@ fn parse_flag(s: &str) -> Option<bool> {
     }
 }
 
-/// Case-insensitive `strip_prefix`.
+/// Case-insensitive `strip_prefix`. The boundary check keeps multibyte input
+/// from panicking the slice: a non-boundary cut can never match an ASCII
+/// prefix anyway.
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+    if s.len() >= prefix.len()
+        && s.is_char_boundary(prefix.len())
+        && s[..prefix.len()].eq_ignore_ascii_case(prefix)
+    {
         Some(&s[prefix.len()..])
     } else {
         None
@@ -645,5 +650,19 @@ mod tests {
         let (m, s) = strip(src);
         assert_eq!(m, DiagramMeta::default());
         assert_eq!(s, src.trim_end());
+    }
+
+    #[test]
+    fn multibyte_lines_do_not_panic() {
+        // `accDescr` is 8 bytes; byte 8 of `A["漢字漢字"]` falls inside a
+        // CJK char, which used to panic the prefix slice.
+        let src = "flowchart TD\n  A[\"漢字漢字\"]\n";
+        let (m, s) = strip(src);
+        assert_eq!(m, DiagramMeta::default());
+        assert!(s.contains("漢字漢字"));
+
+        // Shorter-than-prefix multibyte lines must not panic either.
+        let (_, s) = strip("pie\n\"漢\" : 1\n");
+        assert!(s.contains('漢'));
     }
 }
