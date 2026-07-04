@@ -44,7 +44,7 @@ Run `mermaid-svg --help` for the full usage.
 
 ## Themes
 
-Four built-in themes: `default`, `dark`, `forest`, `neutral`.
+Five built-in themes: `default`, `base`, `dark`, `forest`, `neutral`.
 
 ```rust
 use mermaid_svg::{render_with, Theme};
@@ -67,12 +67,13 @@ let svg = render_with(source, &custom)?;
 The color/font fields are `Cow<'static, str>`, so the built-ins stay `const`
 while overrides accept owned runtime strings (`"#fffbe6".into()`).
 
-The built-in constructors are `Theme::default_theme()`, `Theme::dark()`,
-`Theme::forest()`, and `Theme::neutral()`; `Theme::with_font(family)` and
-`Theme::with_font_size(px)` return a copy with the font overridden.
-`Theme::by_name(name)` selects a built-in by string, accepting `base` as an
-alias for `default` (matching upstream Mermaid); the `mermaid-svg --theme`
-flag uses the same lookup.
+The built-in constructors are `Theme::default_theme()`, `Theme::base()`,
+`Theme::dark()`, `Theme::forest()`, and `Theme::neutral()`;
+`Theme::with_font(family)` and `Theme::with_font_size(px)` return a copy with
+the font overridden. `Theme::by_name(name)` selects a built-in by string;
+`base` is upstream's designated customization palette (warm `#fff4dd`
+primary, visibly distinct from `default`, meant to be recolored via
+`themeVariables`); the `mermaid-svg --theme` flag uses the same lookup.
 
 ## Supported diagrams
 
