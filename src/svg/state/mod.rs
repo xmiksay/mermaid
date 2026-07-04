@@ -308,9 +308,7 @@ fn draw_transition(
     end: &StateEndClip,
     theme: &Theme,
 ) {
-    let fg = &theme.fg;
     let flow_edge_stroke = &theme.flow_edge_stroke;
-    let flow_label_bg = &theme.flow_label_bg;
     let n = pts.len();
     if n < 2 {
         return;
@@ -336,21 +334,7 @@ fn draw_transition(
     );
     if let Some(label) = &tr.label {
         let mid = polyline_midpoint(&clipped);
-        let w = text_width(label, 7.0, theme.font_size) + 8.0;
-        let h = 18.0;
-        svg.rect(
-            mid.0 - w / 2.0,
-            mid.1 - h / 2.0,
-            w,
-            h,
-            &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
-        );
-        svg.text(
-            mid.0,
-            mid.1 + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-            label,
-        );
+        crate::svg::label::draw_edge_label(svg, mid, label, theme);
     }
 }
 

@@ -7,6 +7,53 @@
 //! [`markup::parse_lines`][super::markup::parse_lines], which emits styled
 //! `<tspan>`s rather than flattening the emphasis to plain text.
 
+use super::builder::SvgBuilder;
+use super::theme::Theme;
+
+/// Draw an opaque background rect — upstream Mermaid's `edgeLabelBackground`
+/// treatment — sized `width`×`height` and centered on `(cx, cy)`, so an edge
+/// label drawn on top stays legible where the edge crosses a node or another
+/// label (#260). The fill is the theme's `flow_label_bg` (wired from the
+/// `edgeLabelBackground` theme variable).
+pub(crate) fn edge_label_bg(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    cy: f64,
+    width: f64,
+    height: f64,
+    theme: &Theme,
+) {
+    svg.rect(
+        cx - width / 2.0,
+        cy - height / 2.0,
+        width,
+        height,
+        &format!("fill=\"{}\" stroke=\"none\"", theme.flow_label_bg),
+    );
+}
+
+/// Draw a centered single-line edge label on an opaque [`edge_label_bg`],
+/// matching upstream's edge-label styling (12px, theme foreground). Shared by
+/// the graph-shaped renderers (flowchart, state, class, ER, block).
+pub(crate) fn draw_edge_label(
+    svg: &mut SvgBuilder,
+    (mx, my): (f64, f64),
+    text: &str,
+    theme: &Theme,
+) {
+    let w = super::metrics::text_width(text, 7.0, theme.font_size) + 8.0;
+    edge_label_bg(svg, mx, my, w, 18.0, theme);
+    svg.text(
+        mx,
+        my + 4.0,
+        &format!(
+            "text-anchor=\"middle\" fill=\"{}\" font-size=\"12\"",
+            theme.fg
+        ),
+        text,
+    );
+}
+
 /// Decode a display label the way upstream Mermaid does before rendering text:
 /// strip KaTeX math fences, then resolve `#`-prefixed entity codes.
 ///
@@ -93,6 +140,20 @@ fn decode_entity(s: &str) -> Option<(String, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_label_draws_background_before_text() {
+        let theme = Theme::default();
+        let mut svg = SvgBuilder::new(100.0, 100.0);
+        draw_edge_label(&mut svg, (50.0, 20.0), "yes", &theme);
+        let out = svg.finish();
+        // The opaque rect (edgeLabelBackground) must precede the label text so
+        // it sits behind it (#260).
+        let rect = out.find(&format!("fill=\"{}\" stroke=\"none\"", theme.flow_label_bg));
+        let text = out.find(">yes<");
+        assert!(rect.is_some(), "expected a background rect");
+        assert!(rect < text, "background must come before the label text");
+    }
 
     #[test]
     fn decodes_entity_codes() {

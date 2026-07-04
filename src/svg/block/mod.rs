@@ -409,6 +409,11 @@ mod tests {
         let svg = render_from(src);
         assert!(svg.contains("#f00"));
         assert!(svg.contains(">link<"));
+        // #260: the edge label sits on an opaque background rect so it stays
+        // legible where the edge crosses a node.
+        let rect = svg.find("fill=\"#fff\" stroke=\"none\"");
+        let label = svg.find(">link<");
+        assert!(rect.is_some() && rect < label);
         // no ghost blocks for the classDef/class keywords
         assert!(!svg.contains(">classDef<"));
         assert!(!svg.contains(">hot<"));

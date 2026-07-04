@@ -105,7 +105,6 @@ pub(super) fn draw_edge(
         return;
     }
     let stroke = &theme.flow_edge_stroke;
-    let fg = &theme.fg;
     let (Some(a), Some(b)) = (nodes.get(&e.from), nodes.get(&e.to)) else {
         return;
     };
@@ -136,13 +135,8 @@ pub(super) fn draw_edge(
         &format!("stroke=\"{stroke}\" stroke-width=\"{width}\"{dash}{marker}"),
     );
     if let Some(label) = &e.label {
-        let (mx, my) = ((ax + bx) / 2.0, (ay + by) / 2.0);
-        svg.text(
-            mx,
-            my - 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-            label,
-        );
+        let mid = ((ax + bx) / 2.0, (ay + by) / 2.0);
+        crate::svg::label::draw_edge_label(svg, mid, label, theme);
     }
 }
 

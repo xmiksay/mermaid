@@ -19,9 +19,7 @@ pub(super) fn draw_relation(
     id_to_u32: &HashMap<String, NodeId>,
     theme: &Theme,
 ) {
-    let fg = &theme.fg;
     let flow_edge_stroke = &theme.flow_edge_stroke;
-    let flow_label_bg = &theme.flow_label_bg;
     let src = id_to_u32[&rel.from] as usize;
     let dst = id_to_u32[&rel.to] as usize;
     let n = pts.len();
@@ -80,21 +78,7 @@ pub(super) fn draw_relation(
 
     if let Some(label) = &rel.label {
         let mid = polyline_midpoint(&clipped);
-        let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
-        let h = 16.0;
-        svg.rect(
-            mid.0 - w / 2.0,
-            mid.1 - h / 2.0,
-            w,
-            h,
-            &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
-        );
-        svg.text(
-            mid.0,
-            mid.1 + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-            label,
-        );
+        crate::svg::label::draw_edge_label(svg, mid, label, theme);
     }
 }
 
