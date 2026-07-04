@@ -53,7 +53,11 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   `->>+` shorthand) draw one band per level, each offset `level * 3px` to the
   right instead of overwriting. Activations still open at the end of the event
   loop are flushed down to `lifeline_bottom`. The band fill/stroke are
-  theme-driven (`theme.activation_fill`/`activation_stroke`).
+  theme-driven (`theme.activation_fill`/`activation_stroke`). An `activate`/
+  `deactivate` that directly follows a message (the `->>+`/`-->>-` shorthand, or
+  a bare `activate` on the next line) starts its band **at that message's arrow**,
+  not half a row below it: `layout_items` remembers the previous message's arrow
+  y (`prev_msg_arrow_y`) and the activation event borrows it, matching upstream.
   - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
     (`parse_message` in `src/parse/sequence/message.rs`): a leading `+`/`-` on the
     target id is stripped (not part of the participant name) and

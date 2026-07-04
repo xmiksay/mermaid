@@ -7,10 +7,10 @@ use super::builder::SvgBuilder;
 use super::theme::Theme;
 
 const PAD: f64 = 40.0;
-const SIZE: f64 = 460.0;
+const SIZE: f64 = 500.0;
 const TITLE_GAP: f64 = 32.0;
 /// Default scatter-point radius when neither the point nor config sets one.
-const POINT_RADIUS: f64 = 6.0;
+const POINT_RADIUS: f64 = 5.0;
 
 pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
@@ -272,6 +272,29 @@ mod tests {
         // width = PAD*2 + 300 + 60 = 440, height = PAD*2 + 300 + 30 = 410.
         assert!(svg.contains("viewBox=\"0 0 440 410\""));
         assert!(svg.contains("r=\"10\""));
+    }
+
+    #[test]
+    fn unconfigured_defaults_match_upstream_500_square_radius_5() {
+        // With no config, the plot is a 500×500 square and points default to
+        // radius 5, matching upstream Mermaid (#227).
+        let d = QuadrantDiagram {
+            points: vec![QuadrantPoint {
+                label: "A".into(),
+                x: 0.5,
+                y: 0.5,
+                radius: None,
+                color: None,
+                stroke_color: None,
+                stroke_width: None,
+                class_name: None,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // width = PAD*2 + 500 + 60 = 640, height = PAD*2 + 500 + 30 = 610.
+        assert!(svg.contains("viewBox=\"0 0 640 610\""));
+        assert!(svg.contains("r=\"5\""));
     }
 
     #[test]
