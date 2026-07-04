@@ -14,9 +14,23 @@ pub(crate) fn parse(input: &str) -> Result<MindmapDiagram, ParseError> {
     let mut root: Option<MindmapNode> = None;
     let mut diag = MindmapDiagram::default();
 
-    for (idx, raw) in input.lines().enumerate() {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut idx = 0;
+    while idx < lines.len() {
         let line_no = idx + 1;
-        let content = strip_comment(raw);
+        // Reassemble a multi-line quoted/markdown label. The grammar is
+        // line-oriented, but a `"…"` label (e.g. a `` "`**bold**\nmore`" ``
+        // markdown string) may span lines. If the line opens a quote that does
+        // not close, gather following lines until the quotes balance — the
+        // same idea as `collect_init` for multi-line `%%{init}%%`.
+        let mut logical = String::from(lines[idx]);
+        idx += 1;
+        while logical.matches('"').count() % 2 == 1 && idx < lines.len() {
+            logical.push('\n');
+            logical.push_str(lines[idx]);
+            idx += 1;
+        }
+        let content = strip_comment(&logical);
         if content.trim().is_empty() {
             continue;
         }
@@ -202,6 +216,25 @@ mod tests {
         let r = d.root.unwrap();
         // Quotes stripped, backtick fence preserved for the markup layer.
         assert_eq!(r.children[0].text, "`**Bold** and *italic*`");
+    }
+
+    #[test]
+    fn multiline_markdown_string_reassembled() {
+        // A `"`…`"` markdown string spanning two lines must join into one node,
+        // not leak brackets/backticks and spawn a bogus `second line` sibling.
+        let d = parse("mindmap\n  id1[\"`**Root**\n  second line`\"]\n").unwrap();
+        let r = d.root.unwrap();
+        assert_eq!(r.shape, MindmapShape::Square);
+        assert_eq!(r.text, "`**Root**\n  second line`");
+        assert!(r.children.is_empty());
+    }
+
+    #[test]
+    fn multiline_plain_quoted_label_reassembled() {
+        let d = parse("mindmap\n  id1[\"first\n  second\"]\n").unwrap();
+        let r = d.root.unwrap();
+        assert_eq!(r.text, "first\n  second");
+        assert!(r.children.is_empty());
     }
 
     #[test]
