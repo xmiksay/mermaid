@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(p.config.row_height, 24.0);
         assert!(!p.config.show_bits);
         // Unset knobs keep their defaults.
-        assert_eq!(p.config.bit_width, 16.0);
+        assert_eq!(p.config.bit_width, 32.0);
     }
 
     #[test]

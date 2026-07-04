@@ -9,6 +9,9 @@ Parser: `src/parse/packet.rs` · Renderer: `src/svg/packet.rs`.
   a dash) stays valid, and non-contiguous gaps remain a tolerated no-op.
   `config.packet.*` (`bitsPerRow`/`bitWidth`/`rowHeight`/`showBits`/`paddingX`/
   `paddingY`) flows through the preamble → `apply_packet_config` (`src/parse/mod.rs`)
-  onto `PacketDiagram.config` (`PacketConfig`, defaults matching the renderer's
-  old constants so the gallery stays byte-identical); `src/svg/packet.rs` reads
+  onto `PacketDiagram.config` (`PacketConfig`, defaults tracking upstream's 32px
+  per bit so one-bit flag labels fit their cells); `src/svg/packet.rs` reads
   them (`showBits false` drops the bit ruler, `bitsPerRow` re-wraps rows).
+- Background cells are drawn only for bits no field covers — a field is one
+  undivided rectangle, not a grid of per-bit cells (issue #248), matching
+  upstream's flat field rectangles.
