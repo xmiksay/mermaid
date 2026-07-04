@@ -4,16 +4,40 @@
 //! Ports the pre-render text handling upstream Mermaid does: resolving
 //! `#`-prefixed entity codes. Backtick-fenced markdown *strings* and their
 //! `**bold**`/`*italic*` emphasis are handled one layer up, in
-//! [`markup::parse_spans`][super::markup::parse_spans], which emits styled
+//! [`markup::parse_lines`][super::markup::parse_lines], which emits styled
 //! `<tspan>`s rather than flattening the emphasis to plain text.
 
 /// Decode a display label the way upstream Mermaid does before rendering text:
-/// resolve `#`-prefixed entity codes.
+/// strip KaTeX math fences, then resolve `#`-prefixed entity codes.
 ///
 /// Mermaid uses `#` (not `&`) as the entity sentinel in diagram source, so
 /// `#quot;` → `"`, `#35;` → `#`, `#9829;`/`#x2665;` → `♥`.
 pub fn decode_label(s: &str) -> String {
-    decode_entities(s)
+    decode_entities(&strip_math(s))
+}
+
+/// Strip KaTeX `$$…$$` math fences, keeping the inner expression as plain text.
+/// Full KaTeX layout is out of scope for a static renderer, so degrading
+/// `$$x^2$$` to `x^2` reads better than leaking the raw delimiters (#187). Only
+/// matched `$$` pairs are unwrapped; a lone `$$` is left untouched.
+fn strip_math(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains("$$") {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("$$") {
+        match rest[start + 2..].find("$$") {
+            Some(end_rel) => {
+                out.push_str(&rest[..start]);
+                out.push_str(rest[start + 2..start + 2 + end_rel].trim());
+                rest = &rest[start + 2 + end_rel + 2..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
 }
 
 fn decode_entities(s: &str) -> String {
@@ -79,6 +103,16 @@ mod tests {
         // Not an entity: left untouched.
         assert_eq!(decode_label("C#Sharp"), "C#Sharp");
         assert_eq!(decode_label("#notclosed"), "#notclosed");
+    }
+
+    #[test]
+    fn strips_math_fences() {
+        // #187: `$$…$$` KaTeX fences degrade to their inner expression.
+        assert_eq!(decode_label("$$x^2$$"), "x^2");
+        assert_eq!(decode_label("a $$x + y$$ b"), "a x + y b");
+        // A lone/unmatched `$$` is left untouched, as is bare currency.
+        assert_eq!(decode_label("cost is $$"), "cost is $$");
+        assert_eq!(decode_label("$5 and $10"), "$5 and $10");
     }
 
     #[test]

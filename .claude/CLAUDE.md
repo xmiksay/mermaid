@@ -236,7 +236,10 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   `style="max-width: {w}px;"` + `viewBox` and **no fixed height** (upstream
   shape). Tests must not assert a root `height="…"`.
 - **Label text is decoded** in `SvgBuilder::text()` via `decode_label`
-  (`src/svg/label.rs`), which now only resolves `#…;` entity codes
+  (`src/svg/label.rs`), which strips KaTeX `$$…$$` math fences (`strip_math`:
+  `$$x^2$$` → `x^2` — full KaTeX layout is out of scope, so the raw delimiters
+  are dropped rather than leaked; only matched `$$` pairs are unwrapped) then
+  resolves `#…;` entity codes
   (`#quot;`→`"`, `#35;`→`#`, `#9829;`/`#x2665;`→`♥`, named set). Backtick-fenced
   markdown *strings* and their `**bold**`/`*italic*`/`__`/`_` emphasis are
   handled one layer up by `parse_spans` (`src/svg/markup.rs`): a fenced line is
@@ -245,10 +248,15 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   fenced label still collapses to one plain run (bare `<text>` fast path). Bare
   labels with `_`/`*` (e.g. `snake_case`) are never touched.
 - **Inline HTML labels** (`htmlLabels`, `src/svg/markup.rs`): `SvgBuilder::text`
-  first line-splits, then `parse_spans` walks each line into styled runs mapped
-  onto `<tspan>`s — `<b>`/`<strong>`→`font-weight="bold"`, `<i>`/`<em>`→italic,
+  first line-splits (`split_label_lines` on `<br>`/`\n`), then `parse_lines`
+  walks **all** lines together into styled runs mapped onto `<tspan>`s —
+  `<b>`/`<strong>`→`font-weight="bold"`, `<i>`/`<em>`→italic,
   `<u>`→underline, `<span style="color:…">`→`fill`, `<a href>`→wraps the run in
-  an SVG `<a>`. Tag scanning runs on the raw source *before* entity decoding, so
+  an SVG `<a>`. `parse_lines` threads one open-tag style stack across the line
+  breaks so a tag opened before a `<br>` still styles the following line
+  (`<b>a<br>b</b>` keeps both lines bold, #187); the single-line `parse_spans`
+  is now a test-only helper. Tag scanning runs on the raw source *before* entity
+  decoding, so
   `#lt;`-encoded brackets never masquerade as tags; the per-run text is then
   `decode_label`-ed. Unknown tags are **stripped** (not escaped), so unsupported
   markup degrades to plain text; a bare `<` that doesn't open a well-formed tag
@@ -768,6 +776,14 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   and timeline scale the `LABEL_LINE_H` line spacing by `font_scale` the same
   way. Because `font_scale(14) == 1`, every default-theme render — and the whole
   gallery — is byte-identical; only a non-default font size changes.
+  `text_width` counts East-Asian-wide / full-width glyphs (`char_width_units`:
+  CJK ideographs, kana, Hangul, full-width forms) as **two** half-width units,
+  so a CJK label no longer overflows its shape by ~50% (#187); pure-ASCII text
+  is unchanged, keeping the gallery byte-identical.
+- **A leading UTF-8 BOM (U+FEFF)** is stripped at the top of `parse_with_meta`
+  (`src/parse/mod.rs`) before preamble handling — Rust's `trim` leaves it, so a
+  Windows-editor file would otherwise report `unknown diagram type: ﻿flowchart`
+  (#187).
 - C4 supports the full `{System,Container,Component} × {Db,Queue} × {_Ext}`
   element matrix; the `_Ext` variants reuse the same shape with the gray
   external palette. `UpdateElementStyle` / `UpdateRelStyle` /

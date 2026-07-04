@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
-use super::markup::{parse_spans, Span};
+use super::markup::{parse_lines, Span};
 use super::theme::Theme;
 
 /// Baseline-to-baseline spacing used when a label is split across lines.
@@ -121,7 +121,9 @@ impl SvgBuilder {
 
     pub fn text(&mut self, x: f64, y: f64, attrs: &str, content: &str) {
         let lines = split_label_lines(content);
-        let parsed: Vec<Vec<Span>> = lines.iter().map(|l| parse_spans(l)).collect();
+        // Parse all lines together so an inline tag opened before a `<br>`
+        // still styles the text after it (#187).
+        let parsed: Vec<Vec<Span>> = parse_lines(&lines);
         // Fast path: a single line of plain text stays a bare <text>, so
         // tag-free labels render byte-identically to before inline HTML support.
         if parsed.len() == 1 && parsed[0].len() == 1 && parsed[0][0].is_plain() {
@@ -515,6 +517,23 @@ mod tests {
         assert!(svg.contains("text-decoration=\"underline\">u</tspan>"));
         // The tags themselves never leak as literal text.
         assert!(!svg.contains("&lt;b&gt;"));
+    }
+
+    #[test]
+    fn inline_style_carries_across_br() {
+        // #187: a tag opened before a <br> must still style the next line.
+        let mut b = SvgBuilder::new(200.0, 60.0);
+        b.text(
+            50.0,
+            30.0,
+            "text-anchor=\"middle\"",
+            "<b>line1<br>line2</b>",
+        );
+        let svg = b.finish();
+        // Both stacked lines are bold, not just the first.
+        assert_eq!(svg.matches("font-weight=\"bold\"").count(), 2);
+        assert!(svg.contains(">line1</tspan>"));
+        assert!(svg.contains(">line2</tspan>"));
     }
 
     #[test]
