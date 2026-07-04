@@ -114,10 +114,7 @@ fn draw_ticket(svg: &mut SvgBuilder, x: f64, y: f64, ticket: &str, base: Option<
         } else {
             format!("{base}{ticket}")
         };
-        svg.raw(&format!(
-            "<a xlink:href=\"{}\" target=\"_blank\">",
-            escape(&href)
-        ));
+        svg.raw(&format!("<a href=\"{}\" target=\"_blank\">", escape(&href)));
         svg.text(x, y, &attrs, ticket);
         svg.raw("</a>");
     } else {
@@ -180,7 +177,7 @@ mod tests {
         assert!(!svg.contains("[Very High]"));
         // Ticket rendered and linked with the id substituted into the base URL.
         assert!(svg.contains(">MC-2037<"));
-        assert!(svg.contains("xlink:href=\"https://tracker/MC-2037\""));
+        assert!(svg.contains("href=\"https://tracker/MC-2037\""));
     }
 
     #[test]
@@ -198,6 +195,6 @@ mod tests {
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(">MC-1<"));
-        assert!(!svg.contains("xlink:href"));
+        assert!(!svg.contains("href"));
     }
 }
