@@ -292,7 +292,7 @@ fn parse_one_block(tok: &str) -> Option<BlockItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::ast::BlockLinkStyle;
+    use crate::parse::ast::{BlockLinkStyle, EdgeHead};
 
     #[test]
     fn basic_grid() {
@@ -369,7 +369,8 @@ mod tests {
         assert_eq!(edges[0].from, "a");
         assert_eq!(edges[0].to, "b");
         assert_eq!(edges[0].label.as_deref(), Some("hello"));
-        assert!(edges[0].arrow);
+        assert_eq!(edges[0].head, EdgeHead::Arrow);
+        assert_eq!(edges[0].tail, EdgeHead::None);
     }
 
     #[test]
@@ -437,9 +438,73 @@ mod tests {
             .collect();
         assert_eq!(edges.len(), 3);
         assert_eq!(edges[0].style, BlockLinkStyle::Dotted);
-        assert!(edges[0].arrow);
+        assert_eq!(edges[0].head, EdgeHead::Arrow);
         assert_eq!(edges[1].style, BlockLinkStyle::Thick);
         assert_eq!(edges[2].style, BlockLinkStyle::Invisible);
+    }
+
+    #[test]
+    fn cross_and_circle_headed_links() {
+        // Formerly a #169 residual: `--x`/`--o`/`==x`/`==o` fell through to block
+        // parsing and produced ghost blocks. They now parse as headed edges.
+        let d = parse("block-beta\n  a b c d e f\n  a --x b\n  b --o c\n  c ==x d\n  d ==o e\n")
+            .unwrap();
+        let edges: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                BlockItem::Edge(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(edges.len(), 4);
+        assert_eq!(
+            (edges[0].style, edges[0].head),
+            (BlockLinkStyle::Solid, EdgeHead::Cross)
+        );
+        assert_eq!(
+            (edges[1].style, edges[1].head),
+            (BlockLinkStyle::Solid, EdgeHead::Circle)
+        );
+        assert_eq!(
+            (edges[2].style, edges[2].head),
+            (BlockLinkStyle::Thick, EdgeHead::Cross)
+        );
+        assert_eq!(
+            (edges[3].style, edges[3].head),
+            (BlockLinkStyle::Thick, EdgeHead::Circle)
+        );
+        // No ghost blocks were emitted for the connectors.
+        let ids: Vec<&str> = blocks(&d).iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c", "d", "e", "f"]);
+    }
+
+    #[test]
+    fn tail_marked_links() {
+        // `<-->`/`x--x`/`o--o` carry a marker on the `from` end too. A node id
+        // ending in `o` (`foo`) must not be misread as a circle tail.
+        let d = parse("block-beta\n  a b foo c\n  a <--> b\n  b x--x foo\n  foo o--o c\n").unwrap();
+        let edges: Vec<_> = d
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                BlockItem::Edge(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(edges.len(), 3);
+        assert_eq!(
+            (edges[0].tail, edges[0].head),
+            (EdgeHead::Arrow, EdgeHead::Arrow)
+        );
+        assert_eq!(
+            (edges[1].tail, edges[1].head),
+            (EdgeHead::Cross, EdgeHead::Cross)
+        );
+        assert_eq!(
+            (edges[2].from.as_str(), edges[2].tail),
+            ("foo", EdgeHead::Circle)
+        );
     }
 
     #[test]

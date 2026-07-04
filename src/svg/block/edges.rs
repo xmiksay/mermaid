@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::parse::{BlockArrow, BlockEdge, BlockLinkStyle, BlockShape};
+use crate::parse::{BlockArrow, BlockEdge, BlockLinkStyle, BlockShape, EdgeHead};
 
 use crate::svg::builder::{fnum, SvgBuilder};
 use crate::svg::theme::Theme;
@@ -112,15 +112,16 @@ pub(super) fn draw_edge(
     // Clip both ends to the node boundaries so the arrowhead sits on the edge.
     let (ax, ay) = clip((b.cx, b.cy), a);
     let (bx, by) = clip((a.cx, a.cy), b);
-    let marker = if e.arrow {
-        " marker-end=\"url(#blockarrow)\""
-    } else {
-        ""
-    };
-    if e.arrow {
-        svg.defs_raw(
-            "<marker id=\"blockarrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"#333\"/></marker>"
-        );
+    // The markers use `orient="auto-start-reverse"`, so the same id flips to
+    // point outward at the tail (`marker-start`) end.
+    let mut marker = String::new();
+    if let Some(id) = marker_id(e.tail) {
+        define_marker(svg, e.tail);
+        marker.push_str(&format!(" marker-start=\"url(#{id})\""));
+    }
+    if let Some(id) = marker_id(e.head) {
+        define_marker(svg, e.head);
+        marker.push_str(&format!(" marker-end=\"url(#{id})\""));
     }
     let (width, dash) = match e.style {
         BlockLinkStyle::Thick => ("2.6", ""),
@@ -143,6 +144,28 @@ pub(super) fn draw_edge(
             label,
         );
     }
+}
+
+/// SVG `<marker>` id for an edge end, or `None` for a plain end (`---`).
+fn marker_id(head: EdgeHead) -> Option<&'static str> {
+    match head {
+        EdgeHead::Arrow => Some("blockarrow"),
+        EdgeHead::Circle => Some("blockcircle"),
+        EdgeHead::Cross => Some("blockcross"),
+        _ => None,
+    }
+}
+
+/// Emit the `<marker>` definition backing `head` (idempotent per id — the same
+/// definition may be appended once per referencing edge).
+fn define_marker(svg: &mut SvgBuilder, head: EdgeHead) {
+    let def = match head {
+        EdgeHead::Arrow => "<marker id=\"blockarrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"#333\"/></marker>",
+        EdgeHead::Circle => "<marker id=\"blockcircle\" viewBox=\"0 0 12 12\" refX=\"10\" refY=\"6\" markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\"><circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#fff\" stroke=\"#333\" stroke-width=\"1.5\"/></marker>",
+        EdgeHead::Cross => "<marker id=\"blockcross\" viewBox=\"0 0 10 10\" refX=\"5\" refY=\"5\" markerWidth=\"9\" markerHeight=\"9\" orient=\"auto\"><path d=\"M1,1 L9,9 M9,1 L1,9\" stroke=\"#333\" stroke-width=\"1.5\"/></marker>",
+        _ => return,
+    };
+    svg.defs_raw(def);
 }
 
 /// Clip the point `from → node.center` to the node's shape boundary.
