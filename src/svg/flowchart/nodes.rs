@@ -259,22 +259,20 @@ fn draw_label(
     font_size: Option<&str>,
     extra: &str,
 ) {
-    let lines = split_label_lines(text);
-    let n = lines.len() as f64;
-    let line_h = 18.0;
-    let y0 = cy - ((n - 1.0) * line_h) / 2.0 + 5.0;
     let fs = match font_size {
         Some(s) => format!(" font-size=\"{s}\""),
         None => String::new(),
     };
-    for (i, line) in lines.iter().enumerate() {
-        svg.text(
-            cx,
-            y0 + i as f64 * line_h,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\"{fs}{extra}"),
-            line,
-        );
-    }
+    // Route the whole label through one `SvgBuilder::text` call: it stacks the
+    // lines as vertically-centered <tspan>s and carries an inline tag opened
+    // before a `<br>` across the break (#221). Splitting per line here would
+    // reset the open-tag stack at each line boundary.
+    svg.text(
+        cx,
+        cy + 5.0,
+        &format!("text-anchor=\"middle\" fill=\"{fg}\"{fs}{extra}"),
+        text,
+    );
 }
 
 // ---- subgraph frames -------------------------------------------------------
