@@ -10,7 +10,6 @@ keywords = ["mermaid", "diagram", "svg", "flowchart", "uml"]
 categories = ["visualization", "rendering", "parser-implementations"]
 
 [dependencies]
-petgraph = "0.8.3"
 thiserror = "2.0.18"
 
 [dev-dependencies]

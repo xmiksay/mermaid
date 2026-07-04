@@ -4,7 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Pure-Rust [Mermaid](https://mermaid.js.org/) → SVG renderer. No Node.js,
-no JVM, no native binaries — just `cargo add mermaid-svg`.
+no JVM, no native binaries, a single runtime dependency (`thiserror`) —
+just `cargo add mermaid-svg`.
 
 ## Quick start
 
