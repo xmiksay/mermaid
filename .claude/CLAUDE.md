@@ -83,7 +83,7 @@ the `lib.rs` include lines, so treat it as a serial-window change.
 | journey · timeline · sankey · quadrant · xychart · radar · packet parsers | done |
 | mindmap · gitGraph · requirement · C4 · block · architecture · kanban · treemap · zenuml parsers | done |
 | Matching SVG renderers (zenuml reuses sequence renderer) | done |
-| Themes (default, dark, forest, neutral + user-defined) | done |
+| Themes (default, base, dark, forest, neutral + user-defined) | done |
 | CLI binary (`mermaid-svg`) | done |
 | Cross-cutting preamble (frontmatter title/theme, `%%{init}%%`, accTitle/accDescr) | done |
 | Responsive SVG output + `role`/`aria`/`<title>`/`<desc>` accessibility | done |
@@ -137,18 +137,38 @@ fn draw_thing(svg: &mut SvgBuilder, …, theme: &Theme) {
 `format!` strings then use plain identifiers (`{fg}`), since Rust's named
 format args don't support field access.
 
-When adding a new color to `Theme`, also add it to all four built-in
-constructors in `src/svg/theme.rs`. Custom themes use struct-update syntax
-from one of the built-ins, so adding a field is non-breaking.
+When adding a new color to `Theme`, also add it to the built-in constructors in
+`src/svg/theme.rs` (`default_theme`/`dark`/`forest`/`neutral`; `base` uses
+`..Self::default_theme()` struct-update so it inherits new fields for free).
+Custom themes use struct-update syntax from one of the built-ins, so adding a
+field is non-breaking. `by_name` maps `default`→`default_theme`,
+`base`→`base` (upstream's customization palette — warm `#fff4dd` primary,
+visibly distinct from `default`'s lavender, **not** an alias), and the three
+named themes.
 
 Color/font fields are `Cow<'static, str>` (not `&'static str`): built-in
 constructors stay `const` (`Cow::Borrowed(...)`), but `themeVariables`/
 `fontFamily` config and downstream overrides supply owned runtime strings
 (`fg: "#000".into()`). `Theme` is thus `Clone`, **not** `Copy`. Renderers read a
 color as `&theme.fg` (a `&Cow<str>` that deref-coerces to `&str`), so
-`let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working.
+`let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working. The categorical
+`pie_palette` is a `Cow<'static, [Cow<'static, str>]>` (owned-on-write) so
+per-slot `themeVariables` (`pie{N}`/`git{N}`/`cScale{N}`) can recolor
+individual entries via `Theme::set_palette` — `pie_color(i)` returns `&str` and
+still wraps modulo the (possibly grown) length. `theme: base` **without**
+overrides is now visibly distinct from `default`.
 `Theme::apply_theme_variables(&mut self, vars)` recolors a base theme from the
-upstream `themeVariables` names; `theme_from_meta` in `src/svg/mod.rs` wires
+upstream `themeVariables` names — beyond the generic ones (`primaryColor`,
+`lineColor`, …) it now honors the documented per-diagram variables: sequence
+(`actorBkg`/`actorBorder`/`actorTextColor`/`actorLineColor`/`signalColor`/
+`signalTextColor`/`labelBoxBkgColor`/`activationBkgColor`), pie
+(`pie{1..12}`/`pieStrokeColor`/`pieOpacity`/`pieTitleTextColor`), git
+(`git{0..7}`/`commitLabelColor`/`tagLabelColor`), the generic `cScale{0..11}`
+categorical scale, plus `titleColor`/`edgeLabelBackground`. Text-color
+variables land on `Option<Str>` fields with `theme.actor_text()`/`signal_text()`/
+`title()`/`commit_label()`/`tag_label()`/`pie_stroke()` accessors that fall back
+to `fg`/`fg_muted`/`#fff`, so an unset variable keeps the render byte-identical.
+`theme_from_meta` in `src/svg/mod.rs` wires
 theme name → `themeVariables` → `fontFamily`/`fontSize` → `useMaxWidth` onto the
 effective theme. `Theme::responsive` (default `true`) is cleared by
 `config.useMaxWidth: false`, making `SvgBuilder::finish` emit a fixed pixel

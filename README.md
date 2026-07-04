@@ -112,9 +112,16 @@ These work on every diagram type:
   and a nested `config:` block.
 - **`%%{init: {…}}%%` directives** — the same config, inline and anywhere.
 - **Config** — the whole `config:` tree (frontmatter *and* `init`) is honored:
-  `theme` (a built-in name; `base` aliases `default`), `themeVariables`
-  (upstream's `theme: base` recoloring path — `primaryColor`, `lineColor`,
-  `primaryBorderColor`, `noteBkgColor`, `fontFamily`, `fontSize`, …), top-level
+  `theme` (a built-in name — `default`, `base` (the warm-cream customization
+  palette, distinct from `default`), `dark`, `forest`, `neutral`),
+  `themeVariables` (upstream's `theme: base` recoloring path — the generic
+  `primaryColor`/`lineColor`/`primaryBorderColor`/`noteBkgColor`/`titleColor`/
+  `edgeLabelBackground`/`fontFamily`/`fontSize`, plus the documented per-diagram
+  names: sequence `actorBkg`/`actorBorder`/`actorTextColor`/`actorLineColor`/
+  `signalColor`/`signalTextColor`/`labelBoxBkgColor`/`activationBkgColor`, pie
+  `pie{1..12}`/`pieStrokeColor`/`pieOpacity`/`pieTitleTextColor`, git
+  `git{0..7}`/`commitLabelColor`/`tagLabelColor`, and the `cScale{0..11}`
+  categorical scale), top-level
   `fontFamily`/`fontSize`, `useMaxWidth: false` (top-level *or* per diagram —
   `flowchart.useMaxWidth`, `sequence.useMaxWidth`, … — emit a fixed-size SVG
   instead of the responsive envelope), and `flowchart.curve` (the diagram-level

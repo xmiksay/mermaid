@@ -15,7 +15,7 @@ pub(super) fn draw_message(
     text: &str,
     theme: &Theme,
 ) {
-    let fg = &theme.fg;
+    let fg = theme.signal_text();
     let arrow_stroke = &theme.arrow_stroke;
     let (dash, start_marker, end_marker) = stroke_for(arrow);
     let dash_attr = if dash.is_empty() {

@@ -17,7 +17,7 @@ ARGS:
     OUTPUT    Output file (default: stdout, or '-')
 
 OPTIONS:
-    -t, --theme <NAME>    Theme: default (alias base), dark, forest, neutral [default: default]
+    -t, --theme <NAME>    Theme: default, base, dark, forest, neutral [default: default]
     -f, --font <FAMILY>   CSS font-family for all text [default: sans-serif]
         --font-size <PX>  Base font size in pixels [default: 14]
     -h, --help            Print help
@@ -92,7 +92,7 @@ fn run() -> Result<(), String> {
     }
 
     let mut theme = Theme::by_name(&theme_name).ok_or_else(|| {
-        format!("unknown theme '{theme_name}' (valid: default (alias base), dark, forest, neutral)")
+        format!("unknown theme '{theme_name}' (valid: default, base, dark, forest, neutral)")
     })?;
     if let Some(font) = font {
         theme = theme.with_font(font);

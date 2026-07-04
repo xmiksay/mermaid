@@ -42,6 +42,14 @@ impl LegendPos {
 pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let fg_muted = &theme.fg_muted;
+    let title_color = theme.title();
+    let pie_stroke = theme.pie_stroke();
+    // `pieOpacity` emits a `fill-opacity` attribute only when set, so the
+    // default render stays byte-identical.
+    let opacity_attr = match &theme.pie_opacity {
+        Some(o) => format!(" fill-opacity=\"{o}\""),
+        None => String::new(),
+    };
     let pie_color = |i| theme.pie_color(i);
 
     let total: f64 = p.entries.iter().map(|e| e.value.max(0.0)).sum();
@@ -130,7 +138,9 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!(
+                "text-anchor=\"middle\" fill=\"{title_color}\" font-size=\"18\" font-weight=\"bold\""
+            ),
             t,
         );
     }
@@ -171,7 +181,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
             svg.path(
                 &slice_path(cx, cy, RADIUS, inner_r, a1, a2, large),
                 &format!(
-                    "fill=\"{c}\" stroke=\"#fff\" stroke-width=\"1\"",
+                    "fill=\"{c}\"{opacity_attr} stroke=\"{pie_stroke}\" stroke-width=\"1\"",
                     c = pie_color(i)
                 ),
             );
@@ -202,7 +212,7 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
             SWATCH,
             SWATCH,
             &format!(
-                "fill=\"{c}\" stroke=\"#fff\" stroke-width=\"1\"",
+                "fill=\"{c}\" stroke=\"{pie_stroke}\" stroke-width=\"1\"",
                 c = pie_color(i)
             ),
         );
