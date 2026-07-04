@@ -61,8 +61,10 @@ enum Field {
 
 /// Field order implied by a `dateFormat` string, honoring both the date tokens
 /// (`Y`/`M`/`D`) and any sub-day time tokens (`H` hour, lowercase `m` minute,
-/// lowercase `s` second, `S` millisecond). Defaults to year-month-day when the
-/// three date tokens can't be located.
+/// lowercase `s` second, `S` millisecond). A well-formed date format contributes
+/// its three date tokens plus any time tokens; a **time-only** format (e.g.
+/// `HH:mm`) contributes just its time tokens. Falls back to year-month-day when
+/// neither a full date nor any time token can be located.
 fn field_order(fmt: &str) -> Vec<Field> {
     let candidates = [
         (fmt.find(['Y', 'y']), Field::Year),
@@ -73,8 +75,12 @@ fn field_order(fmt: &str) -> Vec<Field> {
         (fmt.find('s'), Field::Second),
         (fmt.find('S'), Field::Milli),
     ];
-    // A well-formed format has the three date tokens; otherwise fall back.
-    if candidates[0].0.is_none() || candidates[1].0.is_none() || candidates[2].0.is_none() {
+    let has_full_date =
+        candidates[0].0.is_some() && candidates[1].0.is_some() && candidates[2].0.is_some();
+    let has_time = candidates[3..].iter().any(|(pos, _)| pos.is_some());
+    // Without a full date or any time token there's nothing to anchor on — a
+    // partial date format (e.g. `YYYY-MM`) falls back to the ISO field order.
+    if !has_full_date && !has_time {
         return vec![Field::Year, Field::Month, Field::Day];
     }
     let mut present: Vec<(usize, Field)> = candidates
@@ -103,15 +109,24 @@ pub(crate) fn parse_datetime(s: &str, date_format: Option<&str>) -> Option<f64> 
         .filter(|p| !p.is_empty())
         .map(|p| p.parse().ok())
         .collect::<Option<Vec<_>>>()?;
-    if nums.len() < 3 {
+    let order = field_order(date_format.unwrap_or("YYYY-MM-DD"));
+    // A date needs all of its Y/M/D numbers (trailing time components stay
+    // optional); a time-only format needs each of its present time fields.
+    let date_fields = order
+        .iter()
+        .filter(|f| matches!(f, Field::Year | Field::Month | Field::Day))
+        .count();
+    let min_required = if date_fields > 0 {
+        date_fields
+    } else {
+        order.len()
+    };
+    if nums.len() < min_required {
         return None;
     }
     let (mut y, mut m, mut d) = (0i64, 1i64, 1i64);
     let (mut hh, mut mi, mut ss, mut ms) = (0i64, 0i64, 0i64, 0i64);
-    for (field, &v) in field_order(date_format.unwrap_or("YYYY-MM-DD"))
-        .iter()
-        .zip(&nums)
-    {
+    for (field, &v) in order.iter().zip(&nums) {
         match field {
             Field::Year => y = v,
             Field::Month => m = v,
@@ -155,13 +170,20 @@ const DAYS_FULL: [&str; 7] = [
     "Saturday",
 ];
 
-/// Render a day count using a d3-style `axisFormat` (a `strftime` subset);
-/// defaults to ISO `%Y-%m-%d`.
-pub(crate) fn format_date(day: i64, axis_format: Option<&str>) -> String {
+/// Render a **fractional** day count using a d3-style `axisFormat` (a `strftime`
+/// subset); defaults to ISO `%Y-%m-%d`. Time tokens (`%H`/`%M`/`%S`) read the
+/// sub-day fraction, so a sub-day axis shows real hours/minutes instead of `00`.
+pub(crate) fn format_date(day: f64, axis_format: Option<&str>) -> String {
     let fmt = axis_format.unwrap_or("%Y-%m-%d");
-    let (y, m, d) = civil_from_days(day);
+    // Round to whole seconds first so a fraction just under midnight rolls the
+    // date forward instead of printing `24:00` on the previous day.
+    let total_secs = (day * 86_400.0).round() as i64;
+    let whole = total_secs.div_euclid(86_400);
+    let sec_of_day = total_secs.rem_euclid(86_400);
+    let (hour, minute, second) = (sec_of_day / 3600, (sec_of_day % 3600) / 60, sec_of_day % 60);
+    let (y, m, d) = civil_from_days(whole);
     let mi = (m - 1).clamp(0, 11) as usize;
-    let wd = weekday(day) as usize;
+    let wd = weekday(whole) as usize;
     let mut out = String::new();
     let mut chars = fmt.chars();
     while let Some(c) = chars.next() {
@@ -175,14 +197,14 @@ pub(crate) fn format_date(day: i64, axis_format: Option<&str>) -> String {
             Some('m') => out.push_str(&format!("{m:02}")),
             Some('d') => out.push_str(&format!("{d:02}")),
             Some('e') => out.push_str(&format!("{d:2}")),
-            Some('j') => out.push_str(&format!("{:03}", day - days_from_civil(y, 1, 1) + 1)),
+            Some('j') => out.push_str(&format!("{:03}", whole - days_from_civil(y, 1, 1) + 1)),
             Some('b') | Some('h') => out.push_str(MONTHS_ABBR[mi]),
             Some('B') => out.push_str(MONTHS_FULL[mi]),
             Some('a') => out.push_str(DAYS_ABBR[wd]),
             Some('A') => out.push_str(DAYS_FULL[wd]),
-            Some('H') => out.push_str("00"),
-            Some('M') => out.push_str("00"),
-            Some('S') => out.push_str("00"),
+            Some('H') => out.push_str(&format!("{hour:02}")),
+            Some('M') => out.push_str(&format!("{minute:02}")),
+            Some('S') => out.push_str(&format!("{second:02}")),
             Some('%') => out.push('%'),
             Some(other) => {
                 out.push('%');
@@ -326,11 +348,36 @@ mod tests {
 
     #[test]
     fn axis_format_specifiers() {
-        let day = days_from_civil(2026, 1, 5); // a Monday
+        let day = days_from_civil(2026, 1, 5) as f64; // a Monday
         assert_eq!(format_date(day, None), "2026-01-05");
         assert_eq!(format_date(day, Some("%m/%d")), "01/05");
         assert_eq!(format_date(day, Some("%b %d")), "Jan 05");
         assert_eq!(format_date(day, Some("%a")), "Mon");
+    }
+
+    #[test]
+    fn time_only_format_keeps_minutes() {
+        // `dateFormat HH:mm` yields a sub-day fraction off a fixed base day, so
+        // 17:49 and 18:08 differ by exactly 19 minutes.
+        let a = parse_datetime("17:49", Some("HH:mm")).unwrap();
+        let b = parse_datetime("18:08", Some("HH:mm")).unwrap();
+        assert!((b - a - 19.0 / 1440.0).abs() < 1e-9);
+        // A single number can't satisfy a two-field time format.
+        assert_eq!(parse_datetime("17", Some("HH:mm")), None);
+    }
+
+    #[test]
+    fn axis_formats_real_time_from_fraction() {
+        let base = days_from_civil(2026, 1, 5) as f64;
+        // 17:49:30 → the time tokens read the fraction, not a hardcoded `00`.
+        let dt = base + (17.0 * 3600.0 + 49.0 * 60.0 + 30.0) / 86_400.0;
+        assert_eq!(format_date(dt, Some("%H:%M")), "17:49");
+        assert_eq!(format_date(dt, Some("%H:%M:%S")), "17:49:30");
+        // A fraction a hair under midnight rolls the date forward, not `24:00`.
+        assert_eq!(
+            format_date(base + 1.0 - 1e-9, Some("%Y-%m-%d %H:%M")),
+            "2026-01-06 00:00"
+        );
     }
 
     #[test]

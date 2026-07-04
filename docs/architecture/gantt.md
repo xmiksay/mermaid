@@ -14,6 +14,18 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   with a `2026-01-03 09:00` value no longer collapses to midnight; `parse_date`
   is just `parse_datetime(..).floor()`. Task start/end dates resolve through
   `parse_datetime`; `Excludes` still uses whole-day `parse_date`.
+- **Time-only formats** (`dateFormat HH:mm`) are fully supported: `field_order`
+  contributes just the present time tokens when no full date is found, and
+  `parse_datetime` only requires as many numbers as the format has fields (2 for
+  `HH:mm`), so `17:49` parses to a sub-day fraction off a fixed base day. The
+  gantt parser's `looks_like_date` also treats a `:`-joined digit token as a
+  date, so a leading `09:00` is read as the start rather than the task id, and an
+  explicit `18:14` end becomes a `TaskEnd::Date`. When the whole chart spans less
+  than a day the renderer drops the `0.5`-day minimum-bar floor (so a 2h and a
+  90m task no longer render identically), lets the axis span the true sub-day
+  range instead of stretching to one day, and `pick_tick_step` picks clean
+  minute/hour tick intervals. `format_date` takes a **fractional** day and reads
+  the fraction for `%H`/`%M`/`%S`, so a `HH:mm` axis shows real times, not `00`.
 - Gantt `excludes` (weekends / weekday names / specific dates) is honored by
   the renderer via `Excludes` (`src/svg/gantt_date.rs`): each non-working day
   gets a light shading band behind the bars, and duration-based tasks are

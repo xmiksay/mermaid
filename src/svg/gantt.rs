@@ -30,13 +30,29 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         .iter()
         .map(|t| t.start_day)
         .fold(f64::INFINITY, f64::min);
-    let project_end = resolved
+    // Raw span (unclamped durations) decides whether the chart is sub-day. A
+    // sub-day chart drops the half-day bar floor — otherwise a 2h and a 90m task
+    // both clamp to 0.5d and render identically — and lets the axis span less
+    // than a full day instead of being stretched to one.
+    let raw_end = resolved
         .iter()
         .map(|t| t.start_day + t.duration)
         .fold(f64::NEG_INFINITY, f64::max);
+    let raw_span = if project_start.is_finite() && raw_end.is_finite() {
+        raw_end - project_start
+    } else {
+        0.0
+    };
+    let sub_day = raw_span > 0.0 && raw_span < 1.0;
+    let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
+    let project_end = resolved
+        .iter()
+        .map(|t| t.start_day + t.duration.max(min_bar_dur))
+        .fold(f64::NEG_INFINITY, f64::max);
 
     let (start_day, total_days) = if project_start.is_finite() && project_end.is_finite() {
-        (project_start, (project_end - project_start).max(1.0))
+        let floor = if sub_day { raw_span } else { 1.0 };
+        (project_start, (project_end - project_start).max(floor))
     } else {
         (0.0, 1.0)
     };
@@ -97,7 +113,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             x + 2.0,
             axis_y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"11\""),
-            &format_date((start_day + tick).round() as i64, d.axis_format.as_deref()),
+            &format_date(start_day + tick, d.axis_format.as_deref()),
         );
         tick += tick_step;
     }
@@ -216,7 +232,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 );
             } else {
                 // Bar
-                let w = (r.duration / total_days) * body_w;
+                let w = (r.duration.max(min_bar_dur) / total_days) * body_w;
                 svg.rect(
                     x,
                     y + 2.0,
@@ -282,7 +298,9 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<Resolved> {
                     .map(|(s, _)| *s - start)
                     .unwrap_or(1.0),
             }
-            .max(0.5);
+            // Guard only against a negative length here; the visible-bar floor
+            // is applied at render time so sub-day charts keep true durations.
+            .max(0.0);
             let end = start + dur;
             if let Some(id) = &task.id {
                 id_to_start_end.insert(id.clone(), (start, end));
@@ -364,6 +382,18 @@ fn css_style(css: &str) -> String {
 }
 
 fn pick_tick_step(total_days: f64) -> f64 {
+    if total_days < 1.0 {
+        // Sub-day span: step in clean minute/hour intervals, aiming for at most
+        // ~8 ticks so a `HH:mm` axis stays readable.
+        const MINUTE: f64 = 1.0 / 1440.0;
+        return [
+            1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 180.0, 360.0, 720.0,
+        ]
+        .into_iter()
+        .map(|m| m * MINUTE)
+        .find(|step| total_days / step <= 8.0)
+        .unwrap_or(720.0 * MINUTE);
+    }
     if total_days <= 7.0 {
         1.0
     } else if total_days <= 30.0 {
@@ -578,6 +608,29 @@ mod tests {
         let resolved = resolve_tasks(&d);
         let b_end = resolved[1].start_day + resolved[1].duration;
         assert!((resolved[2].start_day - b_end).abs() < 1e-6);
+    }
+
+    #[test]
+    fn subday_durations_keep_true_length() {
+        // With a sub-day span the half-day floor is dropped, so a 2h task and a
+        // 90m task keep distinct durations instead of both clamping to 0.5d.
+        let d = build("gantt\ndateFormat HH:mm\nsection S\nA : 10:00, 2h\nB : 12:00, 90m\n");
+        let resolved = resolve_tasks(&d);
+        assert!((resolved[0].duration - 2.0 / 24.0).abs() < 1e-9);
+        assert!((resolved[1].duration - 1.5 / 24.0).abs() < 1e-9);
+        assert!(resolved[0].duration > resolved[1].duration);
+    }
+
+    #[test]
+    fn subday_axis_shows_real_times() {
+        // A time-only chart draws several minute-spaced ticks labelled with real
+        // hours/minutes, not a single `00:00`.
+        let d = build(
+            "gantt\ndateFormat HH:mm\naxisFormat %H:%M\nsection S\nA : 09:00, 30m\nB : 30m\n",
+        );
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">09:00<"));
+        assert!(svg.contains(">09:30<"));
     }
 
     #[test]
