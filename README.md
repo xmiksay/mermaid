@@ -192,6 +192,31 @@ string-matching. Both `ParseError` and `RenderError` are `#[non_exhaustive]`.
   Sugiyama.
 - The SVG is built as a plain string. No XML library at runtime.
 
+## Development
+
+Day-to-day commands are wrapped in the `Makefile` — run `make` (or `make
+help`) to list them:
+
+| Target | What it does |
+|---|---|
+| `make build` | Debug build (library + `mermaid-svg` binary) |
+| `make run ARGS="…"` | Run the CLI (defaults to `--help`) |
+| `make check` | Fast typecheck of all targets |
+| `make fmt` / `make lint` | Apply formatting / fmt-check + clippy (`-D warnings`) |
+| `make test-unit` | Unit tests (in-module `#[cfg(test)]` + sugiyama) |
+| `make test-integration` | Integration tests (`tests/integration.rs`; writes `target/test-samples/*.svg`) |
+| `make test-doc` | Doctests |
+| `make test` | All of the above |
+| `make bench` | Criterion benches (`parse/<kind>` + `render/<kind>`) |
+| `make gallery` | Regenerate `assets/gallery/*.md` from `samples/` |
+| `make doc` | Build rustdoc with the embedded gallery |
+| `make package` | Dry-run crates.io packaging |
+| `make verify` | Hard gate (`lint` + `test`) — must pass before pushing |
+| `make clean` | Remove build artifacts |
+
+`CARGO_BUILD_JOBS` defaults to 4; override per invocation, e.g.
+`make build CARGO_BUILD_JOBS=8`.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
