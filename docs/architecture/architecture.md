@@ -14,4 +14,8 @@ Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture.rs`.
   never keeps a stray `"`. The titled edge form `id:S -[title]- S:id` (upstream
   langium Arrow `'--' | '-' title=ARCH_TITLE '-'`) fills `ArchEdge.label`
   (`split_titled_edge`), rendered at the edge midpoint. `align row|column id id…`
-  (v11.16+) is consumed by `is_align_stmt` (honoring it in layout is a follow-up).
+  (v11.16+) is parsed by `parse_align` into `ArchitectureDiagram.aligns` and
+  honored by `apply_aligns` (`src/svg/architecture.rs`): within a group, the
+  listed nodes are repositioned into a shared row (common y, boxes left→right) or
+  column (common x, boxes top→bottom), anchored at their current top-left, after
+  the sugiyama pass. Directives naming fewer than two in-group nodes are ignored.

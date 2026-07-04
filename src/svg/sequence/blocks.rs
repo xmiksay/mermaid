@@ -14,7 +14,13 @@ pub(super) fn layout_items(
     num: &mut Numbering,
     x_of: &HashMap<String, f64>,
 ) {
+    // Arrow y of the message immediately preceding an activation, so a `->>+`/
+    // `-->>-` shorthand starts (or ends) its band at the arrow rather than half a
+    // row below it, matching upstream. Cleared every iteration; only re-set by a
+    // message, so a standalone `activate`/`deactivate` still lands on the cursor.
+    let mut prev_msg_arrow_y: Option<f64> = None;
     for item in items {
+        let attach_y = prev_msg_arrow_y.take();
         match item {
             SequenceItem::AutoNumber(cfg) => match cfg {
                 Some(c) => {
@@ -34,13 +40,15 @@ pub(super) fn layout_items(
                 } else {
                     None
                 };
+                let arrow_y = *cursor - MSG_STEP / 2.0;
                 out.push(Event {
-                    y: *cursor - MSG_STEP / 2.0,
+                    y: arrow_y,
                     kind: EventKind::Message {
                         msg: m.clone(),
                         number,
                     },
                 });
+                prev_msg_arrow_y = Some(arrow_y);
             }
             SequenceItem::Note(n) => {
                 let h = note_geometry(n, x_of).map_or(NOTE_HEIGHT, |g| g.height);
@@ -52,13 +60,13 @@ pub(super) fn layout_items(
             }
             SequenceItem::Activate(id) => {
                 out.push(Event {
-                    y: *cursor,
+                    y: attach_y.unwrap_or(*cursor),
                     kind: EventKind::Activate(id.clone()),
                 });
             }
             SequenceItem::Deactivate(id) => {
                 out.push(Event {
-                    y: *cursor,
+                    y: attach_y.unwrap_or(*cursor),
                     kind: EventKind::Deactivate(id.clone()),
                 });
             }
@@ -535,6 +543,88 @@ mod tests {
         );
         assert!(!svg.contains("fill=\"#EEE\""));
         assert!(svg.contains(Theme::dark().frame_label_fill.as_ref()));
+    }
+
+    #[test]
+    fn activation_band_starts_at_activating_arrow() {
+        // `->>+`/`-->>-` shorthand: the band top aligns to the request arrow and
+        // its bottom to the response arrow, not half a row below them (#227).
+        let d = build("sequenceDiagram\nA->>+B: req\nB-->>-A: resp\n");
+        let mut events = Vec::new();
+        let mut cursor = 0.0;
+        let mut counter = 1.0;
+        let mut num = Numbering {
+            on: false,
+            step: 1.0,
+        };
+        layout_items(
+            &d.items,
+            &mut events,
+            &mut cursor,
+            &mut counter,
+            &mut num,
+            &HashMap::new(),
+        );
+        let msg_ys: Vec<f64> = events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EventKind::Message { .. } => Some(e.y),
+                _ => None,
+            })
+            .collect();
+        let act_y = events
+            .iter()
+            .find_map(|e| match &e.kind {
+                EventKind::Activate(_) => Some(e.y),
+                _ => None,
+            })
+            .unwrap();
+        let deact_y = events
+            .iter()
+            .find_map(|e| match &e.kind {
+                EventKind::Deactivate(_) => Some(e.y),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(act_y, msg_ys[0], "band top sits on the request arrow");
+        assert_eq!(deact_y, msg_ys[1], "band bottom sits on the response arrow");
+    }
+
+    #[test]
+    fn standalone_activate_stays_on_cursor() {
+        // An `activate` not directly following a message arrow (here separated by
+        // a note) is unaffected: it lands on the running cursor, below the arrow.
+        let d = build("sequenceDiagram\nA->>B: req\nNote right of B: wait\nactivate B\n");
+        let mut events = Vec::new();
+        let mut cursor = 0.0;
+        let mut counter = 1.0;
+        let mut num = Numbering {
+            on: false,
+            step: 1.0,
+        };
+        layout_items(
+            &d.items,
+            &mut events,
+            &mut cursor,
+            &mut counter,
+            &mut num,
+            &HashMap::new(),
+        );
+        let msg_y = events
+            .iter()
+            .find_map(|e| match e.kind {
+                EventKind::Message { .. } => Some(e.y),
+                _ => None,
+            })
+            .unwrap();
+        let act_y = events
+            .iter()
+            .find_map(|e| match &e.kind {
+                EventKind::Activate(_) => Some(e.y),
+                _ => None,
+            })
+            .unwrap();
+        assert!(act_y > msg_y, "standalone activate stays on the cursor");
     }
 
     #[test]

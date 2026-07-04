@@ -12,7 +12,10 @@
 //!     db:T --> B:disk1
 //! ```
 
-use super::ast::{ArchEdge, ArchGroup, ArchJunction, ArchService, ArchSide, ArchitectureDiagram};
+use super::ast::{
+    ArchAlign, ArchAlignAxis, ArchEdge, ArchGroup, ArchJunction, ArchService, ArchSide,
+    ArchitectureDiagram,
+};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<ArchitectureDiagram, ParseError> {
@@ -44,9 +47,10 @@ pub(crate) fn parse(input: &str) -> Result<ArchitectureDiagram, ParseError> {
         } else if let Some(rest) = line.strip_prefix("junction") {
             let (id, parent) = split_parent(rest);
             d.junctions.push(ArchJunction { id, parent });
-        } else if is_align_stmt(line) {
-            // v11.16+ `align row|column id id...` — consumed; honoring the
-            // alignment constraint in layout is a follow-up.
+        } else if let Some(align) = parse_align(line) {
+            // v11.16+ `align row|column id id...` — the listed nodes share a row
+            // (common y) or column (common x) within their group.
+            d.aligns.push(align);
         } else {
             d.edges.push(parse_edge(line, line_no)?);
         }
@@ -190,16 +194,25 @@ fn split_titled_edge(line: &str) -> Option<(&str, String, &str)> {
     Some((&line[..open], title, &line[close + 2..]))
 }
 
-/// True for a `align row|column …` statement (v11.16+). Requires whitespace
-/// after `align` so a service/edge id starting with `align` isn't captured.
-fn is_align_stmt(line: &str) -> bool {
-    match line.strip_prefix("align") {
-        Some(rest) if rest.starts_with(char::is_whitespace) => {
-            let kw = rest.trim_start();
-            kw.starts_with("row") || kw.starts_with("column")
-        }
-        _ => false,
+/// Parses an `align row|column id id…` statement (v11.16+). Requires whitespace
+/// after `align` so a service/edge id starting with `align` isn't captured, and
+/// at least one target id. Ids are separated by whitespace and/or commas.
+fn parse_align(line: &str) -> Option<ArchAlign> {
+    let rest = line.strip_prefix("align")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
     }
+    let mut tokens = rest.split([' ', '\t', ',']).filter(|t| !t.is_empty());
+    let axis = match tokens.next()? {
+        "row" => ArchAlignAxis::Row,
+        "column" => ArchAlignAxis::Column,
+        _ => return None,
+    };
+    let ids: Vec<String> = tokens.map(str::to_string).collect();
+    if ids.is_empty() {
+        return None;
+    }
+    Some(ArchAlign { axis, ids })
 }
 
 /// Strips a trailing `{group}` endpoint marker, returning the bare id and
@@ -289,12 +302,32 @@ mod tests {
     }
 
     #[test]
-    fn align_statement_consumed() {
-        // `align row|column id id…` (v11.16+) is consumed, not a hard error (#184).
-        let src = "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign row a b\n";
+    fn align_statement_captured() {
+        // `align row|column id id…` (v11.16+) is captured, not a hard error and
+        // not an edge (#184, #227).
+        let src = "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign row a, b\n";
         let d = parse(src).unwrap();
         assert_eq!(d.services.len(), 2);
         assert_eq!(d.edges.len(), 0);
+        assert_eq!(d.aligns.len(), 1);
+        assert_eq!(d.aligns[0].axis, ArchAlignAxis::Row);
+        assert_eq!(d.aligns[0].ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn align_column_parsed() {
+        let src =
+            "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign column a b\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.aligns[0].axis, ArchAlignAxis::Column);
+    }
+
+    #[test]
+    fn align_without_ids_is_not_an_align() {
+        // `align row` with no target ids isn't a valid align; it falls through to
+        // the edge parser, which rejects the missing `--` connector.
+        let src = "architecture-beta\nservice a(server)[A]\nalign row\n";
+        assert!(parse(src).is_err());
     }
 
     #[test]

@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 
-use crate::parse::{ArchSide, ArchitectureDiagram};
+use crate::parse::{ArchAlign, ArchAlignAxis, ArchSide, ArchitectureDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{fnum, SvgBuilder};
@@ -118,6 +118,23 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         };
         let layout = layout_with(&g, &cfg).unwrap_or_default();
 
+        // Node centers in group-local layout space; `align row|column` overrides
+        // reposition their members into a shared row/column before placement.
+        let mut positions: HashMap<NodeId, (f64, f64)> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let n = i as NodeId;
+                let p = layout
+                    .node_pos
+                    .get(&n)
+                    .copied()
+                    .unwrap_or((SERVICE_W / 2.0, SERVICE_H / 2.0));
+                (n, p)
+            })
+            .collect();
+        apply_aligns(&mut positions, &id_to_node, &g.node_size, &d.aligns);
+
         let inner_origin_x = PAD + GROUP_PAD;
         let inner_origin_y = group_y + GROUP_PAD + label_h;
 
@@ -128,11 +145,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
 
         for (i, id) in ids.iter().enumerate() {
             let node_id = i as NodeId;
-            let (cx, cy) = layout
-                .node_pos
-                .get(&node_id)
-                .copied()
-                .unwrap_or((SERVICE_W / 2.0, SERVICE_H / 2.0));
+            let (cx, cy) = positions[&node_id];
             let is_j = d.junctions.iter().any(|j| &j.id == id);
             let (w, h) = if is_j {
                 (JUNCTION_R * 2.0, JUNCTION_R * 2.0)
@@ -356,6 +369,56 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
+/// Repositions each `align` directive's members into a shared row (common y,
+/// boxes laid left→right) or column (common x, boxes laid top→bottom), anchored
+/// at the members' current top-left corner so the arrangement replaces the
+/// layered default in place. Directives naming fewer than two members present in
+/// this group are ignored.
+fn apply_aligns(
+    positions: &mut HashMap<NodeId, (f64, f64)>,
+    id_to_node: &HashMap<String, NodeId>,
+    node_size: &HashMap<NodeId, (f64, f64)>,
+    aligns: &[ArchAlign],
+) {
+    const GAP: f64 = 36.0;
+    for a in aligns {
+        let members: Vec<NodeId> = a
+            .ids
+            .iter()
+            .filter_map(|id| id_to_node.get(id).copied())
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let anchor_x = members
+            .iter()
+            .map(|&n| positions[&n].0)
+            .fold(f64::INFINITY, f64::min);
+        let anchor_y = members
+            .iter()
+            .map(|&n| positions[&n].1)
+            .fold(f64::INFINITY, f64::min);
+        match a.axis {
+            ArchAlignAxis::Row => {
+                let mut left = anchor_x - node_size[&members[0]].0 / 2.0;
+                for &n in &members {
+                    let w = node_size[&n].0;
+                    positions.insert(n, (left + w / 2.0, anchor_y));
+                    left += w + GAP;
+                }
+            }
+            ArchAlignAxis::Column => {
+                let mut top = anchor_y - node_size[&members[0]].1 / 2.0;
+                for &n in &members {
+                    let h = node_size[&n].1;
+                    positions.insert(n, (anchor_x, top + h / 2.0));
+                    top += h + GAP;
+                }
+            }
+        }
+    }
+}
+
 /// Midpoint of the named side of a rect — where an edge port attaches.
 fn port_point(center: (f64, f64), w: f64, h: f64, side: ArchSide) -> (f64, f64) {
     let (cx, cy) = center;
@@ -494,6 +557,7 @@ mod tests {
                 group: false,
                 label: None,
             }],
+            aligns: vec![],
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
@@ -545,6 +609,58 @@ architecture-beta
         assert_eq!(d.edges[0].label.as_deref(), Some("Queries"));
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(">Queries<"), "edge title missing");
+    }
+
+    /// Top-left `(x, y)` of every service box (`width="110"`) in source order.
+    fn service_boxes(svg: &str) -> Vec<(f64, f64)> {
+        svg.split("<rect ")
+            .filter(|chunk| chunk.contains("width=\"110\""))
+            .filter_map(|chunk| {
+                let x = attr(chunk, "x=\"")?;
+                let y = attr(chunk, "y=\"")?;
+                Some((x, y))
+            })
+            .collect()
+    }
+
+    fn attr(chunk: &str, key: &str) -> Option<f64> {
+        let start = chunk.find(key)? + key.len();
+        let end = chunk[start..].find('"')? + start;
+        chunk[start..end].parse().ok()
+    }
+
+    fn arch(src: &str) -> ArchitectureDiagram {
+        match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Architecture(d) => d,
+            _ => panic!("expected architecture diagram"),
+        }
+    }
+
+    #[test]
+    fn align_column_stacks_services_vertically() {
+        // `align column a b` puts a and b in a shared column: same x, distinct y
+        // with a above b (#227).
+        let d = arch(
+            "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign column a b\n",
+        );
+        let svg = render(&d, &Theme::default());
+        let boxes = service_boxes(&svg);
+        assert_eq!(boxes.len(), 2);
+        assert!((boxes[0].0 - boxes[1].0).abs() < 0.01, "column shares x");
+        assert!(boxes[0].1 < boxes[1].1, "a stacks above b");
+    }
+
+    #[test]
+    fn align_row_lines_services_horizontally() {
+        // `align row a b` puts a and b in a shared row: same y, distinct x with a
+        // left of b (#227).
+        let d =
+            arch("architecture-beta\nservice a(server)[A]\nservice b(server)[B]\nalign row a b\n");
+        let svg = render(&d, &Theme::default());
+        let boxes = service_boxes(&svg);
+        assert_eq!(boxes.len(), 2);
+        assert!((boxes[0].1 - boxes[1].1).abs() < 0.01, "row shares y");
+        assert!(boxes[0].0 < boxes[1].0, "a sits left of b");
     }
 
     #[test]

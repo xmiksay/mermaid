@@ -219,6 +219,22 @@ pub struct ArchitectureDiagram {
     pub services: Vec<ArchService>,
     pub junctions: Vec<ArchJunction>,
     pub edges: Vec<ArchEdge>,
+    /// `align row|column id id…` (v11.16+) constraints — the listed nodes are
+    /// laid out into a shared row or column within their group.
+    pub aligns: Vec<ArchAlign>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchAlign {
+    pub axis: ArchAlignAxis,
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ArchAlignAxis {
+    Row,
+    Column,
 }
 
 #[derive(Debug, Clone, PartialEq)]
