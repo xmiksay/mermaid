@@ -26,12 +26,20 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   `"{n}. {text}"` for numbered messages (`fmt_seq_number` drops the decimal point
   for integral values, so `2.0` shows as `2`). A non-positive step falls back to
   `1.0`. `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
-- Sequence **half arrows** (`-\`, `-/`, `-|\`, `-|/`, v11.12.3+) and their dashed
-  variants (extra leading dash) parse to `ArrowKind::HalfArrow`/`DashedHalfArrow`
-  (`ARROWS` table in `src/parse/sequence/message.rs`). The `\`/`/` are the two
-  barb directions and the `|` is an optional shaft form; all map to one
-  single-barb `arrow-half` marker (`define_markers`, `stroke_for`) drawn at the
-  head end.
+- Sequence **half arrows** (v11.12.3+) use upstream `sequenceDiagram.jison`'s
+  spellings (#223): the barb is a *doubled* char — `\\` (upper) or `//` (lower)
+  — or a single barb behind a `|` shaft (`-|\`, `-|/`). Dashed forms add a dash
+  on the shaft side (`--\\`, `--//`, `--|\`, `--|/`), and the eight **reverse**
+  forms put the barb at the tail (`\\-`, `//-`, `\|-`, `/|-` plus their dashed
+  `--` variants). The `ARROWS` table (`src/parse/sequence/message.rs`) is
+  ordered longest-first so a dashed/pipe token wins over its bare prefix at the
+  same position. Each spelling maps to one of eight `ArrowKind` variants split
+  by upper/lower barb × solid/dashed × forward/reverse; the barb picks the
+  marker (`arrow-half-top` / `arrow-half-bottom`) and reverse forms hang it off
+  the tail (`marker-start`) instead of the head (`marker-end`)
+  (`define_markers`, `stroke_for` in `src/svg/sequence/messages.rs`). The
+  pre-#223 single-char barbs (`-\`, `-/`) are not upstream tokens and are now a
+  hard error.
 - Sequence `par_over <label>` (upstream's overlapping-par frame) reuses the
   `par`/`and` `BlockFrame::Par` structure, so it accepts `and` branches and
   renders as a normal par block (`handle_block_keyword` in

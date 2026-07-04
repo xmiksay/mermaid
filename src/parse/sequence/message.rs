@@ -14,21 +14,32 @@ const ARROWS: &[(&str, ArrowKind)] = &[
     ("-->", ArrowKind::Dashed),
     ("--x", ArrowKind::DashedCross),
     ("--)", ArrowKind::DashedOpen),
-    // v11.12.3+ half (single-barb) arrows. `\` and `/` are the two barb
-    // directions; the optional `|` shaft form is accepted too. Dashed forms
-    // carry the extra leading dash.
-    ("--|\\", ArrowKind::DashedHalfArrow),
-    ("--|/", ArrowKind::DashedHalfArrow),
-    ("--\\", ArrowKind::DashedHalfArrow),
-    ("--/", ArrowKind::DashedHalfArrow),
+    // v11.12.3+ half (single-barb) arrows, matching upstream
+    // sequenceDiagram.jison spellings (#223). The barb is a *doubled* char —
+    // `\\` (upper) or `//` (lower) — or a single barb behind a `|` shaft
+    // (`|\`/`|/`). Dashed forms carry the extra dash on the shaft side, and the
+    // eight reverse forms put the barb at the tail. Longest tokens first so the
+    // dashed/pipe variants win over their solid/bare prefixes.
+    ("--|\\", ArrowKind::DashedHalfArrowTop),
+    ("--|/", ArrowKind::DashedHalfArrowBottom),
+    ("--\\\\", ArrowKind::DashedHalfArrowTop),
+    ("--//", ArrowKind::DashedHalfArrowBottom),
+    ("\\|--", ArrowKind::DashedHalfArrowStartTop),
+    ("/|--", ArrowKind::DashedHalfArrowStartBottom),
+    ("\\\\--", ArrowKind::DashedHalfArrowStartTop),
+    ("//--", ArrowKind::DashedHalfArrowStartBottom),
     ("->>", ArrowKind::SolidArrow),
     ("->", ArrowKind::Solid),
     ("-x", ArrowKind::Cross),
     ("-)", ArrowKind::Open),
-    ("-|\\", ArrowKind::HalfArrow),
-    ("-|/", ArrowKind::HalfArrow),
-    ("-\\", ArrowKind::HalfArrow),
-    ("-/", ArrowKind::HalfArrow),
+    ("-|\\", ArrowKind::HalfArrowTop),
+    ("-|/", ArrowKind::HalfArrowBottom),
+    ("-\\\\", ArrowKind::HalfArrowTop),
+    ("-//", ArrowKind::HalfArrowBottom),
+    ("\\|-", ArrowKind::HalfArrowStartTop),
+    ("/|-", ArrowKind::HalfArrowStartBottom),
+    ("\\\\-", ArrowKind::HalfArrowStartTop),
+    ("//-", ArrowKind::HalfArrowStartBottom),
 ];
 
 pub(super) fn parse_line_to_items(
@@ -383,17 +394,34 @@ mod tests {
 
     #[test]
     fn half_arrows_recognized() {
-        // v11.12.3+ single-barb half arrows: `\`/`/` barb directions, an optional
-        // `|` shaft, and dashed variants with the extra leading dash (#176).
+        // v11.12.3+ single-barb half arrows spelled as upstream's jison does
+        // (#223): the barb is a *doubled* char (`\\`/`//`) or a single barb
+        // behind a `|` shaft; dashed forms add a dash; reverse forms put the
+        // barb at the tail. `\` is the upper barb, `/` the lower one.
+        //
+        // Note: `\\` in these Rust string literals is one backslash, so `A-\\\\B`
+        // is the two-backslash source `A-\\B`.
         let cases = [
-            ("A-\\B: t", ArrowKind::HalfArrow),
-            ("A-/B: t", ArrowKind::HalfArrow),
-            ("A-|\\B: t", ArrowKind::HalfArrow),
-            ("A-|/B: t", ArrowKind::HalfArrow),
-            ("A--\\B: t", ArrowKind::DashedHalfArrow),
-            ("A--/B: t", ArrowKind::DashedHalfArrow),
-            ("A--|\\B: t", ArrowKind::DashedHalfArrow),
-            ("A--|/B: t", ArrowKind::DashedHalfArrow),
+            // forward, solid
+            ("A-\\\\B: t", ArrowKind::HalfArrowTop),
+            ("A-//B: t", ArrowKind::HalfArrowBottom),
+            ("A-|\\B: t", ArrowKind::HalfArrowTop),
+            ("A-|/B: t", ArrowKind::HalfArrowBottom),
+            // forward, dashed
+            ("A--\\\\B: t", ArrowKind::DashedHalfArrowTop),
+            ("A--//B: t", ArrowKind::DashedHalfArrowBottom),
+            ("A--|\\B: t", ArrowKind::DashedHalfArrowTop),
+            ("A--|/B: t", ArrowKind::DashedHalfArrowBottom),
+            // reverse, solid
+            ("A\\\\-B: t", ArrowKind::HalfArrowStartTop),
+            ("A//-B: t", ArrowKind::HalfArrowStartBottom),
+            ("A\\|-B: t", ArrowKind::HalfArrowStartTop),
+            ("A/|-B: t", ArrowKind::HalfArrowStartBottom),
+            // reverse, dashed
+            ("A\\\\--B: t", ArrowKind::DashedHalfArrowStartTop),
+            ("A//--B: t", ArrowKind::DashedHalfArrowStartBottom),
+            ("A\\|--B: t", ArrowKind::DashedHalfArrowStartTop),
+            ("A/|--B: t", ArrowKind::DashedHalfArrowStartBottom),
         ];
         for (msg, expected) in cases {
             let s = format!("sequenceDiagram\n{msg}\n");
@@ -403,6 +431,35 @@ mod tests {
             assert_eq!(first_msg(&d).from, "A", "case: {msg}");
             assert_eq!(first_msg(&d).to, "B", "case: {msg}");
         }
+    }
+
+    #[test]
+    fn wrong_single_char_half_barbs_are_not_arrows() {
+        // The pre-#223 single-char spellings (`-\`, `-/`) are NOT upstream
+        // tokens: `A-\B` used to be parsed as a half arrow but must now be a
+        // hard error (no arrow token, so not a recognized statement).
+        for msg in ["A-\\B: x", "A-/B: x"] {
+            let s = format!("sequenceDiagram\n{msg}\n");
+            assert!(parse(&s).is_err(), "case: {msg}");
+        }
+    }
+
+    #[test]
+    fn half_arrow_no_phantom_participant() {
+        // Repros from #223: the doubled barb must be fully consumed, not leak a
+        // `\Bob`/`/Bob` phantom, and reverse forms must not hard-error.
+        let d = parse("sequenceDiagram\nA-\\\\Bob: x\n").unwrap();
+        assert_eq!(d.participants.len(), 2);
+        assert!(d.participants.iter().all(|p| p.id == "A" || p.id == "Bob"));
+
+        let d = parse("sequenceDiagram\nA-//Bob: x\n").unwrap();
+        assert!(d.participants.iter().all(|p| p.id == "A" || p.id == "Bob"));
+
+        let d = parse("sequenceDiagram\nBob\\\\-A: y\n").unwrap();
+        let m = first_msg(&d);
+        assert_eq!(m.from, "Bob");
+        assert_eq!(m.to, "A");
+        assert_eq!(m.arrow, ArrowKind::HalfArrowStartTop);
     }
 
     #[test]

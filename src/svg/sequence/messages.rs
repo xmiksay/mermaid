@@ -197,8 +197,16 @@ fn stroke_for(a: ArrowKind) -> (&'static str, Option<&'static str>, Option<&'sta
         ArrowKind::DashedOpen => ("6 4", None, Some("arrow-open")),
         ArrowKind::BiSolidArrow => ("", Some("arrow-filled"), Some("arrow-filled")),
         ArrowKind::BiDashedArrow => ("6 4", Some("arrow-filled"), Some("arrow-filled")),
-        ArrowKind::HalfArrow => ("", None, Some("arrow-half")),
-        ArrowKind::DashedHalfArrow => ("6 4", None, Some("arrow-half")),
+        // Half arrows: the upper (`\`) / lower (`/`) barb picks the marker, and
+        // reverse forms hang it off the tail (start) instead of the head (end).
+        ArrowKind::HalfArrowTop => ("", None, Some("arrow-half-top")),
+        ArrowKind::HalfArrowBottom => ("", None, Some("arrow-half-bottom")),
+        ArrowKind::DashedHalfArrowTop => ("6 4", None, Some("arrow-half-top")),
+        ArrowKind::DashedHalfArrowBottom => ("6 4", None, Some("arrow-half-bottom")),
+        ArrowKind::HalfArrowStartTop => ("", Some("arrow-half-top"), None),
+        ArrowKind::HalfArrowStartBottom => ("", Some("arrow-half-bottom"), None),
+        ArrowKind::DashedHalfArrowStartTop => ("6 4", Some("arrow-half-top"), None),
+        ArrowKind::DashedHalfArrowStartBottom => ("6 4", Some("arrow-half-bottom"), None),
     }
 }
 
@@ -226,18 +234,28 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
         h = h,
         half = h / 2.0,
     );
-    // Half arrow: a single upper barb of the filled arrowhead (`-\`/`-/`).
-    let half_arrow = format!(
-        "<marker id=\"arrow-half\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
+    // Half arrows: a single barb of the arrowhead. `\` is the upper barb
+    // (top-left → tip), `/` the lower barb (bottom-left → tip); reverse forms
+    // reuse the same markers at the tail.
+    let half_top = format!(
+        "<marker id=\"arrow-half-top\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
          markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto-start-reverse\">\
          <path d=\"M0 0 L{h} {half}\" fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"/></marker>",
+        h = h,
+        half = h / 2.0,
+    );
+    let half_bottom = format!(
+        "<marker id=\"arrow-half-bottom\" viewBox=\"0 0 {h} {h}\" refX=\"{h}\" refY=\"{half}\" \
+         markerWidth=\"{h}\" markerHeight=\"{h}\" orient=\"auto-start-reverse\">\
+         <path d=\"M0 {h} L{h} {half}\" fill=\"none\" stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"/></marker>",
         h = h,
         half = h / 2.0,
     );
     svg.defs_raw(&filled);
     svg.defs_raw(&open);
     svg.defs_raw(&cross);
-    svg.defs_raw(&half_arrow);
+    svg.defs_raw(&half_top);
+    svg.defs_raw(&half_bottom);
 }
 
 fn svg_n(v: f64) -> String {

@@ -482,9 +482,18 @@ mod tests {
 
     #[test]
     fn half_arrow_uses_half_marker() {
-        let svg = render(&build("sequenceDiagram\nA-\\B: x\n"), &Theme::default());
-        assert!(svg.contains("id=\"arrow-half\""));
-        assert!(svg.contains("marker-end=\"url(#arrow-half)\""));
+        // `A-\\B` (upstream doubled barb) → upper-barb half marker at the head.
+        let svg = render(&build("sequenceDiagram\nA-\\\\B: x\n"), &Theme::default());
+        assert!(svg.contains("id=\"arrow-half-top\""));
+        assert!(svg.contains("marker-end=\"url(#arrow-half-top)\""));
+    }
+
+    #[test]
+    fn reverse_half_arrow_marks_the_tail() {
+        // `A//-B` (reverse lower barb) → lower-barb half marker at the tail.
+        let svg = render(&build("sequenceDiagram\nA//-B: x\n"), &Theme::default());
+        assert!(svg.contains("id=\"arrow-half-bottom\""));
+        assert!(svg.contains("marker-start=\"url(#arrow-half-bottom)\""));
     }
 
     #[test]
