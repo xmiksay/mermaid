@@ -2,7 +2,7 @@
 //!
 //! Computes per-task absolute start (in "days from project start") by resolving
 //! `after <id>` and `AfterPrevious` references, then lays out one bar per task
-//! in vertical sequence with a time axis at the top.
+//! in vertical sequence with a time axis at the bottom (top with `topAxis`).
 
 use std::collections::HashMap;
 
@@ -11,6 +11,7 @@ use crate::parse::{GanttDiagram, TaskEnd, TaskStart, TaskStatus};
 use super::builder::{escape, fnum, SvgBuilder};
 use super::gantt_date::{format_date, parse_datetime, today_days, weekday, Excludes};
 use super::interact::{close_click, open_click};
+use super::metrics::text_width;
 use super::theme::Theme;
 
 const LABEL_COL_W: f64 = 200.0;
@@ -22,40 +23,20 @@ const SECTION_H: f64 = 24.0;
 const PAD: f64 = 16.0;
 const TIME_COL_MIN_W: f64 = 480.0;
 
+/// Axis tick labels are drawn at this font size; the per-glyph width below is
+/// tuned so an ISO date (`2026-01-01`) estimates to ~59px, matching what the
+/// browser renders — the basis for capping tick density so labels never smear.
+const AXIS_FONT_SIZE: f64 = 11.0;
+const AXIS_LABEL_CHAR_W: f64 = 7.5;
+/// Minimum clear gap (px) kept between one label's end and the next tick.
+const TICK_LABEL_PAD: f64 = 4.0;
+
 pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     // Step 1 — resolve absolute start positions in "days from epoch".
     let resolved = resolve_tasks(d);
-    let project_start = resolved
-        .iter()
-        .map(|t| t.start_day)
-        .fold(f64::INFINITY, f64::min);
-    // Raw span (unclamped durations) decides whether the chart is sub-day. A
-    // sub-day chart drops the half-day bar floor — otherwise a 2h and a 90m task
-    // both clamp to 0.5d and render identically — and lets the axis span less
-    // than a full day instead of being stretched to one.
-    let raw_end = resolved
-        .iter()
-        .map(|t| t.start_day + t.duration)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let raw_span = if project_start.is_finite() && raw_end.is_finite() {
-        raw_end - project_start
-    } else {
-        0.0
-    };
-    let sub_day = raw_span > 0.0 && raw_span < 1.0;
+    let (start_day, total_days, sub_day) = chart_span(&resolved);
     let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
-    let project_end = resolved
-        .iter()
-        .map(|t| t.start_day + t.duration.max(min_bar_dur))
-        .fold(f64::NEG_INFINITY, f64::max);
-
-    let (start_day, total_days) = if project_start.is_finite() && project_end.is_finite() {
-        let floor = if sub_day { raw_span } else { 1.0 };
-        (project_start, (project_end - project_start).max(floor))
-    } else {
-        (0.0, 1.0)
-    };
 
     // Step 2 — compute dimensions.
     let n_rows: usize = d
@@ -82,26 +63,31 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
 
     let body_x = PAD + LABEL_COL_W;
     let body_w = time_col_w;
-    let axis_y = HEADER_H;
+    // Upstream's default layout draws the axis at the bottom; `topAxis` moves it
+    // to the top. `body_top` is where the task rows begin, `axis_y` the top of
+    // the axis band (below the rows in the default layout).
+    let (body_top, axis_y) = if d.top_axis {
+        (HEADER_H + AXIS_H, HEADER_H)
+    } else {
+        (HEADER_H, HEADER_H + body_h)
+    };
+    let body_bottom = body_top + body_h;
 
-    // Axis line + day ticks
+    // Axis baseline sits on the edge the rows share with the axis band.
+    let axis_line_y = if d.top_axis {
+        axis_y + AXIS_H - 1.0
+    } else {
+        axis_y
+    };
     svg.line(
         body_x,
-        axis_y + AXIS_H - 1.0,
+        axis_line_y,
         body_x + body_w,
-        axis_y + AXIS_H - 1.0,
+        axis_line_y,
         "stroke=\"#999\" stroke-width=\"1\"",
     );
-    // `tickInterval Nday|Nweek|Nmonth` overrides the automatic step; a
-    // `weekday` sets which weekday the first tick lands on (week alignment).
-    let tick_step = d
-        .tick_interval
-        .as_deref()
-        .and_then(parse_tick_interval)
-        .unwrap_or_else(|| pick_tick_step(total_days));
-    let mut tick = weekday_tick_offset(d.weekday.as_deref(), start_day);
-    while tick <= total_days + 1e-6 {
-        let x = body_x + (tick / total_days) * body_w;
+    for (dx, label) in axis_ticks(d, start_day, total_days, body_w) {
+        let x = body_x + dx;
         svg.line(
             x,
             axis_y,
@@ -113,9 +99,8 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             x + 2.0,
             axis_y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"11\""),
-            &format_date(start_day + tick, d.axis_format.as_deref()),
+            &label,
         );
-        tick += tick_step;
     }
 
     // Excluded-day shading (weekends etc.): a light band per non-working day
@@ -130,7 +115,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 let x = body_x + ((day as f64 - start_day) / total_days) * body_w;
                 svg.rect(
                     x,
-                    axis_y + AXIS_H,
+                    body_top,
                     day_w,
                     body_h,
                     "fill=\"#000\" fill-opacity=\"0.04\"",
@@ -152,10 +137,10 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 Some(css) => format!("style=\"{}\"", css_style(css)),
                 None => "stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\"".to_string(),
             };
-            svg.line(x, axis_y, x, HEADER_H + AXIS_H + body_h, &attrs);
+            svg.line(x, body_top, x, body_bottom, &attrs);
             svg.text(
                 x + 4.0,
-                axis_y + 12.0,
+                body_top + 12.0,
                 "fill=\"#d33\" font-size=\"11\" font-weight=\"bold\"",
                 "today",
             );
@@ -163,7 +148,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     }
 
     // Body
-    let mut y = HEADER_H + AXIS_H;
+    let mut y = body_top;
     let mut flat_idx = 0;
     for section in &d.sections {
         if !section.name.is_empty() {
@@ -195,9 +180,9 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 // date; duration is ignored (the label sits beside the line).
                 svg.line(
                     x,
-                    axis_y,
+                    body_top,
                     x,
-                    HEADER_H + AXIS_H + body_h,
+                    body_bottom,
                     &format!("stroke=\"{stroke}\" stroke-width=\"1.5\" stroke-dasharray=\"2 2\""),
                 );
                 svg.text(
@@ -381,7 +366,91 @@ fn css_style(css: &str) -> String {
     escape(&joined)
 }
 
-fn pick_tick_step(total_days: f64) -> f64 {
+/// Project time span as `(start_day, total_days, sub_day)`. The raw (unclamped)
+/// span decides `sub_day`: a chart shorter than a day drops the half-day bar
+/// floor and lets the axis span the true sub-day range instead of stretching to
+/// one full day.
+fn chart_span(resolved: &[Resolved]) -> (f64, f64, bool) {
+    let project_start = resolved
+        .iter()
+        .map(|t| t.start_day)
+        .fold(f64::INFINITY, f64::min);
+    let raw_end = resolved
+        .iter()
+        .map(|t| t.start_day + t.duration)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let raw_span = if project_start.is_finite() && raw_end.is_finite() {
+        raw_end - project_start
+    } else {
+        0.0
+    };
+    let sub_day = raw_span > 0.0 && raw_span < 1.0;
+    let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
+    let project_end = resolved
+        .iter()
+        .map(|t| t.start_day + t.duration.max(min_bar_dur))
+        .fold(f64::NEG_INFINITY, f64::max);
+    if project_start.is_finite() && project_end.is_finite() {
+        let floor = if sub_day { raw_span } else { 1.0 };
+        (
+            project_start,
+            (project_end - project_start).max(floor),
+            sub_day,
+        )
+    } else {
+        (0.0, 1.0, sub_day)
+    }
+}
+
+/// Axis ticks as `(offset_px_from_body_x, label)` pairs. `tickInterval` overrides
+/// the automatic step; `weekday` aligns the first tick onto that weekday.
+fn axis_ticks(
+    d: &GanttDiagram,
+    start_day: f64,
+    total_days: f64,
+    body_w: f64,
+) -> Vec<(f64, String)> {
+    // Cap tick density from the widest label: the step must be at least wide
+    // enough that a label plus a small gap fits before the next tick, otherwise
+    // adjacent labels overlap into an unreadable smear (#244).
+    let min_step_days = if body_w > 0.0 {
+        (axis_label_width(start_day, total_days, d.axis_format.as_deref()) + TICK_LABEL_PAD)
+            * total_days
+            / body_w
+    } else {
+        0.0
+    };
+    let tick_step = d
+        .tick_interval
+        .as_deref()
+        .and_then(parse_tick_interval)
+        .unwrap_or_else(|| pick_tick_step(total_days, min_step_days));
+    let mut ticks = Vec::new();
+    let mut tick = weekday_tick_offset(d.weekday.as_deref(), start_day);
+    while tick <= total_days + 1e-6 {
+        ticks.push((
+            (tick / total_days) * body_w,
+            format_date(start_day + tick, d.axis_format.as_deref()),
+        ));
+        tick += tick_step;
+    }
+    ticks
+}
+
+/// Estimated pixel width of the widest axis label across the span, sampled at
+/// both ends and the middle (month names / weekdays vary in width).
+fn axis_label_width(start_day: f64, total_days: f64, axis_format: Option<&str>) -> f64 {
+    [0.0, 0.5, 1.0]
+        .into_iter()
+        .map(|f| {
+            let label = format_date(start_day + f * total_days, axis_format);
+            text_width(&label, AXIS_LABEL_CHAR_W, AXIS_FONT_SIZE)
+        })
+        .fold(0.0, f64::max)
+}
+
+/// Days per tick: the smallest clean step whose spacing clears `min_step_days`.
+fn pick_tick_step(total_days: f64, min_step_days: f64) -> f64 {
     if total_days < 1.0 {
         // Sub-day span: step in clean minute/hour intervals, aiming for at most
         // ~8 ticks so a `HH:mm` axis stays readable.
@@ -394,15 +463,16 @@ fn pick_tick_step(total_days: f64) -> f64 {
         .find(|step| total_days / step <= 8.0)
         .unwrap_or(720.0 * MINUTE);
     }
-    if total_days <= 7.0 {
-        1.0
-    } else if total_days <= 30.0 {
-        2.0
-    } else if total_days <= 120.0 {
-        7.0
-    } else {
-        30.0
-    }
+    // Calendar-friendly ladder (days). Picking the smallest rung that clears the
+    // label-width floor keeps ticks as dense as legibility allows and widens the
+    // step automatically as the range grows.
+    const LADDER: [f64; 11] = [
+        1.0, 2.0, 3.0, 5.0, 7.0, 14.0, 30.0, 60.0, 90.0, 180.0, 365.0,
+    ];
+    LADDER
+        .into_iter()
+        .find(|step| *step >= min_step_days)
+        .unwrap_or(365.0)
 }
 
 fn colors_for(status: TaskStatus, crit: bool) -> (&'static str, &'static str) {
@@ -631,6 +701,64 @@ mod tests {
         let svg = render(&d, &Theme::default());
         assert!(svg.contains(">09:00<"));
         assert!(svg.contains(">09:30<"));
+    }
+
+    #[test]
+    fn tick_labels_do_not_overlap() {
+        // #244: the sample's ISO labels are ~59px wide; the chosen step must
+        // keep consecutive label spans from intersecting.
+        let d = build(
+            "gantt\ntitle Release plan\ndateFormat YYYY-MM-DD\nexcludes weekends\nsection Design\nSpec : a1, 2026-01-01, 5d\nReview : after a1, 2d\nsection Build\nBackend : crit, b1, 2026-01-08, 1w\nFrontend : active, 2026-01-08, 1w\nInteg : after b1 a1, 3d\n",
+        );
+        let resolved = resolve_tasks(&d);
+        let (start, total, _) = chart_span(&resolved);
+        let ticks = axis_ticks(&d, start, total, TIME_COL_MIN_W);
+        assert!(ticks.len() >= 2, "expected multiple ticks");
+        for pair in ticks.windows(2) {
+            let (x0, label) = &pair[0];
+            let (x1, _) = &pair[1];
+            let end = x0 + 2.0 + text_width(label, AXIS_LABEL_CHAR_W, AXIS_FONT_SIZE);
+            assert!(
+                end <= x1 + 2.0 + 1e-6,
+                "labels overlap: {label:?} ends at {end}, next tick at {x1}",
+            );
+        }
+    }
+
+    #[test]
+    fn tick_step_widens_as_range_grows() {
+        let step = |days: &str| {
+            let d = build(&format!(
+                "gantt\ndateFormat YYYY-MM-DD\nsection S\nT : 2026-01-01, {days}\n"
+            ));
+            let resolved = resolve_tasks(&d);
+            let (start, total, _) = chart_span(&resolved);
+            let ticks = axis_ticks(&d, start, total, TIME_COL_MIN_W);
+            // Step in days = fractional gap between the first two ticks × total.
+            (ticks[1].0 - ticks[0].0) / TIME_COL_MIN_W * total
+        };
+        assert!(step("5d") < step("30d"));
+        assert!(step("30d") < step("200d"));
+    }
+
+    #[test]
+    fn top_axis_moves_axis_baseline_up() {
+        // Default layout draws the axis band below the rows; `topAxis` restores
+        // the top placement, so the axis baseline y is smaller.
+        let src =
+            "gantt\ndateFormat YYYY-MM-DD\nsection S\nA : 2026-01-01, 5d\nB : 2026-01-03, 4d\n";
+        let d = build(src);
+        // One named section row + two task rows.
+        let body_h = 3.0 * (BAR_H + ROW_GAP);
+        // Default: baseline at HEADER_H + body_h; top: at HEADER_H + AXIS_H - 1.
+        let bottom = render(&d, &Theme::default());
+        let top = render(
+            &build(&src.replace("section S", "topAxis\nsection S")),
+            &Theme::default(),
+        );
+        assert!(bottom.contains(&fnum(HEADER_H + body_h)));
+        assert!(top.contains(&fnum(HEADER_H + AXIS_H - 1.0)));
+        assert_ne!(bottom, top);
     }
 
     #[test]

@@ -59,9 +59,10 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   *latest* end of the listed predecessors (unknown ids ignored, empty falls back
   to the previous task's end). `until`/end-date resolution happens in
   `resolve_tasks` (`src/svg/gantt.rs`), so forward/unknown refs fall back to a
-  1-day length like `after` does. Config keywords `includes …`,
-  `inclusiveEndDates`, `topAxis` are consumed in `parse()` (informational only)
-  so they don't fall through to the task path.
+  1-day length like `after` does. Config keywords `includes …` and
+  `inclusiveEndDates` are consumed in `parse()` (informational only) so they
+  don't fall through to the task path; `topAxis` sets `GanttDiagram.top_axis`
+  (see the axis-layout note below).
 - Gantt `click <taskId> href "url"` / `click <taskId> call fn()` binds a
   `GanttTask.click` (`ClickAction`, shared with the flowchart). Parsing reuses
   the shared `parse_click` in `src/parse/flowchart/click.rs` (also consumed by
@@ -78,3 +79,13 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   `tickInterval` overrides `pick_tick_step` (`parse_tick_interval` → days), and
   `weekday` offsets the first axis tick onto that weekday (`weekday_tick_offset`).
   `display_mode` is stored but the compact row-packing layout is a follow-up.
+- The date axis (`axis_ticks` in `src/svg/gantt.rs`) **caps tick density from the
+  label width** so labels never overlap into a smear (#244): `axis_label_width`
+  estimates the widest formatted label (via `metrics::text_width` at the 11px axis
+  font, sampled at both ends and the middle), and `pick_tick_step` picks the
+  smallest rung of a calendar-friendly ladder (1d/2d/3d/5d/1w/2w/1M/2M/3M/6M/1y)
+  whose pixel spacing clears `label width + pad`. So the step widens automatically
+  as the range grows; an explicit `tickInterval` still overrides it. The axis is
+  laid out at the **bottom** by default (`body_top`/`axis_y` split by `d.top_axis`,
+  matching upstream); the `topAxis` keyword sets `GanttDiagram.top_axis` to restore
+  the top placement.
