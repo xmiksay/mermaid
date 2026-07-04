@@ -253,6 +253,13 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
   `<tspan>`s for multi-line labels, so every renderer honors `<br>` for free;
   flowchart also sizes nodes from the resulting line count / widest line.
+- Edge labels on the graph-shaped renderers (flowchart, state, class, ER,
+  block) share `label::draw_edge_label` — it measures the text, paints an opaque
+  `edge_label_bg` rect (theme `flow_label_bg`, wired from the
+  `edgeLabelBackground` theme variable) and centers the label on top, matching
+  upstream so a label stays legible where its edge crosses a node or another
+  label (#260). C4 keeps its own two-line label/`[tech]` layout but calls
+  `edge_label_bg` for the same background.
 - Text width scales with the font size: `src/svg/metrics.rs` owns the shared
   `text_width(s, base_char_w, font_size)` / `font_scale(font_size)` helpers
   (`= font_size / BASE_FONT_SIZE`, `BASE_FONT_SIZE = 14`). Every renderer keeps

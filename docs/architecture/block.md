@@ -13,7 +13,9 @@ Parser: `src/parse/block/` · Renderer: `src/svg/block/`.
   `id<["label"]>(dir)` parse to `BlockShape::Arrow(BlockArrow{right,left,up,down})`
   (`(x)`→left+right, `(y)`→up+down) and render as a shafted/double-headed path.
   Edge labels `a -- "text" --> b` are captured off the tail side in `parse_edge`
-  (the label no longer swallows the arrow). Edges resolve endpoints against a
+  (the label no longer swallows the arrow) and drawn through the shared
+  `label::draw_edge_label` so they sit on an opaque `edgeLabelBackground` rect
+  (#260). Edges resolve endpoints against a
   `Geom` map that indexes **groups by id too** (so `ID --> D` where `ID` is a
   `block:ID … end` group works) and clip to the node boundary (`clip`) so
   arrowheads land on the edge, not the center. `block:id:span` keeps the span on

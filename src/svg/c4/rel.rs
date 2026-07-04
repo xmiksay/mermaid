@@ -7,6 +7,8 @@ use crate::parse::{C4RelStyle, C4Relation};
 
 use super::super::builder::{fnum, SvgBuilder};
 use super::super::geometry::{clip_rect, polyline_midpoint};
+use super::super::label::edge_label_bg;
+use super::super::metrics::text_width;
 use super::super::theme::Theme;
 use super::C4_LINE;
 
@@ -61,12 +63,20 @@ pub(super) fn draw_rel(
         mx += s.offset_x.unwrap_or(0.0);
         my += s.offset_y.unwrap_or(0.0);
     }
+    // Opaque background behind each label line so the relation label stays
+    // legible where it crosses geometry (upstream `edgeLabelBackground`, #260).
     if let Some(t) = tech {
+        let label = truncate(label, 36);
+        let tech = format!("[{}]", truncate(t, 30));
+        let lw = text_width(&label, 8.0, 10.0) + 6.0;
+        let tw = text_width(&tech, 8.0, 9.0) + 6.0;
+        edge_label_bg(svg, mx, my - 4.0, lw, 13.0, theme);
+        edge_label_bg(svg, mx, my + 9.0, tw, 12.0, theme);
         svg.text(
             mx,
             my - 1.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            &truncate(label, 36),
+            &label,
         );
         svg.text(
             mx,
@@ -74,14 +84,17 @@ pub(super) fn draw_rel(
             &format!(
                 "text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\" font-style=\"italic\""
             ),
-            &format!("[{}]", truncate(t, 30)),
+            &tech,
         );
     } else {
+        let label = truncate(label, 36);
+        let lw = text_width(&label, 8.0, 10.0) + 6.0;
+        edge_label_bg(svg, mx, my, lw, 14.0, theme);
         svg.text(
             mx,
             my + 4.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            &truncate(label, 36),
+            &label,
         );
     }
 }

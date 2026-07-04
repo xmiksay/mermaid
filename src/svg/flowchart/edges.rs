@@ -190,7 +190,7 @@ pub(super) fn draw_edge(
 
     if let Some(label) = &edge.label {
         let mid = polyline_midpoint(&clipped);
-        draw_edge_label(svg, mid, label, theme);
+        crate::svg::label::draw_edge_label(svg, mid, label, theme);
     }
 }
 
@@ -228,26 +228,6 @@ fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
         attrs.push(format!("marker-end=\"url(#{id})\""));
     }
     attrs.join(" ")
-}
-
-fn draw_edge_label(svg: &mut SvgBuilder, (mx, my): (f64, f64), text: &str, theme: &Theme) {
-    let fg = &theme.fg;
-    let flow_label_bg = &theme.flow_label_bg;
-    let w = crate::svg::metrics::text_width(text, 7.0, theme.font_size) + 8.0;
-    let h = 18.0;
-    svg.rect(
-        mx - w / 2.0,
-        my - h / 2.0,
-        w,
-        h,
-        &format!("fill=\"{flow_label_bg}\" stroke=\"none\""),
-    );
-    svg.text(
-        mx,
-        my + 4.0,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-        text,
-    );
 }
 
 // ---- shape clipping --------------------------------------------------------
