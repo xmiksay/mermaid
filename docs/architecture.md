@@ -269,6 +269,7 @@ One file per diagram kind under `docs/architecture/`:
 - [Class](architecture/class.md)
 - [ER](architecture/er.md)
 - [Gantt](architecture/gantt.md)
+- [Journey](architecture/journey.md)
 - [Pie](architecture/pie.md)
 - [Packet](architecture/packet.md)
 - [Quadrant chart](architecture/quadrant.md)
