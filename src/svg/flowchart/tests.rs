@@ -201,11 +201,22 @@ fn node_label_br_splits_into_lines() {
         &parse_flow("flowchart TB\nPX[\"line one<br/>line two<br/>line three\"]\n"),
         &Theme::default(),
     );
-    // Three separate <text> lines, none containing literal <br> markup.
+    // Lines stacked as <tspan>s, none containing literal <br> markup.
     assert_eq!(svg.matches("line one").count(), 1);
     assert_eq!(svg.matches("line three").count(), 1);
+    assert_eq!(svg.matches("<tspan").count(), 3);
     assert!(!svg.contains("&lt;br"));
     assert!(!svg.contains("<br"));
+}
+
+#[test]
+fn inline_style_carries_across_br_in_node_label() {
+    // #221: a tag opened before a `<br>` must keep styling the text after it.
+    let svg = render(
+        &parse_flow("flowchart TD\nA[\"<b>line1<br>line2</b>\"]\n"),
+        &Theme::default(),
+    );
+    assert_eq!(svg.matches("font-weight=\"bold\"").count(), 2);
 }
 
 #[test]
