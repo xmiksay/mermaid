@@ -151,8 +151,20 @@ pub enum ArrowKind {
     BiSolidArrow,
     /// `<<-->>` dashed line, filled arrowhead at both ends (bidirectional)
     BiDashedArrow,
-    /// `-\` / `-/` solid line, half (single-barb) arrowhead (v11.12.3+)
-    HalfArrow,
-    /// `--\` / `--/` dashed line, half (single-barb) arrowhead (v11.12.3+)
-    DashedHalfArrow,
+    /// `-\\` / `-|\` solid line, upper-barb half arrowhead at the head (v11.12.3+)
+    HalfArrowTop,
+    /// `-//` / `-|/` solid line, lower-barb half arrowhead at the head
+    HalfArrowBottom,
+    /// `--\\` / `--|\` dashed line, upper-barb half arrowhead at the head
+    DashedHalfArrowTop,
+    /// `--//` / `--|/` dashed line, lower-barb half arrowhead at the head
+    DashedHalfArrowBottom,
+    /// `\\-` / `\|-` solid line, upper-barb half arrowhead at the tail (reverse)
+    HalfArrowStartTop,
+    /// `//-` / `/|-` solid line, lower-barb half arrowhead at the tail (reverse)
+    HalfArrowStartBottom,
+    /// `\\--` / `\|--` dashed line, upper-barb half arrowhead at the tail (reverse)
+    DashedHalfArrowStartTop,
+    /// `//--` / `/|--` dashed line, lower-barb half arrowhead at the tail (reverse)
+    DashedHalfArrowStartBottom,
 }
