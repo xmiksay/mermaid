@@ -25,6 +25,9 @@ pub struct GanttDiagram {
     /// `displayMode compact` — packs parallel tasks into shared rows. Parsed
     /// and stored; the compact layout itself is a follow-up.
     pub display_mode: Option<String>,
+    /// `topAxis` — draw the date axis at the top. Upstream's default places it
+    /// at the bottom; this flag restores the top placement.
+    pub top_axis: bool,
     pub sections: Vec<GanttSection>,
 }
 

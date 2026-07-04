@@ -95,7 +95,11 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
             diag.display_mode = Some(rest.to_string());
             continue;
         }
-        if line.starts_with("includes ") || line == "inclusiveEndDates" || line == "topAxis" {
+        if line == "topAxis" {
+            diag.top_axis = true;
+            continue;
+        }
+        if line.starts_with("includes ") || line == "inclusiveEndDates" {
             // Accepted but currently informational only.
             continue;
         }
@@ -401,6 +405,7 @@ mod tests {
         .unwrap();
         assert_eq!(d.sections[0].tasks.len(), 1);
         assert_eq!(d.tick_interval.as_deref(), Some("1week"));
+        assert!(d.top_axis);
     }
 
     #[test]
