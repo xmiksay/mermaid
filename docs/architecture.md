@@ -19,20 +19,23 @@ src/
 │   ├── ast/         all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta —
 │   │                mod + block/c4/charts/class/er/flowchart/gantt/sequence/state/structure
 │   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
-│   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing
-│   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted
+│   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing;
+│   │                parse_style_props + parse_multi_id_stmt (id-list/payload split)
+│   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted/
+│   │                split_top_level + extract_inline_class/split_id_label/parse_attr_pairs
 │   ├── {sequence,flowchart,state,class,c4,block,zenuml}/  multi-file per-diagram parsers (mod + submodules)
 │   └── {pie,er,gantt,journey,timeline,sankey,quadrant,xychart,radar,packet,
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
-│   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder)
+│   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder, def_arrow_marker)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
 │   ├── label.rs     decode_label: `#…;` entity codes (markdown emphasis → markup.rs)
 │   ├── markup.rs    inline-HTML labels → styled tspans (b/i/u/span/a); strip_tags
 │   ├── metrics.rs   shared text_width/font_scale (per-glyph widths track font_size)
 │   ├── decorate.rs  post-render role/aria + <title>/<desc> injection from DiagramMeta
-│   ├── theme.rs     Theme struct + default_theme/dark/forest/neutral + with_font*
+│   ├── theme/       Theme struct + default_theme/dark/forest/neutral + with_font* (mod.rs);
+│   │                apply_theme_variables `themeVariables` overrides (variables.rs)
 │   ├── style.rs     resolves classDef/style/linkStyle into inline fill/stroke
 │   ├── gantt_date.rs civil day-count date math (days_from_civil/format_date/Excludes)
 │   ├── interact.rs  shared click/link wrappers (open_click/close_click)
@@ -117,8 +120,10 @@ fn draw_thing(svg: &mut SvgBuilder, …, theme: &Theme) {
 format args don't support field access.
 
 When adding a new color to `Theme`, also add it to the built-in constructors in
-`src/svg/theme.rs` (`default_theme`/`dark`/`forest`/`neutral`; `base` uses
+`src/svg/theme/mod.rs` (`default_theme`/`dark`/`forest`/`neutral`; `base` uses
 `..Self::default_theme()` struct-update so it inherits new fields for free).
+Its `themeVariables`-override wiring lives beside it in `src/svg/theme/variables.rs`
+(`apply_theme_variables` and the per-diagram helpers).
 Custom themes use struct-update syntax from one of the built-ins, so adding a
 field is non-breaking. `by_name` maps `default`→`default_theme`,
 `base`→`base` (upstream's customization palette — warm `#fff4dd` primary,

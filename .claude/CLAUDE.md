@@ -24,7 +24,8 @@ Extension seams:
   `SAMPLES` entry in `gallery_build.rs` + the matching `#![doc]` include in
   `src/lib.rs`. Public `ast::*` enums are `#[non_exhaustive]`.
 - **New theme color** = `Theme` field + every built-in constructor in
-  `src/svg/theme.rs` (`base` inherits via struct-update for free).
+  `src/svg/theme/mod.rs` (`base` inherits via struct-update for free); wire any
+  `themeVariables` override in `src/svg/theme/variables.rs`.
 - **Closing a per-diagram config gap** = a `meta.config` lookup in
   `parse_with_meta`, not new scanning.
 
@@ -58,7 +59,7 @@ Drive everything through the Makefile (`make help` lists all targets):
 
 ```bash
 make build              # debug build: library + binary
-make test               # all tests (706: 690 lib + 15 integration + 1 doctest)
+make test               # all tests (736: 720 lib + 15 integration + 1 doctest)
 make test-unit          # in-module #[cfg(test)] only
 make test-integration   # tests/integration.rs → target/test-samples/<stem>.svg
 make lint               # cargo fmt --check + clippy --all-targets -D warnings

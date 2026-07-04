@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::parse::ast::{
     BlockArrow, BlockEdge, BlockItem, BlockLinkStyle, BlockShape, EdgeHead, Style,
 };
-use crate::parse::style::parse_style_props;
+use crate::parse::style::{parse_multi_id_stmt, parse_style_props};
 
 /// Style state gathered while scanning: `classDef` definitions plus the
 /// deferred `class`/`style` assignments that target block ids (which may be
@@ -22,40 +22,23 @@ pub(super) struct Ctx {
 /// the line was one of those (so the caller skips node tokenizing).
 pub(super) fn handle_style_line(line: &str, ctx: &mut Ctx) -> bool {
     if let Some(rest) = line.strip_prefix("classDef ") {
-        if let Some((names, props)) = rest.trim().split_once(char::is_whitespace) {
+        if let Some((names, props)) = parse_multi_id_stmt(rest, false) {
             let style = parse_style_props(props);
-            for name in names.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                ctx.class_defs.insert(name.to_string(), style.clone());
+            for name in names {
+                ctx.class_defs.insert(name, style.clone());
             }
         }
         return true;
     }
     if let Some(rest) = line.strip_prefix("class ") {
-        if let Some((ids, name)) = rest.trim().rsplit_once(char::is_whitespace) {
-            let ids: Vec<String> = ids
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            let name = name.trim();
-            if !ids.is_empty() && !name.is_empty() {
-                ctx.class_assign.push((ids, name.to_string()));
-            }
+        if let Some((ids, name)) = parse_multi_id_stmt(rest, true) {
+            ctx.class_assign.push((ids, name.to_string()));
         }
         return true;
     }
     if let Some(rest) = line.strip_prefix("style ") {
-        if let Some((ids, props)) = rest.trim().split_once(char::is_whitespace) {
-            let ids: Vec<String> = ids
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
-            if !ids.is_empty() {
-                ctx.style_assign.push((ids, parse_style_props(props)));
-            }
+        if let Some((ids, props)) = parse_multi_id_stmt(rest, false) {
+            ctx.style_assign.push((ids, parse_style_props(props)));
         }
         return true;
     }

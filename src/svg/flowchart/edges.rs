@@ -280,11 +280,7 @@ fn clip_to_node(
 
 pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
     let flow_edge_stroke = &theme.flow_edge_stroke;
-    svg.defs_raw(&format!(
-        "<marker id=\"arrow-filled\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
-         markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
-    ));
+    svg.def_arrow_marker("arrow-filled", flow_edge_stroke, 10, 10);
     svg.defs_raw(&format!(
         "<marker id=\"arrow-circle\" viewBox=\"0 0 12 12\" refX=\"10\" refY=\"6\" \
          markerWidth=\"12\" markerHeight=\"12\" orient=\"auto-start-reverse\">\

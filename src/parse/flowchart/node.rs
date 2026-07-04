@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::super::ast::{FlowEdge, FlowNode, FlowchartDiagram, NodeShape, Style};
-use super::super::token::{find_unquoted, split_unquoted, unquote};
+use super::super::token::{find_unquoted, parse_attr_pairs, unquote};
 use super::super::ParseError;
 use super::edge::{consume_edge_id, parse_arrow};
 use super::scanner::Scanner;
@@ -181,7 +181,7 @@ fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<Flo
 
     let mut text = id.clone();
     let mut shape = NodeShape::Rect;
-    for (key, value) in split_attrs(&body) {
+    for (key, value) in parse_attr_pairs(&body) {
         match key.as_str() {
             "shape" => shape = shape_from_name(&value),
             "label" | "title" => text = value,
@@ -189,19 +189,6 @@ fn parse_at_node(id: String, sc: &mut Scanner<'_>, line_no: usize) -> Result<Flo
         }
     }
     Ok(finish_node(id, text, shape, sc))
-}
-
-/// Split an attribute block body into `(key, value)` pairs. Commas separate
-/// pairs and `:` separates a key from its value; both are honored only outside
-/// quotes so a quoted value may embed either character. Values are unquoted.
-fn split_attrs(body: &str) -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-    for part in split_unquoted(body, ',') {
-        if let Some((k, v)) = part.split_once(':') {
-            pairs.push((k.trim().to_string(), unquote(v.trim()).to_string()));
-        }
-    }
-    pairs
 }
 
 /// Map a v11 named shape onto an existing `NodeShape`. Aliases follow upstream

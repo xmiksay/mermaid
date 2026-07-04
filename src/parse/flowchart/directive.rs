@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use super::super::ast::{EdgeCurve, FlowNode, FlowchartDiagram, NodeShape, Style};
-use super::super::style::parse_style_props;
+use super::super::style::{parse_multi_id_stmt, parse_style_props};
 use super::super::ParseError;
 
 /// Index of the node with `id`, creating a bare rectangle placeholder if a
@@ -31,7 +31,9 @@ pub(super) fn node_index(
     })
 }
 
-/// `style <id> <props>` — inline style on a single node.
+/// `style <id> <props>` — inline style on a single node. Upstream `flow.jison`
+/// binds `style` to a single `idString`, unlike `erDiagram`/`block-beta` whose
+/// `style` accepts a comma-separated id-list — so this stays single-id.
 pub(super) fn handle_style(
     rest: &str,
     diag: &mut FlowchartDiagram,
@@ -54,16 +56,11 @@ pub(super) fn handle_class_def(
     diag: &mut FlowchartDiagram,
     line_no: usize,
 ) -> Result<(), ParseError> {
-    let (names, props) = rest
-        .trim()
-        .split_once(char::is_whitespace)
-        .ok_or_else(|| malformed("classDef", line_no))?;
+    let (names, props) =
+        parse_multi_id_stmt(rest, false).ok_or_else(|| malformed("classDef", line_no))?;
     let style = parse_style_props(props);
-    for name in names.split(',') {
-        let name = name.trim();
-        if !name.is_empty() {
-            diag.class_defs.insert(name.to_string(), style.clone());
-        }
+    for name in names {
+        diag.class_defs.insert(name, style.clone());
     }
     Ok(())
 }
@@ -75,20 +72,10 @@ pub(super) fn handle_class_apply(
     nodes_by_id: &mut HashMap<String, usize>,
     line_no: usize,
 ) -> Result<(), ParseError> {
-    let (ids, class_name) = rest
-        .trim()
-        .rsplit_once(char::is_whitespace)
-        .ok_or_else(|| malformed("class", line_no))?;
-    let class_name = class_name.trim();
-    if class_name.is_empty() {
-        return Err(malformed("class", line_no));
-    }
-    for id in ids.split(',') {
-        let id = id.trim();
-        if id.is_empty() {
-            continue;
-        }
-        let idx = node_index(diag, nodes_by_id, id);
+    let (ids, class_name) =
+        parse_multi_id_stmt(rest, true).ok_or_else(|| malformed("class", line_no))?;
+    for id in ids {
+        let idx = node_index(diag, nodes_by_id, &id);
         let classes = &mut diag.nodes[idx].classes;
         if !classes.iter().any(|c| c == class_name) {
             classes.push(class_name.to_string());

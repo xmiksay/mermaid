@@ -156,11 +156,9 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
 
     let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0)).theme(theme);
 
+    svg.def_arrow_marker("req-arrow", stroke, 9, 9);
     svg.defs_raw(&format!(
-        "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
-         markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\">\
-         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{stroke}\"/></marker>\
-         <marker id=\"req-contains\" viewBox=\"0 0 20 20\" refX=\"19\" refY=\"10\" \
+        "<marker id=\"req-contains\" viewBox=\"0 0 20 20\" refX=\"19\" refY=\"10\" \
          markerWidth=\"18\" markerHeight=\"18\" orient=\"auto-start-reverse\">\
          <circle cx=\"10\" cy=\"10\" r=\"9\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\"/>\
          <path d=\"M1,10 L19,10 M10,1 L10,19\" stroke=\"{stroke}\" stroke-width=\"1\"/></marker>"

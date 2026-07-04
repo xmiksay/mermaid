@@ -91,12 +91,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let height = (max_y + PAD).max(220.0);
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
-    let arrow_color = C4_LINE;
-    svg.defs_raw(&format!(
-        "<marker id=\"c4-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
-         markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\">\
-         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{arrow_color}\"/></marker>"
-    ));
+    svg.def_arrow_marker("c4-arrow", C4_LINE, 9, 9);
 
     if let Some(t) = &d.title {
         svg.text(

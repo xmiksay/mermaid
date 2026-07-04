@@ -227,12 +227,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     let height = (group_y - GROUP_GAP + PAD).max(160.0);
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
-    svg.defs_raw(&format!(
-        "<marker id=\"arch-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
-         markerWidth=\"8\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
-         <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{}\"/></marker>",
-        &theme.flow_edge_stroke
-    ));
+    svg.def_arrow_marker("arch-arrow", &theme.flow_edge_stroke, 9, 8);
 
     for (x, y, w, h, label) in &placed_groups {
         svg.rect(*x, *y, *w, *h,

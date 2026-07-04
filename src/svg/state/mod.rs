@@ -377,13 +377,7 @@ fn clip_to_state(
 }
 
 fn define_marker(svg: &mut SvgBuilder, theme: &Theme) {
-    let flow_edge_stroke = &theme.flow_edge_stroke;
-    let m = format!(
-        "<marker id=\"state-arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
-         markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
-    );
-    svg.defs_raw(&m);
+    svg.def_arrow_marker("state-arrow", &theme.flow_edge_stroke, 10, 10);
 }
 
 #[cfg(test)]

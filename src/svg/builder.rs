@@ -191,6 +191,19 @@ impl SvgBuilder {
         self.defs.push_str(raw);
     }
 
+    /// Define a triangular arrowhead `<marker>`: a filled `M0,0 L10,5 L0,10 z`
+    /// triangle in a `0 0 10 10` viewBox, oriented `auto-start-reverse` so the
+    /// same id serves both `marker-start` and `marker-end`. `ref_x` places the
+    /// tip on the node boundary; `size` sets both marker dimensions.
+    pub fn def_arrow_marker(&mut self, id: &str, color: &str, ref_x: u32, size: u32) {
+        let _ = write!(
+            self.defs,
+            "<marker id=\"{id}\" viewBox=\"0 0 10 10\" refX=\"{ref_x}\" refY=\"5\" \
+             markerWidth=\"{size}\" markerHeight=\"{size}\" orient=\"auto-start-reverse\">\
+             <path d=\"M0,0 L10,5 L0,10 z\" fill=\"{color}\"/></marker>"
+        );
+    }
+
     pub fn raw(&mut self, raw: &str) {
         self.body.push_str(raw);
     }

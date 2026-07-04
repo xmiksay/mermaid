@@ -15,7 +15,7 @@
 //! part before `[` is the id, the bracketed text the display label.
 
 use super::ast::{KanbanColumn, KanbanDiagram, KanbanTask};
-use super::token::split_unquoted;
+use super::token::{parse_attr_pairs, split_id_label};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<KanbanDiagram, ParseError> {
@@ -95,14 +95,8 @@ fn parse_task(body: &str) -> KanbanTask {
     let mut ticket = None;
     if let Some(a) = attrs {
         let a = a.trim_end_matches('}').trim();
-        for kv in split_unquoted(a, ',') {
-            let (k, v) = match kv.split_once(':') {
-                Some(p) => p,
-                None => continue,
-            };
-            let k = k.trim();
-            let v = v.trim().trim_matches('\'').trim_matches('"').to_string();
-            match k {
+        for (k, v) in parse_attr_pairs(a) {
+            match k.as_str() {
                 "assigned" => assigned = Some(v),
                 "priority" => priority = Some(v),
                 "ticket" => ticket = Some(v),
@@ -117,22 +111,6 @@ fn parse_task(body: &str) -> KanbanTask {
         priority,
         ticket,
     }
-}
-
-/// Split the documented `id[Label]` form into `(id, label)`. Without brackets
-/// the whole string is both id and label; a bracket form with an empty prefix
-/// (`[Label]`) reuses the label as the id.
-fn split_id_label(s: &str) -> (String, String) {
-    let s = s.trim();
-    if let Some(open) = s.find('[') {
-        if s.ends_with(']') {
-            let id = s[..open].trim();
-            let label = s[open + 1..s.len() - 1].trim();
-            let id = if id.is_empty() { label } else { id };
-            return (id.to_string(), label.to_string());
-        }
-    }
-    (s.to_string(), s.to_string())
 }
 
 #[cfg(test)]
