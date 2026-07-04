@@ -54,25 +54,49 @@ struct Style {
     href: Option<String>,
 }
 
+/// Parse a run of already-`<br>`/newline-split label lines into per-line styled
+/// runs, carrying the open-tag style stack **across** the line breaks so a tag
+/// opened on one line still styles the next: `<b>a<br>b</b>` keeps both lines
+/// bold (#187). Each line is parsed independently only for backtick-fenced
+/// markdown, which is self-contained.
+pub(crate) fn parse_lines(lines: &[&str]) -> Vec<Vec<Span>> {
+    let mut cur = Style::default();
+    let mut stack: Vec<(String, Style)> = Vec::new();
+    lines
+        .iter()
+        .map(|line| parse_line(line, &mut cur, &mut stack))
+        .collect()
+}
+
 /// Parse one already-line-split label into styled runs. Adjacent runs sharing
-/// the same style are merged so a tag-free label yields exactly one span.
+/// the same style are merged so a tag-free label yields exactly one span. The
+/// library drives whole labels through [`parse_lines`]; this single-line form is
+/// kept for the unit tests that exercise span parsing in isolation.
+#[cfg(test)]
 pub(crate) fn parse_spans(line: &str) -> Vec<Span> {
+    let mut cur = Style::default();
+    let mut stack: Vec<(String, Style)> = Vec::new();
+    parse_line(line, &mut cur, &mut stack)
+}
+
+/// Parse one line, threading the caller's `cur` style and open-tag `stack` so a
+/// tag left open at the line's end continues into the next line's parse.
+fn parse_line(line: &str, cur: &mut Style, stack: &mut Vec<(String, Style)>) -> Vec<Span> {
     // Backtick-fenced markdown strings carry `**bold**`/`*italic*` emphasis
-    // rather than HTML tags — parse those into styled runs instead.
+    // rather than HTML tags — parse those into styled runs instead. Such a line
+    // is self-contained, so it neither reads nor mutates the carried tag stack.
     if let Some(inner) = fenced_markdown(line) {
         return parse_markdown_spans(inner);
     }
     let b = line.as_bytes();
     let mut spans: Vec<Span> = Vec::new();
     let mut buf = String::new();
-    let mut cur = Style::default();
-    let mut stack: Vec<(String, Style)> = Vec::new();
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'<' {
             if let Some((tag, len)) = parse_tag(&line[i..]) {
-                flush(&mut spans, &mut buf, &cur);
-                apply_tag(&tag, &mut cur, &mut stack);
+                flush(&mut spans, &mut buf, cur);
+                apply_tag(&tag, cur, stack);
                 i += len;
                 continue;
             }
@@ -81,7 +105,7 @@ pub(crate) fn parse_spans(line: &str) -> Vec<Span> {
         buf.push(ch);
         i += ch.len_utf8();
     }
-    flush(&mut spans, &mut buf, &cur);
+    flush(&mut spans, &mut buf, cur);
     if spans.is_empty() {
         spans.push(Span::default());
     }
@@ -445,6 +469,16 @@ mod tests {
     fn plain_fenced_string_is_single_span() {
         // No emphasis markers → one plain run, so the bare-<text> fast path holds.
         assert_eq!(parse_spans("`plain`"), vec![plain("plain")]);
+    }
+
+    #[test]
+    fn tag_stack_carries_across_lines() {
+        // #187: <b> opened on the first line still styles the second line.
+        let lines = ["<b>line1", "line2</b>", "plain"];
+        let parsed = parse_lines(&lines);
+        assert!(parsed[0][0].bold);
+        assert!(parsed[1][0].bold);
+        assert!(!parsed[2][0].bold);
     }
 
     #[test]

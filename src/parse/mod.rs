@@ -120,6 +120,10 @@ pub fn parse(input: &str) -> Result<Diagram, ParseError> {
 /// `accTitle`/`accDescr`, theme) extracted from the source preamble. The
 /// diagram body is parsed from the source with the preamble removed.
 pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError> {
+    // Strip a leading UTF-8 BOM (U+FEFF): Windows editors prepend one and Rust's
+    // `trim` does not remove it, so it would otherwise glue onto the header token
+    // (`﻿flowchart` → "unknown diagram type"). (#187)
+    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
     let (meta, cleaned) = preamble::strip(input);
     let mut diagram = dispatch(&cleaned)?;
     if let Some(title) = &meta.title {
@@ -429,6 +433,13 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn leading_bom_is_stripped() {
+        // #187: a UTF-8 BOM from a Windows editor must not glue onto the header.
+        let d = parse("\u{feff}flowchart TD\nA-->B\n").unwrap();
+        assert!(matches!(d, Diagram::Flowchart(_)));
     }
 
     #[test]
