@@ -2,7 +2,7 @@ export CARGO_BUILD_JOBS ?= 4
 
 .DEFAULT_GOAL := help
 .PHONY: help build run check fmt lint test test-unit test-integration test-doc \
-        bench gallery doc package verify clean
+        coverage bench gallery doc package verify clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -33,6 +33,12 @@ test-doc: ## Doctests (lib.rs examples)
 	cargo test --doc
 
 test: test-unit test-integration test-doc ## All tests (unit + integration + doctest)
+
+coverage: ## Test coverage report (needs cargo-llvm-cov): summary + lcov + HTML under target/llvm-cov/
+	@mkdir -p target/llvm-cov
+	cargo llvm-cov --lcov --output-path target/llvm-cov/lcov.info
+	cargo llvm-cov report --html
+	cargo llvm-cov report
 
 bench: ## Criterion benches: parse/<kind> + render/<kind> over samples/
 	cargo bench

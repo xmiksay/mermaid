@@ -209,6 +209,7 @@ help`) to list them:
 | `make test-integration` | Integration tests (`tests/integration.rs`; writes `target/test-samples/*.svg`) |
 | `make test-doc` | Doctests |
 | `make test` | All of the above |
+| `make coverage` | Test coverage report via `cargo-llvm-cov` (summary + lcov + HTML under `target/llvm-cov/`) |
 | `make bench` | Criterion benches (`parse/<kind>` + `render/<kind>`) |
 | `make gallery` | Regenerate `assets/gallery/*.md` from `samples/` |
 | `make doc` | Build rustdoc with the embedded gallery |

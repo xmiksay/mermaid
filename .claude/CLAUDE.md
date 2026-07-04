@@ -64,6 +64,7 @@ make test-unit          # in-module #[cfg(test)] only
 make test-integration   # tests/integration.rs → target/test-samples/<stem>.svg
 make lint               # cargo fmt --check + clippy --all-targets -D warnings
 make verify             # lint + test — the hard gate before any push
+make coverage           # cargo-llvm-cov report (summary + lcov + HTML under target/llvm-cov/)
 make bench              # criterion benches: parse/<kind> + render/<kind>
 make gallery            # regenerate assets/gallery/*.md
 make run ARGS="--help"  # run the CLI
