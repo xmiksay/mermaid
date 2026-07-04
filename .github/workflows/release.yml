@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  coverage:
+    name: Verify / Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads channel + components from rust-toolchain.toml; llvm-tools is
+      # only needed here, so it is added on top rather than pinned there.
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: llvm-tools
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Lint
+        run: make lint
+
+      - name: Tests with coverage
+        run: make coverage
+
+      - name: Doctests
+        run: make test-doc
+
+      - name: Coverage summary
+        run: |
+          {
+            echo "### Test coverage — ${{ github.ref_name }}"
+            echo '```'
+            cargo llvm-cov report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.ref_name }}
+          path: |
+            target/llvm-cov/lcov.info
+            target/llvm-cov/html
