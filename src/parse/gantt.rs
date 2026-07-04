@@ -285,7 +285,11 @@ fn parse_end(s: &str, line_no: usize) -> Result<TaskEnd, ParseError> {
 }
 
 fn looks_like_date(s: &str) -> bool {
+    // A calendar date has ≥2 `-` separators (`YYYY-MM-DD`, `DD-MM-YYYY`); a
+    // sub-day time token (`HH:mm`, `HH:mm:ss`) is digits joined by `:`. Either
+    // way it carries separators, so it's never mistaken for a bare id like `a1`.
     s.chars().filter(|c| *c == '-').count() >= 2
+        || (s.contains(':') && s.chars().all(|c| c.is_ascii_digit() || c == ':'))
 }
 
 fn looks_like_start(s: &str) -> bool {
@@ -477,6 +481,24 @@ mod tests {
         assert_eq!(t.id.as_deref(), Some("v1"));
         assert_eq!(t.start, TaskStart::Date("2026-01-03".into()));
         assert_eq!(t.end, TaskEnd::Duration(0.0));
+    }
+
+    #[test]
+    fn time_only_start_is_a_date_not_an_id() {
+        // `dateFormat HH:mm` values carry a `:`, so a leading time token is the
+        // start date rather than being consumed as the task id.
+        let d = parse("gantt\ndateFormat HH:mm\nsection S\nA : 09:00, 30m\nB : 10:00, 18:14\n")
+            .unwrap();
+        let a = &d.sections[0].tasks[0];
+        assert_eq!(a.start, TaskStart::Date("09:00".into()));
+        match a.end {
+            TaskEnd::Duration(days) => assert!((days - 30.0 / 1_440.0).abs() < 1e-12),
+            _ => panic!("expected a duration end"),
+        }
+        // An explicit time end resolves to an end date, not an id/duration.
+        let b = &d.sections[0].tasks[1];
+        assert_eq!(b.start, TaskStart::Date("10:00".into()));
+        assert_eq!(b.end, TaskEnd::Date("18:14".into()));
     }
 
     #[test]
