@@ -3,7 +3,7 @@
 
 use crate::parse::QuadrantDiagram;
 
-use super::builder::SvgBuilder;
+use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const PAD: f64 = 40.0;
@@ -114,37 +114,56 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
         &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
     );
 
-    // Axis labels.
+    // X-axis labels: centered under each horizontal half, matching upstream
+    // (which places the left label under the left half and the right label
+    // under the right half rather than jamming them into the outer corners).
+    let x_label_y = chart_top + chart_h + 22.0;
     if let Some(l) = &d.x_axis_left {
         svg.text(
-            chart_left,
-            chart_top + chart_h + 22.0,
-            &format!("text-anchor=\"start\" fill=\"{fg}\" font-size=\"12\""),
+            chart_left + half_w / 2.0,
+            x_label_y,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             l,
         );
     }
     if let Some(r) = &d.x_axis_right {
         svg.text(
-            chart_left + chart_w,
-            chart_top + chart_h + 22.0,
-            &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"12\""),
+            chart_left + half_w * 1.5,
+            x_label_y,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             r,
         );
     }
-    if let Some(b) = &d.y_axis_bottom {
+    // Y-axis labels: rotated -90° and centered along each vertical half inside
+    // the left margin (upstream draws them vertically). Drawn horizontally with
+    // `text-anchor="end"` they were as wide as the text and clipped off the left
+    // edge of the viewBox (#243). The baseline sits at `Y_LABEL_X`; the rotated
+    // text only extends by its (font) height, so it stays well within [0, x].
+    const Y_LABEL_X: f64 = PAD / 2.0;
+    if let Some(t) = &d.y_axis_top {
+        let cy = chart_top + half_h / 2.0;
         svg.text(
-            chart_left - 8.0,
-            chart_top + chart_h - 4.0,
-            &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"12\""),
-            b,
+            Y_LABEL_X,
+            cy,
+            &format!(
+                "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" transform=\"rotate(-90 {} {})\"",
+                fnum(Y_LABEL_X),
+                fnum(cy)
+            ),
+            t,
         );
     }
-    if let Some(t) = &d.y_axis_top {
+    if let Some(b) = &d.y_axis_bottom {
+        let cy = chart_top + half_h * 1.5;
         svg.text(
-            chart_left - 8.0,
-            chart_top + 12.0,
-            &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"12\""),
-            t,
+            Y_LABEL_X,
+            cy,
+            &format!(
+                "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" transform=\"rotate(-90 {} {})\"",
+                fnum(Y_LABEL_X),
+                fnum(cy)
+            ),
+            b,
         );
     }
 
@@ -295,6 +314,25 @@ mod tests {
         // width = PAD*2 + 500 + 60 = 640, height = PAD*2 + 500 + 30 = 610.
         assert!(svg.contains("viewBox=\"0 0 640 610\""));
         assert!(svg.contains("r=\"5\""));
+    }
+
+    #[test]
+    fn y_axis_labels_rotated_and_inside_viewbox() {
+        // Long y-axis labels used to render horizontally with `text-anchor="end"`
+        // near the left edge, spilling off-canvas (x < 0) and clipping (#243).
+        // They must now be rotated -90° and stay fully inside the viewBox.
+        let d = QuadrantDiagram {
+            y_axis_top: Some("High Engagement".into()),
+            y_axis_bottom: Some("Low Engagement".into()),
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert_eq!(svg.matches("transform=\"rotate(-90 ").count(), 2);
+        // No text (nor any element) is placed at a negative x coordinate.
+        assert!(
+            !svg.contains("x=\"-"),
+            "label extends outside the viewBox: {svg}"
+        );
     }
 
     #[test]

@@ -18,3 +18,9 @@ Parser: `src/parse/quadrant.rs` · Renderer: `src/svg/quadrant.rs`.
   background tint — `Theme.quadrant_fills` (`[Option<Str>; 4]`, filled by
   `apply_theme_variables`) with `Theme::quadrant_fill(quadrant, palette_index)`
   falling back to the pie palette when unset.
+- Axis labels follow upstream layout: the two x-axis labels are centered under
+  each horizontal half; the two y-axis labels are rotated `-90°` and centered
+  along each vertical half inside the left margin. Drawing y labels horizontally
+  with `text-anchor="end"` clipped long ones off the left edge of the viewBox
+  (#243) — rotated, they only extend by the font height, so their `x` stays
+  well inside `[0, chart_left]`.
