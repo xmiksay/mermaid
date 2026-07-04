@@ -520,6 +520,23 @@ mod tests {
     }
 
     #[test]
+    fn opposite_transitions_render_distinctly() {
+        // Regression for #241: `Idle --> Running` and `Running --> Idle` used to
+        // collapse onto one segment, hiding the second label under the first.
+        let d = build("stateDiagram-v2\nIdle --> Running : start\nRunning --> Idle : stop\n");
+        let svg = render(&d, &Theme::default());
+        // Two arrowheads, one per direction.
+        assert_eq!(svg.matches("marker-end=\"url(#state-arrow)\"").count(), 2);
+        // The two labels no longer share an anchor.
+        let (sx, sy) = label_center(&svg, "start");
+        let (tx, ty) = label_center(&svg, "stop");
+        assert!(
+            (sx - tx).abs() > 1.0 || (sy - ty).abs() > 1.0,
+            "labels overlap: start ({sx},{sy}) vs stop ({tx},{ty})",
+        );
+    }
+
+    #[test]
     fn pseudo_states_visible_on_dark_theme() {
         // Start/end dots used a hardcoded #333, near-invisible on the dark bg.
         let d = build("stateDiagram-v2\n[*] --> A\nA --> [*]\n");

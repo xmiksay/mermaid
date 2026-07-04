@@ -76,6 +76,8 @@ pub(crate) fn build(w: &Work) -> Layout {
         edge_points.insert((orig_u, orig_v), waypoints);
     }
 
+    bow_opposite_pairs(&mut edge_points);
+
     let width = if min_x.is_finite() {
         max_x - min_x
     } else {
@@ -92,6 +94,54 @@ pub(crate) fn build(w: &Work) -> Layout {
         edge_points,
         width,
         height,
+    }
+}
+
+/// Sideways offset (layout units) applied to each curve of an opposite pair.
+const BOW: f64 = 12.0;
+
+/// When both `(u, v)` and `(v, u)` are routed, a single reversed polyline
+/// serves both directions, so the two curves — and their labels — collapse onto
+/// one segment. Bow each away from the shared axis on opposite sides so both
+/// stay visible with their own arrowhead and label. The perpendicular is taken
+/// from each edge's own direction, so `(u, v)` and `(v, u)` bow apart.
+fn bow_opposite_pairs(edge_points: &mut HashMap<(NodeId, NodeId), Vec<(f64, f64)>>) {
+    let keys: Vec<(NodeId, NodeId)> = edge_points.keys().copied().collect();
+    for (u, v) in keys {
+        if u == v || !edge_points.contains_key(&(v, u)) {
+            continue;
+        }
+        let pts = &edge_points[&(u, v)];
+        if pts.len() < 2 {
+            continue;
+        }
+        let (x0, y0) = pts[0];
+        let (x1, y1) = *pts.last().unwrap();
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-6 {
+            continue;
+        }
+        let (px, py) = (-dy / len * BOW, dx / len * BOW);
+        let bowed: Vec<(f64, f64)> = if pts.len() == 2 {
+            // Keep the endpoints on the node centers; bow only the midpoint so
+            // each curve leaves its node at an angle and the arrowheads part.
+            let mid = ((x0 + x1) / 2.0 + px, (y0 + y1) / 2.0 + py);
+            vec![(x0, y0), mid, (x1, y1)]
+        } else {
+            let n = pts.len();
+            pts.iter()
+                .enumerate()
+                .map(|(i, &(x, y))| {
+                    if i == 0 || i == n - 1 {
+                        (x, y)
+                    } else {
+                        (x + px, y + py)
+                    }
+                })
+                .collect()
+        };
+        edge_points.insert((u, v), bowed);
     }
 }
 
@@ -152,6 +202,21 @@ mod tests {
         // A self-loop starts and ends on the same node boundary point.
         assert_eq!(loop_pts.first(), loop_pts.last());
         assert!(loop_pts.len() >= 2);
+    }
+
+    #[test]
+    fn opposite_edges_bow_onto_separate_paths() {
+        // 1 -> 2 and 2 -> 1 would otherwise share one reversed polyline; each
+        // must gain a bowed midpoint offset to opposite sides.
+        let l = build_layout(&[1, 2], &[(1, 2), (2, 1)]);
+        let a = &l.edge_points[&(1, 2)];
+        let b = &l.edge_points[&(2, 1)];
+        assert!(a.len() >= 3 && b.len() >= 3, "opposite edges not bowed");
+        // Endpoints stay on the node centers; only the interior bows.
+        assert_eq!(a.first(), Some(&l.node_pos[&1]));
+        assert_eq!(a.last(), Some(&l.node_pos[&2]));
+        // The bowed midpoints sit on opposite sides of the shared axis.
+        assert_ne!(a[1], b[1]);
     }
 
     #[test]

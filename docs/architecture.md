@@ -240,6 +240,14 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   `Rect` for forward compatibility.
 - Sugiyama waypoints include **endpoints** (center of src, center of dst).
   The SVG renderer clips them to the node boundary itself.
+- **Opposite edge pairs** — when both `(u, v)` and `(v, u)` are routed, they
+  otherwise share one reversed polyline, so the two curves and their labels
+  collapse onto one segment (the second label sits hidden under the first,
+  #241). `bow_opposite_pairs` in `route.rs` bows each such edge sideways by
+  `BOW` layout units, using the edge's own direction for the perpendicular so
+  the pair bows to opposite sides; endpoints stay on the node centers (only the
+  midpoint / interior waypoints move) so arrowheads leave each node at an angle
+  and the labels no longer overlap. All graph-shaped kinds benefit for free.
 - Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
