@@ -5,6 +5,7 @@ use crate::parse::ast::{
     ArrowKind, AutoNumberConfig, Message, NotePosition, Participant, ParticipantKind,
     SequenceDiagram, SequenceItem, SequenceNote,
 };
+use crate::parse::token::parse_attr_pairs;
 use crate::parse::ParseError;
 
 const ARROWS: &[(&str, ArrowKind)] = &[
@@ -253,15 +254,10 @@ fn split_participant_meta(s: &str) -> (String, Option<ParticipantKind>) {
 /// it onto a [`ParticipantKind`]. Unknown/absent types return `None` so the
 /// caller keeps the declared `participant`/`actor` kind.
 fn meta_type_kind(meta: &str) -> Option<ParticipantKind> {
-    let after_key = &meta[meta.find("type")? + "type".len()..];
-    let value_part = &after_key[after_key.find(':')? + 1..];
-    let value = value_part
-        .split(',')
-        .next()
-        .unwrap_or(value_part)
-        .trim()
-        .trim_matches(|c: char| c == '"' || c == '\'' || c == '}')
-        .trim();
+    let value = parse_attr_pairs(meta)
+        .into_iter()
+        .find(|(k, _)| k == "type")?
+        .1;
     match value.to_ascii_lowercase().as_str() {
         "boundary" => Some(ParticipantKind::Boundary),
         "control" => Some(ParticipantKind::Control),

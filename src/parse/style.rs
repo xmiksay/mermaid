@@ -23,6 +23,32 @@ pub(crate) fn parse_style_props(s: &str) -> Style {
     out
 }
 
+/// Split a `<id-list> <payload>` directive body (`classDef`/`class`/`style`)
+/// into the comma-separated, trimmed, non-empty ids and the payload substring.
+/// `payload_is_last` selects the split point: `false` (`classDef`/`style`)
+/// treats everything after the first whitespace as the payload; `true` (`class`)
+/// treats only the final whitespace-delimited token as the payload, leaving the
+/// id-list in front. Returns `None` when the body lacks a whitespace separator
+/// or has no non-empty ids, so the caller can raise its own error.
+pub(crate) fn parse_multi_id_stmt(
+    body: &str,
+    payload_is_last: bool,
+) -> Option<(Vec<String>, &str)> {
+    let body = body.trim();
+    let (ids, payload) = if payload_is_last {
+        body.rsplit_once(char::is_whitespace)?
+    } else {
+        body.split_once(char::is_whitespace)?
+    };
+    let ids: Vec<String> = ids
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!ids.is_empty()).then_some((ids, payload))
+}
+
 fn split_escaped_commas(s: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut cur = String::new();
@@ -77,5 +103,23 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].0, "fill");
         assert_eq!(s[1].0, "stroke");
+    }
+
+    #[test]
+    fn multi_id_stmt_splits_ids_and_payload() {
+        // classDef/style: payload is everything after the first whitespace; the
+        // id-list is comma-separated with no interior spaces (upstream grammar).
+        let (ids, payload) = parse_multi_id_stmt("A,B,C fill:#f9f,stroke:#000", false).unwrap();
+        assert_eq!(ids, vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+        assert_eq!(payload, "fill:#f9f,stroke:#000");
+
+        // class: payload is the trailing token, id-list in front.
+        let (ids, payload) = parse_multi_id_stmt("A,B foo", true).unwrap();
+        assert_eq!(ids, vec!["A".to_string(), "B".to_string()]);
+        assert_eq!(payload, "foo");
+
+        // Empty ids and missing separators return None.
+        assert!(parse_multi_id_stmt("A", false).is_none());
+        assert!(parse_multi_id_stmt(" , foo", true).is_none());
     }
 }

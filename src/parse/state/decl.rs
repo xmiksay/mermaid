@@ -4,25 +4,8 @@
 
 use std::collections::HashMap;
 
+pub(super) use crate::parse::token::extract_inline_class;
 use crate::parse::{State, StateDiagram, StateKind, Style};
-
-/// Remove a `:::class` token from `raw`, returning the remaining text (with the
-/// token excised, so a trailing `: label` survives) and the class name. Only the
-/// first occurrence is handled.
-pub(super) fn extract_inline_class(raw: &str) -> (String, Option<String>) {
-    if let Some(p) = raw.find(":::") {
-        let after = &raw[p + 3..];
-        let end = after
-            .find(|c: char| c.is_whitespace() || c == ':')
-            .unwrap_or(after.len());
-        let cls = after[..end].to_string();
-        let cleaned = format!("{}{}", &raw[..p], &after[end..]);
-        let cls = (!cls.is_empty()).then_some(cls);
-        (cleaned.trim().to_string(), cls)
-    } else {
-        (raw.trim().to_string(), None)
-    }
-}
 
 pub(super) fn apply_state_class(
     diag: &mut StateDiagram,

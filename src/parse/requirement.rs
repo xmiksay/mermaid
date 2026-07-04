@@ -29,7 +29,7 @@ use super::ast::{
     FlowDirection, ReqElement, ReqRelation, ReqRelationKind, Requirement, RequirementDiagram,
     RequirementKind,
 };
-use super::style::parse_style_props;
+use super::style::{parse_multi_id_stmt, parse_style_props};
 use super::token::{find_unquoted, unquote};
 use super::{strip_comment, ParseError};
 
@@ -150,35 +150,25 @@ fn parse_direction(s: &str) -> Option<FlowDirection> {
 
 /// `classDef <name>[,<name2>] <props>` — define one or more style classes.
 fn handle_class_def(rest: &str, d: &mut RequirementDiagram) {
-    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+    let Some((names, props)) = parse_multi_id_stmt(rest, false) else {
         return;
     };
     let style = parse_style_props(props);
-    for name in names.split(',') {
-        let name = name.trim();
-        if !name.is_empty() {
-            d.class_defs.insert(name.to_string(), style.clone());
-        }
+    for name in names {
+        d.class_defs.insert(name, style.clone());
     }
 }
 
 /// `class <id1>,<id2> <className>` — apply a class to requirements/elements.
 fn handle_class_apply(rest: &str, d: &mut RequirementDiagram) {
-    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+    let Some((ids, class_name)) = parse_multi_id_stmt(rest, true) else {
         return;
     };
-    let class_name = class_name.trim();
-    if class_name.is_empty() {
-        return;
-    }
-    for id in ids.split(',') {
-        let id = id.trim();
-        if !id.is_empty() {
-            d.node_classes
-                .entry(id.to_string())
-                .or_default()
-                .push(class_name.to_string());
-        }
+    for id in ids {
+        d.node_classes
+            .entry(id)
+            .or_default()
+            .push(class_name.to_string());
     }
 }
 

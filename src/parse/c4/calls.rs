@@ -6,6 +6,7 @@ use super::super::ast::{
     C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4LayoutConfig, C4RelDirection,
     C4RelStyle, C4Relation,
 };
+use super::super::token::split_top_level;
 use super::super::ParseError;
 
 pub(super) enum C4Directive {
@@ -260,31 +261,14 @@ pub(super) fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation
 }
 
 pub(super) fn split_args(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut in_q = false;
-    let mut depth = 0i32;
-    for c in s.chars() {
-        match c {
-            '"' => in_q = !in_q,
-            '(' if !in_q => {
-                depth += 1;
-                cur.push(c);
-            }
-            ')' if !in_q => {
-                depth -= 1;
-                cur.push(c);
-            }
-            ',' if !in_q && depth == 0 => {
-                out.push(cur.trim().trim_matches('"').to_string());
-                cur.clear();
-            }
-            _ => cur.push(c),
-        }
+    let mut parts: Vec<String> = split_top_level(s, ',')
+        .into_iter()
+        .map(|p| p.trim().trim_matches('"').to_string())
+        .collect();
+    // An all-empty input yields no arguments; every other trailing part
+    // (including an empty one after a real arg) is kept.
+    if parts.len() == 1 && parts[0].is_empty() {
+        parts.clear();
     }
-    let last = cur.trim().trim_matches('"').to_string();
-    if !last.is_empty() || !out.is_empty() {
-        out.push(last);
-    }
-    out
+    parts
 }

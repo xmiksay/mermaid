@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 
 use super::ast::{Cardinality, Entity, EntityAttribute, ErDiagram, ErRelation, FlowDirection};
-use super::style::parse_style_props;
-use super::token::{find_unquoted, unquote};
+use super::style::{parse_multi_id_stmt, parse_style_props};
+use super::token::{find_unquoted, split_id_label, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
@@ -70,50 +70,29 @@ pub(crate) fn parse(input: &str) -> Result<ErDiagram, ParseError> {
         // Styling directives (upstream `erDiagram` grammar): `classDef`,
         // `class`, `style` — shared with the flowchart's resolve_style path.
         if let Some(rest) = line.strip_prefix("classDef ") {
-            let (names, props) = rest
-                .trim()
-                .split_once(char::is_whitespace)
-                .ok_or_else(|| malformed("classDef", line_no))?;
+            let (names, props) =
+                parse_multi_id_stmt(rest, false).ok_or_else(|| malformed("classDef", line_no))?;
             let style = parse_style_props(props);
-            for name in names.split(',') {
-                let name = name.trim();
-                if !name.is_empty() {
-                    diag.class_defs.insert(name.to_string(), style.clone());
-                }
+            for name in names {
+                diag.class_defs.insert(name, style.clone());
             }
             continue;
         }
         if let Some(rest) = line.strip_prefix("class ") {
-            let (ids, class_name) = rest
-                .trim()
-                .rsplit_once(char::is_whitespace)
-                .ok_or_else(|| malformed("class", line_no))?;
-            let class_name = class_name.trim();
-            if class_name.is_empty() {
-                return Err(malformed("class", line_no));
-            }
-            for id in ids.split(',') {
-                let id = id.trim();
-                if id.is_empty() {
-                    continue;
-                }
-                add_class(&mut diag, &mut by_name, id, class_name);
+            let (ids, class_name) =
+                parse_multi_id_stmt(rest, true).ok_or_else(|| malformed("class", line_no))?;
+            for id in ids {
+                add_class(&mut diag, &mut by_name, &id, class_name);
             }
             continue;
         }
         if let Some(rest) = line.strip_prefix("style ") {
             // `style A,B fill:#f9f` — the id side is a comma-separated list.
-            let (ids, props) = rest
-                .trim()
-                .split_once(char::is_whitespace)
-                .ok_or_else(|| malformed("style", line_no))?;
+            let (ids, props) =
+                parse_multi_id_stmt(rest, false).ok_or_else(|| malformed("style", line_no))?;
             let style = parse_style_props(props);
-            for id in ids.split(',') {
-                let id = id.trim();
-                if id.is_empty() {
-                    continue;
-                }
-                let i = entity_index(&mut diag, &mut by_name, id);
+            for id in ids {
+                let i = entity_index(&mut diag, &mut by_name, &id);
                 diag.entities[i].style = style.clone();
             }
             continue;
@@ -188,23 +167,6 @@ fn is_entity_decl(line: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-}
-
-/// Split an `id[Alias]` form into `(id, label)`; a plain id reuses itself as
-/// the label. A surrounding pair of quotes is stripped from both sides.
-/// Mirrors the flowchart node-label split.
-fn split_id_label(s: &str) -> (String, String) {
-    let s = s.trim();
-    if let Some(open) = s.find('[') {
-        if s.ends_with(']') {
-            let id = s[..open].trim();
-            let label = s[open + 1..s.len() - 1].trim();
-            let id = if id.is_empty() { label } else { id };
-            return (unquote(id).to_string(), unquote(label).to_string());
-        }
-    }
-    let s = unquote(s);
-    (s.to_string(), s.to_string())
 }
 
 /// Split a `:::className` style-separator suffix off an entity id.

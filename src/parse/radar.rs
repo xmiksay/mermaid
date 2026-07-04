@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 
 use super::ast::{RadarAxis, RadarCurve, RadarDiagram, RadarGraticule};
-use super::token::unquote;
+use super::token::{split_top_level, unquote};
 use super::{strip_comment, ParseError};
 
 pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
@@ -88,7 +88,7 @@ pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
 
 fn parse_axis_list(s: &str, line_no: usize) -> Result<Vec<RadarAxis>, ParseError> {
     let mut out = Vec::new();
-    for item in split_top(s, ',') {
+    for item in split_top_level(s, ',') {
         let item = item.trim();
         if item.is_empty() {
             continue;
@@ -187,31 +187,6 @@ fn parse_num(s: &str, what: &str, line_no: usize) -> Result<f64, ParseError> {
 
 fn parse_bool(s: &str) -> bool {
     !matches!(s, "false" | "0" | "no")
-}
-
-fn split_top(s: &str, delim: char) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut depth = 0i32;
-    for c in s.chars() {
-        match c {
-            '[' | '{' | '(' => {
-                depth += 1;
-                cur.push(c);
-            }
-            ']' | '}' | ')' => {
-                depth -= 1;
-                cur.push(c);
-            }
-            d if d == delim && depth == 0 => {
-                out.push(cur.clone());
-                cur.clear();
-            }
-            _ => cur.push(c),
-        }
-    }
-    out.push(cur);
-    out
 }
 
 #[cfg(test)]

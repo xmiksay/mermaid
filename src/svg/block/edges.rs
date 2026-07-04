@@ -160,7 +160,7 @@ fn marker_id(head: EdgeHead) -> Option<&'static str> {
 /// definition may be appended once per referencing edge).
 fn define_marker(svg: &mut SvgBuilder, head: EdgeHead) {
     let def = match head {
-        EdgeHead::Arrow => "<marker id=\"blockarrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M0,0 L10,5 L0,10 Z\" fill=\"#333\"/></marker>",
+        EdgeHead::Arrow => return svg.def_arrow_marker("blockarrow", "#333", 9, 6),
         EdgeHead::Circle => "<marker id=\"blockcircle\" viewBox=\"0 0 12 12\" refX=\"10\" refY=\"6\" markerWidth=\"9\" markerHeight=\"9\" orient=\"auto-start-reverse\"><circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#fff\" stroke=\"#333\" stroke-width=\"1.5\"/></marker>",
         EdgeHead::Cross => "<marker id=\"blockcross\" viewBox=\"0 0 10 10\" refX=\"5\" refY=\"5\" markerWidth=\"9\" markerHeight=\"9\" orient=\"auto\"><path d=\"M1,1 L9,9 M9,1 L1,9\" stroke=\"#333\" stroke-width=\"1.5\"/></marker>",
         _ => return,

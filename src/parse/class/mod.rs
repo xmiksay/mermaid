@@ -27,7 +27,8 @@ use super::ast::{
     ClassDiagram, ClassMember, ClassRelation, FlowDirection, MemberKind, Namespace, Style,
     UmlClass, Visibility,
 };
-use super::style::parse_style_props;
+use super::style::{parse_multi_id_stmt, parse_style_props};
+use super::token::extract_inline_class;
 use super::{strip_comment, ParseError};
 
 mod notes;
@@ -303,15 +304,12 @@ fn add_member_line(
 
 /// `classDef <name>[,<name2>] <props>` — define style classes.
 fn handle_class_def(rest: &str, diag: &mut ClassDiagram) {
-    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+    let Some((names, props)) = parse_multi_id_stmt(rest, false) else {
         return;
     };
     let style = parse_style_props(props);
-    for name in names.split(',') {
-        let name = name.trim();
-        if !name.is_empty() {
-            diag.class_defs.insert(name.to_string(), style.clone());
-        }
+    for name in names {
+        diag.class_defs.insert(name, style.clone());
     }
 }
 
@@ -342,23 +340,6 @@ fn handle_css_class(rest: &str, diag: &mut ClassDiagram, by_name: &mut HashMap<S
         if !cls.classes.iter().any(|c| c == class_name) {
             cls.classes.push(class_name.to_string());
         }
-    }
-}
-
-/// Remove a `:::class` token from `raw`, returning the remaining text and the
-/// class name (first occurrence only).
-fn extract_inline_class(raw: &str) -> (String, Option<String>) {
-    if let Some(p) = raw.find(":::") {
-        let after = &raw[p + 3..];
-        let end = after
-            .find(|c: char| c.is_whitespace() || c == ':')
-            .unwrap_or(after.len());
-        let cls = after[..end].to_string();
-        let cleaned = format!("{}{}", &raw[..p], &after[end..]);
-        let cls = (!cls.is_empty()).then_some(cls);
-        (cleaned.trim().to_string(), cls)
-    } else {
-        (raw.trim().to_string(), None)
     }
 }
 

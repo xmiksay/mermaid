@@ -155,11 +155,6 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
          <path d=\"M0 0 L11 6 L0 12 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
     );
-    let arrow = format!(
-        "<marker id=\"cls-arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" \
-         markerWidth=\"10\" markerHeight=\"10\" orient=\"auto-start-reverse\">\
-         <path d=\"M0 0 L10 5 L0 10 z\" fill=\"{flow_edge_stroke}\"/></marker>"
-    );
     let diamond_filled = format!(
         "<marker id=\"cls-diamond-filled\" viewBox=\"0 0 16 8\" refX=\"0\" refY=\"4\" \
          markerWidth=\"16\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
@@ -180,7 +175,7 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
          </marker>"
     );
     svg.defs_raw(&triangle);
-    svg.defs_raw(&arrow);
+    svg.def_arrow_marker("cls-arrow", flow_edge_stroke, 10, 10);
     svg.defs_raw(&diamond_filled);
     svg.defs_raw(&diamond_open);
     svg.defs_raw(&lollipop);

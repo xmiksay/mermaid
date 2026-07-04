@@ -25,7 +25,7 @@ use super::ast::{
     StateTransition,
 };
 use super::flowchart::click::parse_click;
-use super::style::parse_style_props;
+use super::style::{parse_multi_id_stmt, parse_style_props};
 use super::{strip_comment, ParseError};
 
 mod decl;
@@ -306,33 +306,23 @@ fn parse_note_head(head: &str) -> Option<(NotePosition, String)> {
 
 /// `classDef <name>[,<name2>] <props>` — define style classes.
 fn handle_class_def(rest: &str, diag: &mut StateDiagram) {
-    let Some((names, props)) = rest.trim().split_once(char::is_whitespace) else {
+    let Some((names, props)) = parse_multi_id_stmt(rest, false) else {
         return;
     };
     let style = parse_style_props(props);
-    for name in names.split(',') {
-        let name = name.trim();
-        if !name.is_empty() {
-            diag.class_defs.insert(name.to_string(), style.clone());
-        }
+    for name in names {
+        diag.class_defs.insert(name, style.clone());
     }
 }
 
 /// `class <id1>,<id2> <className>` — apply a class to states.
 fn handle_class_apply(rest: &str, diag: &mut StateDiagram, existing: &mut HashMap<String, usize>) {
-    let Some((ids, class_name)) = rest.trim().rsplit_once(char::is_whitespace) else {
+    let Some((ids, class_name)) = parse_multi_id_stmt(rest, true) else {
         return;
     };
-    let class_name = class_name.trim();
-    if class_name.is_empty() {
-        return;
-    }
-    for id in ids.split(',') {
-        let id = id.trim();
-        if !id.is_empty() {
-            ensure_state(diag, existing, id, "", StateKind::Normal);
-            apply_state_class(diag, existing, id, class_name);
-        }
+    for id in ids {
+        ensure_state(diag, existing, &id, "", StateKind::Normal);
+        apply_state_class(diag, existing, &id, class_name);
     }
 }
 
