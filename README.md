@@ -220,6 +220,11 @@ help`) to list them:
 `CARGO_BUILD_JOBS` defaults to 4; override per invocation, e.g.
 `make build CARGO_BUILD_JOBS=8`.
 
+Releasing: bump the version in `Cargo.toml` and push a matching `v<version>`
+tag — the Release pipeline re-verifies (lint + tests with coverage), uploads
+the coverage report, and publishes to crates.io (via the
+`CARGO_REGISTRY_TOKEN` repository secret).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
