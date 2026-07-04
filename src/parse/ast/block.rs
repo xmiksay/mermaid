@@ -87,7 +87,11 @@ pub struct BlockEdge {
     pub from: String,
     pub to: String,
     pub label: Option<String>,
-    pub arrow: bool,
+    /// Marker at the `from` end (`<--`/`x--`/`o--`); `EdgeHead::None` for a
+    /// plain tail. Shared with the flowchart's [`EdgeHead`].
+    pub tail: EdgeHead,
+    /// Marker at the `to` end (`-->`/`--x`/`--o`); `EdgeHead::None` for `---`.
+    pub head: EdgeHead,
     /// Line style of the link (`-->` solid, `-.->` dotted, `==>` thick,
     /// `~~~` invisible).
     pub style: BlockLinkStyle,

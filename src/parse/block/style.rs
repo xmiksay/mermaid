@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use crate::parse::ast::{BlockArrow, BlockEdge, BlockItem, BlockLinkStyle, BlockShape, Style};
+use crate::parse::ast::{
+    BlockArrow, BlockEdge, BlockItem, BlockLinkStyle, BlockShape, EdgeHead, Style,
+};
 use crate::parse::style::parse_style_props;
 
 /// Style state gathered while scanning: `classDef` definitions plus the
@@ -184,21 +186,17 @@ fn strip_pair(s: &str, open: &str, close: &str) -> Option<String> {
 }
 
 pub(super) fn parse_edge(line: &str) -> Option<BlockEdge> {
-    // Link operators, longest first so `-.->` wins over `-->`/`---`, etc.
-    // Each: (operator, style, has-arrowhead).
-    const LINKS: &[(&str, BlockLinkStyle, bool)] = &[
-        ("~~~", BlockLinkStyle::Invisible, false),
-        ("-.->", BlockLinkStyle::Dotted, true),
-        ("-.-", BlockLinkStyle::Dotted, false),
-        ("==>", BlockLinkStyle::Thick, true),
-        ("===", BlockLinkStyle::Thick, false),
-        ("-->", BlockLinkStyle::Solid, true),
-        ("---", BlockLinkStyle::Solid, false),
-    ];
-    for (op, style, arrow) in LINKS {
-        if let Some(pos) = line.find(op) {
-            let mut from = line[..pos].trim().to_string();
-            let to = line[pos + op.len()..].trim().to_string();
+    // Scan left-to-right for the first link operator. The connectors are all
+    // ASCII (`- = . ~ x o < >`), so byte indexing is safe.
+    let b = line.as_bytes();
+    for i in 0..b.len() {
+        // A leading `x`/`o`/`<` only counts as a tail marker at a token
+        // boundary, so an id ending in `o` (e.g. `foo`) can't be mistaken for
+        // one when the `--` core follows.
+        let boundary = i == 0 || b[i - 1].is_ascii_whitespace();
+        if let Some((end, tail, style, head)) = match_link(b, i, boundary) {
+            let mut from = line[..i].trim().to_string();
+            let to = line[end..].trim().to_string();
             // Inline label on the tail side: `from -- "text"` / `from -. text` /
             // `from == text`.
             let label = extract_inline_label(&mut from);
@@ -209,12 +207,83 @@ pub(super) fn parse_edge(line: &str) -> Option<BlockEdge> {
                 from,
                 to,
                 label,
-                arrow: *arrow,
-                style: *style,
+                tail,
+                head,
+                style,
             });
         }
     }
     None
+}
+
+/// Match a link operator starting at byte `i`, returning `(end, tail, style,
+/// head)` where `end` is the byte index just past the operator. `boundary` says
+/// whether a leading `x`/`o`/`<` may act as a tail marker (solid links only,
+/// mirroring the upstream `[xo<]?--+[-xo>]` pattern; thick/dotted carry no
+/// tail).
+fn match_link(
+    b: &[u8],
+    i: usize,
+    boundary: bool,
+) -> Option<(usize, EdgeHead, BlockLinkStyle, EdgeHead)> {
+    if boundary {
+        let tail = match b.get(i) {
+            Some(b'<') => Some(EdgeHead::Arrow),
+            Some(b'o') => Some(EdgeHead::Circle),
+            Some(b'x') => Some(EdgeHead::Cross),
+            _ => None,
+        };
+        if let Some(tail) = tail {
+            if let Some((end, style, head)) = match_core(b, i + 1) {
+                if style == BlockLinkStyle::Solid {
+                    return Some((end, tail, style, head));
+                }
+            }
+        }
+    }
+    let (end, style, head) = match_core(b, i)?;
+    Some((end, EdgeHead::None, style, head))
+}
+
+/// Match a tail-less link core (`~~~`, `-.-`/`-.->`, `==…`, `--…`) at byte `i`.
+fn match_core(b: &[u8], i: usize) -> Option<(usize, BlockLinkStyle, EdgeHead)> {
+    let rest = &b[i..];
+    if rest.starts_with(b"~~~") {
+        let mut j = i;
+        while b.get(j) == Some(&b'~') {
+            j += 1;
+        }
+        return Some((j, BlockLinkStyle::Invisible, EdgeHead::None));
+    }
+    if rest.starts_with(b"-.->") {
+        return Some((i + 4, BlockLinkStyle::Dotted, EdgeHead::Arrow));
+    }
+    if rest.starts_with(b"-.-") {
+        return Some((i + 3, BlockLinkStyle::Dotted, EdgeHead::None));
+    }
+    if rest.starts_with(b"==") {
+        let head = head_char(b.get(i + 2), b'=')?;
+        return Some((i + 3, BlockLinkStyle::Thick, head));
+    }
+    if rest.starts_with(b"--") {
+        let head = head_char(b.get(i + 2), b'-')?;
+        return Some((i + 3, BlockLinkStyle::Solid, head));
+    }
+    None
+}
+
+/// Classify the head char after a `--`/`==` core. `filler` spells "no head" for
+/// this line style (`-` for solid `---`, `=` for thick `===`). A core not
+/// followed by a valid head char (e.g. the `--` of a `-- "text"` label opener)
+/// is not a link.
+fn head_char(c: Option<&u8>, filler: u8) -> Option<EdgeHead> {
+    match c {
+        Some(b'>') => Some(EdgeHead::Arrow),
+        Some(b'x') => Some(EdgeHead::Cross),
+        Some(b'o') => Some(EdgeHead::Circle),
+        Some(&c) if c == filler => Some(EdgeHead::None),
+        _ => None,
+    }
 }
 
 /// Split a trailing inline-label opener (`--`/`-.`/`==`) off the tail side of a

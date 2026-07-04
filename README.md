@@ -100,7 +100,7 @@ primary, visibly distinct from `default`, meant to be recolored via
 | Git graph | `gitGraph` | commits, branches, merges, checkouts |
 | Requirement | `requirementDiagram` | requirements, elements, relationships, `direction`, `classDef`/`class`/`style` styling |
 | C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems (`Db`/`Queue`/`_Ext` variants), boundaries, relations, `Update*Style` overrides |
-| Block | `block-beta`, `block` | grid layout, spanning blocks, edges |
+| Block | `block-beta`, `block` | grid layout, spanning blocks, edges (`-->`/`---`/`-.->`/`==>` plus x/o heads `--x`/`--o`/`==x`/`==o` and tails `<-->`/`x--x`/`o--o`), block arrows |
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards, `id[Label]` form, `@{…}` metadata (assigned/priority/ticket), priority-colored borders, hyperlinked tickets |
 | Treemap | `treemap-beta`, `treemap` | squarified nested weighted rectangles, `config.treemap.valueFormat` value formatting (defaults to `,` thousands grouping), `config.treemap.showValues` toggle, `classDef` + `:::class` fill/stroke overrides |

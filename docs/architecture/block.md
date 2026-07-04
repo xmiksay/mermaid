@@ -26,11 +26,19 @@ Parser: `src/parse/block/` · Renderer: `src/svg/block/`.
     `((`. The node tokenizer (`parse_block_line`) floors bracket depth at 0 so
     the unmatched `]` of a `>text]` shape can't glue the rest of the line into
     one token.
-  - Links carry a `BlockLinkStyle` (`Solid`/`Dotted`/`Thick`/`Invisible`):
-    `parse_edge` matches `~~~`/`-.->`/`-.-`/`==>`/`===`/`-->`/`---` longest-first
-    and reads an inline `-- / -. / ==` label opener off the tail. The renderer
-    draws dotted (`stroke-dasharray`) / thick (wider stroke) styles and skips
-    drawing an invisible link (which still shapes layout).
+  - Links carry a `BlockLinkStyle` (`Solid`/`Dotted`/`Thick`/`Invisible`) plus
+    a `tail`/`head` `EdgeHead` (shared with the flowchart AST). `parse_edge`
+    scans the line for the first link operator: `~~~`, dotted `-.->`/`-.-`, and
+    the head-bearing solid (`--` core) / thick (`==` core) forms whose head char
+    is `>`→`Arrow`, `x`→`Cross`, `o`→`Circle`, or the filler (`-`/`=`)→no head
+    (`---`/`===`). Solid links also take an optional **tail** marker
+    (`<--`/`x--`/`o--`, upstream `[xo<]?--+[-xo>]`); a leading `x`/`o`/`<`
+    counts as a tail only at a token boundary so an id ending in `o` (`foo`)
+    isn't misread. It still reads an inline `-- / -. / ==` label opener off the
+    tail. The renderer draws dotted (`stroke-dasharray`) / thick (wider stroke)
+    styles, skips an invisible link (which still shapes layout), and emits
+    `blockarrow`/`blockcross`/`blockcircle` `<marker>`s at the head
+    (`marker-end`) and tail (`marker-start`) ends.
   - `columns auto` (no longer a hard-error) packs every direct cell into one row
     — `auto_column_count` sums block/group spans + space counts. `space` is a
     keyword only as `space`/`space:N`, so ids like `spaceship` survive.

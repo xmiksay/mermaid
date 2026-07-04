@@ -429,6 +429,22 @@ mod tests {
         assert!(svg.contains("marker-end=\"url(#blockarrow)\""));
     }
 
+    #[test]
+    fn cross_and_circle_head_markers() {
+        let svg = render_from("block-beta\n  a b c\n  a --x b\n  b --o c\n");
+        assert!(svg.contains("marker-end=\"url(#blockcross)\""));
+        assert!(svg.contains("marker-end=\"url(#blockcircle)\""));
+        assert!(svg.contains("id=\"blockcross\""));
+        assert!(svg.contains("id=\"blockcircle\""));
+    }
+
+    #[test]
+    fn bidirectional_link_marks_both_ends() {
+        let svg = render_from("block-beta\n  a b\n  a <--> b\n");
+        assert!(svg.contains("marker-start=\"url(#blockarrow)\""));
+        assert!(svg.contains("marker-end=\"url(#blockarrow)\""));
+    }
+
     fn render_from(src: &str) -> String {
         match crate::parse::parse(src).unwrap() {
             crate::parse::Diagram::Block(d) => render(&d, &Theme::default()),
