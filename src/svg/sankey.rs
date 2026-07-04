@@ -61,7 +61,7 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         .enumerate()
         .map(|(i, n)| (n.as_str(), i))
         .collect();
-    let node_color = |n: &str| -> &'static str { theme.pie_color(index[n]) };
+    let node_color = |n: &str| theme.pie_color(index[n]);
 
     // Assign a column per node honoring `nodeAlignment`.
     let col = assign_columns(

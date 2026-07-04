@@ -51,7 +51,8 @@ fn assign_col(
 
 pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
+    let commit_label = theme.commit_label();
+    let tag_label = theme.tag_label();
 
     let main_branch = d.config.main_branch_name.as_str();
 
@@ -342,7 +343,8 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
         }
         // Commit id label.
         if d.config.show_commit_label {
-            let mut attrs = format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"10\"");
+            let mut attrs =
+                format!("text-anchor=\"middle\" fill=\"{commit_label}\" font-size=\"10\"");
             let ly = y + COMMIT_R + 12.0;
             if d.config.rotate_commit_label && horizontal {
                 let _ = write!(attrs, " transform=\"rotate(-45 {} {})\"", fnum(x), fnum(ly));
@@ -355,7 +357,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 x,
                 y - COMMIT_R - 6.0 - ti as f64 * 13.0,
                 &format!(
-                    "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\" font-weight=\"bold\""
+                    "text-anchor=\"middle\" fill=\"{tag_label}\" font-size=\"10\" font-weight=\"bold\""
                 ),
                 &format!("[{}]", escape(t)),
             );
