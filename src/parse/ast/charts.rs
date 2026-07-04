@@ -264,8 +264,8 @@ pub struct PacketField {
     pub label: String,
 }
 
-/// `config.packet.*` layout knobs. Defaults match the renderer's built-in
-/// constants, so a diagram with no config renders byte-identically.
+/// `config.packet.*` layout knobs. Defaults track upstream Mermaid's packet
+/// layout (32px per bit), so a diagram with no config matches the JS reference.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PacketConfig {
     /// `packet.bitsPerRow` — bits drawn per row before wrapping.
@@ -286,7 +286,9 @@ impl Default for PacketConfig {
     fn default() -> Self {
         Self {
             bits_per_row: 32,
-            bit_width: 16.0,
+            // 32px per bit (upstream default) so a one-bit flag label fits its
+            // cell instead of smearing into its neighbours (issue #248).
+            bit_width: 32.0,
             row_height: 40.0,
             show_bits: true,
             padding_x: 30.0,

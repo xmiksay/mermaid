@@ -58,9 +58,15 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Rows background (empty cells get muted color).
+    // Background: draw a plain cell only where no field covers the bit. Cells
+    // drawn under a field would bleed per-bit gridlines through the field's
+    // outline; upstream fields are undivided rectangles (issue #248).
     for row in 0..rows {
         for bit in 0..bits_per_row {
+            let abs = row * bits_per_row + bit;
+            if d.fields.iter().any(|f| abs >= f.start && abs <= f.end) {
+                continue;
+            }
             let x = chart_left + bit as f64 * bit_w;
             let y = chart_top + row as f64 * row_h;
             svg.rect(
@@ -168,6 +174,60 @@ mod tests {
             s[start..end].to_string()
         };
         assert_ne!(vb(&svg), vb(&single));
+    }
+
+    #[test]
+    fn covered_bits_draw_no_background_cell() {
+        // A full 32-bit field leaves no gap, so the muted background cells
+        // (fill-opacity="0.15") — the source of intra-field gridlines — must
+        // not be emitted under it (issue #248).
+        let full = render(
+            &PacketDiagram {
+                title: None,
+                fields: vec![PacketField {
+                    start: 0,
+                    end: 31,
+                    label: "all".into(),
+                }],
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        assert!(!full.contains("fill-opacity=\"0.15\""));
+
+        // A single-bit field in a 32-bit row leaves 31 uncovered cells.
+        let sparse = render(
+            &PacketDiagram {
+                title: None,
+                fields: vec![PacketField {
+                    start: 0,
+                    end: 0,
+                    label: "b".into(),
+                }],
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        assert_eq!(sparse.matches("fill-opacity=\"0.15\"").count(), 31);
+    }
+
+    #[test]
+    fn one_bit_cells_are_32px_wide() {
+        let svg = render(
+            &PacketDiagram {
+                title: None,
+                fields: vec![PacketField {
+                    start: 0,
+                    end: 0,
+                    label: "URG".into(),
+                }],
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        // The field rect is one bit wide; default bit width is now 32px so the
+        // three-letter flag label fits inside its own cell.
+        assert!(svg.contains("width=\"32\""));
     }
 
     #[test]
