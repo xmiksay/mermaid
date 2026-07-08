@@ -1,5 +1,8 @@
-//! Mindmap renderer. Two-sided layout fanning out from a central root.
+//! Mindmap renderer. Deterministic radial tree fanning out from a central root
+//! circle, matching upstream Mermaid's radial silhouette: branch-colored filled
+//! rounded nodes and thick edges from the categorical theme scale.
 
+use std::f64::consts::{FRAC_PI_2, PI};
 use std::fmt::Write as _;
 
 use std::collections::HashMap;
@@ -12,23 +15,30 @@ use super::metrics::text_width;
 use super::style::resolve_style;
 use super::theme::Theme;
 
-const NODE_PAD_X: f64 = 12.0;
-const NODE_H: f64 = 28.0;
-const LEVEL_GAP: f64 = 130.0;
-const SIBLING_GAP: f64 = 14.0;
+const NODE_PAD_X: f64 = 14.0;
+const NODE_H: f64 = 32.0;
+/// Radius added per depth level; first ring sits this far from the centre.
+const RING_GAP: f64 = 160.0;
 const TEXT_PX: f64 = 7.0;
+const ICON_SIZE: f64 = 16.0;
+/// Gap between an in-node icon glyph and its label text.
+const ICON_GAP: f64 = 6.0;
 
 #[derive(Clone)]
 struct Laid {
     node: MindmapNode,
+    /// Node centre in layout space.
     x: f64,
     y: f64,
     w: f64,
     h: f64,
+    /// Radius of the root circle (only meaningful at `depth == 0`).
+    r: f64,
+    depth: usize,
+    /// Index of the first-level branch this node belongs to (`-1` for the root),
+    /// used to pick a branch color from the theme scale.
+    section: i32,
     children: Vec<Laid>,
-    subtree_h: f64,
-    /// +1 for a branch growing to the right of the root, -1 for the left.
-    dir: f64,
 }
 
 pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
@@ -46,42 +56,14 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
         return svg.finish();
     };
 
-    // Lay out each first-level branch as a canonical right-growing subtree, then
-    // alternate them onto the right and left of the root (a back-to-back pair of
-    // half-trees) so the map fans out on both sides instead of only rightward.
     let font_size = theme.font_size;
-    let root_w = node_width(&root.text, font_size);
-    let mut right: Vec<Laid> = Vec::new();
-    let mut left: Vec<Laid> = Vec::new();
-    for (i, c) in root.children.iter().enumerate() {
-        let branch = layout(c, 1, font_size);
-        if i % 2 == 0 {
-            right.push(branch);
-        } else {
-            left.push(branch);
-        }
-    }
-    stack_group(&mut right);
-    for l in &mut left {
-        mirror(l, root_w);
-    }
-    stack_group(&mut left);
+    // Root sits at the origin; its children are dealt around the full circle by
+    // angular sector (proportional to each subtree's leaf count), and every
+    // descendant is fanned outward within its parent's sector.
+    let mut laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, font_size);
 
-    let mut children = right;
-    children.extend(left);
-    let mut laid = Laid {
-        node: root.clone(),
-        x: 0.0,
-        y: 0.0,
-        w: root_w,
-        h: NODE_H,
-        children,
-        subtree_h: 0.0,
-        dir: 1.0,
-    };
-
-    // Frame the whole tree (both sides plus icons) and shift into positive space.
-    let margin = 30.0;
+    // Frame the whole radial layout and shift into positive space.
+    let margin = 24.0;
     let (min_x, min_y, max_x, max_y) = bounds(&laid);
     shift(&mut laid, margin - min_x, margin - min_y);
     let width = (max_x - min_x) + margin * 2.0;
@@ -90,62 +72,71 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     draw_edges(&laid, &mut svg, theme);
-    draw_nodes(&laid, &mut svg, theme, &d.class_defs, 0);
+    draw_nodes(&laid, &mut svg, theme, &d.class_defs);
 
     svg.finish()
 }
 
-fn node_width(text: &str, font_size: f64) -> f64 {
-    (text_width(text, TEXT_PX, font_size) + NODE_PAD_X * 2.0).max(40.0)
+/// Leaves in a subtree (a leaf counts as one) — the angular weight of a node.
+fn leaves(n: &MindmapNode) -> usize {
+    if n.children.is_empty() {
+        1
+    } else {
+        n.children.iter().map(leaves).sum()
+    }
 }
 
-fn layout(n: &MindmapNode, depth: usize, font_size: f64) -> Laid {
-    let w = node_width(&n.text, font_size);
-    let mut children: Vec<Laid> = n
-        .children
-        .iter()
-        .map(|c| layout(c, depth + 1, font_size))
-        .collect();
-    let subtree_h = stack_group(&mut children);
+fn node_size(n: &MindmapNode, font_size: f64) -> (f64, f64) {
+    let icon_w = if n.icon.is_some() {
+        ICON_SIZE + ICON_GAP
+    } else {
+        0.0
+    };
+    let tw = text_width(&n.text, TEXT_PX, font_size);
+    let w = (tw + NODE_PAD_X * 2.0 + icon_w).max(48.0);
+    (w, NODE_H)
+}
+
+/// Build the laid-out subtree for `n`, placing it at the centre of the angular
+/// sector `[a0, a1)` at radius `depth * RING_GAP` and recursing on its children.
+fn build(n: &MindmapNode, depth: usize, section: i32, a0: f64, a1: f64, font_size: f64) -> Laid {
+    let angle = (a0 + a1) / 2.0;
+    let (w, h) = node_size(n, font_size);
+    let r = depth as f64 * RING_GAP;
+    let (x, y) = (r * angle.cos(), r * angle.sin());
+    let root_r = if depth == 0 {
+        (text_width(&n.text, TEXT_PX, font_size) / 2.0 + NODE_PAD_X + 6.0).max(28.0)
+    } else {
+        0.0
+    };
+
+    let total = leaves(n).max(1) as f64;
+    let mut cursor = a0;
+    let mut children = Vec::with_capacity(n.children.len());
+    for (i, c) in n.children.iter().enumerate() {
+        let span = (a1 - a0) * (leaves(c) as f64) / total;
+        let child_section = if depth == 0 { i as i32 } else { section };
+        children.push(build(
+            c,
+            depth + 1,
+            child_section,
+            cursor,
+            cursor + span,
+            font_size,
+        ));
+        cursor += span;
+    }
+
     Laid {
         node: n.clone(),
-        x: depth as f64 * LEVEL_GAP,
-        y: 0.0,
+        x,
+        y,
         w,
-        h: NODE_H,
+        h,
+        r: root_r,
+        depth,
+        section,
         children,
-        subtree_h,
-        dir: 1.0,
-    }
-}
-
-/// Distribute `children` into vertical bands centered on y=0, returning the
-/// total band height (clamped to a single node).
-fn stack_group(children: &mut [Laid]) -> f64 {
-    let mut total = 0.0;
-    for (i, c) in children.iter().enumerate() {
-        total += c.subtree_h;
-        if i + 1 < children.len() {
-            total += SIBLING_GAP;
-        }
-    }
-    let subtree_h = total.max(NODE_H);
-    let mut cursor = -subtree_h / 2.0;
-    for c in children.iter_mut() {
-        let dy = cursor + c.subtree_h / 2.0;
-        shift(c, 0.0, dy);
-        cursor += c.subtree_h + SIBLING_GAP;
-    }
-    subtree_h
-}
-
-/// Reflect a canonical (right-growing) subtree horizontally about the root
-/// centre so it grows leftward, and mark every node as a left-side branch.
-fn mirror(laid: &mut Laid, root_w: f64) {
-    laid.x = root_w - (laid.x + laid.w);
-    laid.dir = -1.0;
-    for c in &mut laid.children {
-        mirror(c, root_w);
     }
 }
 
@@ -158,55 +149,55 @@ fn shift(laid: &mut Laid, dx: f64, dy: f64) {
 }
 
 fn bounds(laid: &Laid) -> (f64, f64, f64, f64) {
-    let mut min_x = laid.x;
-    let mut max_x = laid.x + laid.w;
-    let mut min_y = laid.y - laid.h / 2.0;
-    let mut max_y = laid.y + laid.h / 2.0;
-    if laid.node.icon.is_some() {
-        max_y = max_y.max(laid.y + laid.h / 2.0 + 12.0 + ICON_SIZE);
-    }
+    let (hw, hh) = if laid.depth == 0 {
+        (laid.r, laid.r)
+    } else {
+        (laid.w / 2.0, laid.h / 2.0)
+    };
+    let mut min_x = laid.x - hw;
+    let mut max_x = laid.x + hw;
+    let mut min_y = laid.y - hh;
+    let mut max_y = laid.y + hh;
     for c in &laid.children {
-        let (a, b, cc, d) = bounds(c);
+        let (a, b, cc, dd) = bounds(c);
         min_x = min_x.min(a);
         min_y = min_y.min(b);
         max_x = max_x.max(cc);
-        max_y = max_y.max(d);
+        max_y = max_y.max(dd);
     }
     (min_x, min_y, max_x, max_y)
 }
 
 fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
-    let stroke = &theme.flow_edge_stroke;
     for c in &laid.children {
-        // A right branch leaves the parent's right edge for the child's left
-        // edge; a left branch is mirrored, so leave the left edge for the right.
-        let (x1, x2) = if c.dir >= 0.0 {
-            (laid.x + laid.w, c.x)
-        } else {
-            (laid.x, c.x + c.w)
-        };
-        let y1 = laid.y;
-        let y2 = c.y;
-        let mx = (x1 + x2) / 2.0;
+        // Thick spoke in the child's branch color, tapering with depth so the
+        // trunks near the root read heavier than the twigs (upstream taper).
+        let color = branch_color(theme, c.section);
+        let sw = (8.0 - 2.0 * (c.depth as f64 - 1.0)).max(2.0);
         let mut path = String::new();
         let _ = write!(
             path,
-            "M{} {}C{} {}, {} {}, {} {}",
-            fnum(x1),
-            fnum(y1),
-            fnum(mx),
-            fnum(y1),
-            fnum(mx),
-            fnum(y2),
-            fnum(x2),
-            fnum(y2)
+            "M{} {}L{} {}",
+            fnum(laid.x),
+            fnum(laid.y),
+            fnum(c.x),
+            fnum(c.y),
         );
         svg.path(
             &path,
-            &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
+            &format!(
+                "fill=\"none\" stroke=\"{color}\" stroke-width=\"{}\" stroke-linecap=\"round\"",
+                fnum(sw)
+            ),
         );
         draw_edges(c, svg, theme);
     }
+}
+
+/// Branch color for `section` from the categorical scale (`-1`/root falls back
+/// to slot 0).
+fn branch_color(theme: &Theme, section: i32) -> String {
+    theme.cscale_color(section.max(0) as usize).to_string()
 }
 
 fn draw_nodes(
@@ -214,100 +205,52 @@ fn draw_nodes(
     svg: &mut SvgBuilder,
     theme: &Theme,
     class_defs: &HashMap<String, Style>,
-    depth: usize,
 ) {
     let n = &laid.node;
     let rs = resolve_style(class_defs, &n.classes, &Style::new());
-    let fg = rs.label_fill(&theme.fg).to_string();
-    let fg = fg.as_str();
-    let fill = rs
-        .fill
-        .clone()
-        .unwrap_or_else(|| theme.flow_node_fill.to_string());
-    let fill = fill.as_str();
-    let stroke = rs.stroke_or(&theme.flow_node_stroke).to_string();
-    let stroke = stroke.as_str();
-    let cx = laid.x + laid.w / 2.0;
-    let cy = laid.y;
-    let half_w = laid.w / 2.0;
-    let half_h = laid.h / 2.0;
+    let is_root = laid.depth == 0;
 
-    match n.shape {
-        MindmapShape::Default => {
-            svg.line(
-                laid.x,
-                cy + half_h,
-                laid.x + laid.w,
-                cy + half_h,
-                &format!("stroke=\"{stroke}\" stroke-width=\"1\""),
-            );
-        }
-        MindmapShape::Square => {
-            svg.rect(
-                laid.x,
-                cy - half_h,
-                laid.w,
-                laid.h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
-        }
-        MindmapShape::Rounded => {
-            let _ = depth;
-            svg.rect(
-                laid.x,
-                cy - half_h,
-                laid.w,
-                laid.h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\" rx=\"8\""),
-            );
-        }
-        MindmapShape::Circle => {
-            let r = half_w.max(half_h);
-            svg.circle(
-                cx,
-                cy,
-                r,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
-        }
-        MindmapShape::Bang => {
-            // Star-like outline approximated as rounded shape with thick stroke.
-            svg.rect(laid.x, cy - half_h, laid.w, laid.h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2.5\" stroke-dasharray=\"4 2\" rx=\"4\""));
-        }
-        MindmapShape::Cloud => {
-            // Approximate cloud by series of arcs; use stadium shape.
-            svg.rect(
-                laid.x,
-                cy - half_h,
-                laid.w,
-                laid.h,
-                &format!(
-                    "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\" rx=\"{}\"",
-                    fnum(half_h)
-                ),
-            );
-        }
-        MindmapShape::Hexagon => {
-            let d = format!(
-                "M{l} {c}L{a} {t}L{b} {t}L{r} {c}L{b} {bb}L{a} {bb}Z",
-                l = fnum(laid.x),
-                r = fnum(laid.x + laid.w),
-                t = fnum(cy - half_h),
-                bb = fnum(cy + half_h),
-                c = fnum(cy),
-                a = fnum(laid.x + half_h),
-                b = fnum(laid.x + laid.w - half_h),
-            );
-            svg.path(
-                &d,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
-            );
-        }
+    // Defaults: the root is a solid dark disc; every other node is filled in its
+    // branch color with a slightly darker border. Explicit `:::class` styling
+    // still overrides fill/stroke/label color.
+    let default_fill = if is_root {
+        darken(&theme.flow_node_stroke, 0.45)
+    } else {
+        branch_color(theme, laid.section)
+    };
+    let fill = rs.fill.clone().unwrap_or_else(|| default_fill.clone());
+    let stroke = rs.stroke.clone().unwrap_or_else(|| darken(&fill, 0.22));
+    let default_text = if is_dark(&fill) {
+        "#ffffff".to_string()
+    } else {
+        theme.fg.to_string()
+    };
+    let fg = rs.label_fill(&default_text).to_string();
+
+    let cx = laid.x;
+    let cy = laid.y;
+    if is_root {
+        svg.circle(
+            cx,
+            cy,
+            laid.r,
+            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"3\""),
+        );
+    } else {
+        draw_shape(svg, laid, &fill, &stroke);
+    }
+
+    // Icon (if any) sits at the left inside the node; the label is centered in
+    // the remaining width so the two never overlap.
+    let mut text_cx = cx;
+    if let Some(icon) = &n.icon {
+        let icon_cx = cx - laid.w / 2.0 + NODE_PAD_X + ICON_SIZE / 2.0;
+        draw_mindmap_icon(svg, icon, icon_cx, cy, &fg);
+        text_cx = cx + (ICON_SIZE + ICON_GAP) / 2.0;
     }
 
     svg.text(
-        cx,
+        text_cx,
         cy + 4.0,
         &format!(
             "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\"{}",
@@ -316,19 +259,88 @@ fn draw_nodes(
         &n.text,
     );
 
-    if let Some(icon) = &n.icon {
-        // Real Font Awesome glyphs aren't available without the font, so map
-        // the class string onto a small builtin glyph rather than printing the
-        // raw `fa fa-book` text (matching the architecture renderer's approach).
-        draw_mindmap_icon(svg, icon, cx, cy + half_h + 12.0, fg);
-    }
-
     for c in &laid.children {
-        draw_nodes(c, svg, theme, class_defs, depth + 1);
+        draw_nodes(c, svg, theme, class_defs);
     }
 }
 
-const ICON_SIZE: f64 = 16.0;
+/// Draw a non-root node's outline centered on `(laid.x, laid.y)`.
+fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
+    let (cx, cy) = (laid.x, laid.y);
+    let (hw, hh) = (laid.w / 2.0, laid.h / 2.0);
+    let x = cx - hw;
+    let y = cy - hh;
+    match laid.node.shape {
+        // A bare `Default` node is a filled rounded rect like `Rounded` — never
+        // the old thin-underline text (that was the "nodes unstyled" bug).
+        MindmapShape::Default | MindmapShape::Rounded => {
+            svg.rect(
+                x,
+                y,
+                laid.w,
+                laid.h,
+                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\" rx=\"8\""),
+            );
+        }
+        MindmapShape::Square => {
+            svg.rect(
+                x,
+                y,
+                laid.w,
+                laid.h,
+                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
+            );
+        }
+        MindmapShape::Circle => {
+            let r = hw.max(hh);
+            svg.circle(
+                cx,
+                cy,
+                r,
+                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
+            );
+        }
+        MindmapShape::Bang => {
+            svg.rect(
+                x,
+                y,
+                laid.w,
+                laid.h,
+                &format!(
+                    "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2.5\" stroke-dasharray=\"4 2\" rx=\"4\""
+                ),
+            );
+        }
+        MindmapShape::Cloud => {
+            svg.rect(
+                x,
+                y,
+                laid.w,
+                laid.h,
+                &format!(
+                    "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\" rx=\"{}\"",
+                    fnum(hh)
+                ),
+            );
+        }
+        MindmapShape::Hexagon => {
+            let d = format!(
+                "M{l} {c}L{a} {t}L{b} {t}L{r} {c}L{b} {bb}L{a} {bb}Z",
+                l = fnum(x),
+                r = fnum(x + laid.w),
+                t = fnum(cy - hh),
+                bb = fnum(cy + hh),
+                c = fnum(cy),
+                a = fnum(x + hh),
+                b = fnum(x + laid.w - hh),
+            );
+            svg.path(
+                &d,
+                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
+            );
+        }
+    }
+}
 
 /// Extract the meaningful name from a Font Awesome class string
 /// (`fa fa-book` / `fab fa-github` / `book`) — the last `fa-`-prefixed token,
@@ -341,7 +353,10 @@ fn icon_name(icon: &str) -> &str {
         .unwrap_or("")
 }
 
-fn draw_mindmap_icon(svg: &mut SvgBuilder, icon: &str, cx: f64, top_y: f64, stroke: &str) {
+/// Draw a small builtin glyph for `icon` centered at `(cx, cy)`. Real Font
+/// Awesome glyphs aren't available without the font, so the class string is
+/// mapped onto a builtin path set rather than printing the raw `fa fa-book`.
+fn draw_mindmap_icon(svg: &mut SvgBuilder, icon: &str, cx: f64, cy: f64, stroke: &str) {
     let paths: &[&str] = match icon_name(icon) {
         "book" => &[
             "M6 5 H15 C16 5 17 6 17 7 V27 C17 26 16 25 15 25 H6 Z",
@@ -374,17 +389,59 @@ fn draw_mindmap_icon(svg: &mut SvgBuilder, icon: &str, cx: f64, top_y: f64, stro
     };
     let s = ICON_SIZE / 32.0;
     let x = cx - ICON_SIZE / 2.0;
+    let y = cy - ICON_SIZE / 2.0;
     let _ = write!(
         svg.body,
         "<g transform=\"translate({x} {y}) scale({s})\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"2\" stroke-linejoin=\"round\" stroke-linecap=\"round\">",
         x = fnum(x),
-        y = fnum(top_y),
+        y = fnum(y),
         s = fnum(s),
     );
     for p in paths {
         let _ = write!(svg.body, "<path d=\"{p}\"/>");
     }
     svg.raw("</g>");
+}
+
+/// Parse `#rgb`/`#rrggbb` into 0..255 channels, or `None` for named colors.
+fn parse_hex(s: &str) -> Option<(f64, f64, f64)> {
+    let h = s.trim().strip_prefix('#')?;
+    let (r, g, b) = match h.len() {
+        6 => (&h[0..2], &h[2..4], &h[4..6]),
+        3 => (&h[0..1], &h[1..2], &h[2..3]),
+        _ => return None,
+    };
+    let dup = h.len() == 3;
+    let ch = |c: &str| {
+        let v = u8::from_str_radix(c, 16).ok()? as f64;
+        Some(if dup { v * 17.0 } else { v })
+    };
+    Some((ch(r)?, ch(g)?, ch(b)?))
+}
+
+/// Darken a hex color toward black by `f` (0..1); non-hex colors pass through.
+fn darken(color: &str, f: f64) -> String {
+    match parse_hex(color) {
+        Some((r, g, b)) => {
+            let k = 1.0 - f;
+            format!(
+                "#{:02x}{:02x}{:02x}",
+                (r * k).round() as u8,
+                (g * k).round() as u8,
+                (b * k).round() as u8,
+            )
+        }
+        None => color.to_string(),
+    }
+}
+
+/// Whether `color` is dark enough to warrant white label text (perceptual
+/// luminance below the midpoint). Non-hex colors are treated as light.
+fn is_dark(color: &str) -> bool {
+    match parse_hex(color) {
+        Some((r, g, b)) => (0.299 * r + 0.587 * g + 0.114 * b) < 140.0,
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -420,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn first_level_branches_split_left_and_right() {
+    fn radial_layout_fans_children_around_root() {
         let leaf = |t: &str| MindmapNode {
             text: t.into(),
             shape: MindmapShape::Default,
@@ -428,32 +485,83 @@ mod tests {
             classes: vec![],
             children: vec![],
         };
-        let d = MindmapDiagram {
-            class_defs: Default::default(),
-            root: Some(MindmapNode {
-                text: "root".into(),
-                shape: MindmapShape::Circle,
-                icon: None,
-                classes: vec![],
-                children: vec![leaf("Right"), leaf("Left")],
-            }),
+        let root = MindmapNode {
+            text: "root".into(),
+            shape: MindmapShape::Circle,
+            icon: None,
+            classes: vec![],
+            children: vec![leaf("A"), leaf("B"), leaf("C"), leaf("D")],
         };
-        // Build the laid-out tree directly so we can inspect the sides.
+        let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+        // The root sits at the origin; every child sits on the first ring.
+        assert_eq!((laid.x, laid.y), (0.0, 0.0));
+        for c in &laid.children {
+            let r = (c.x * c.x + c.y * c.y).sqrt();
+            assert!((r - RING_GAP).abs() < 1e-6, "child off the first ring");
+        }
+        // Four evenly-fanned branches must not all sit on one side of the root:
+        // some grow to the right (x>0) and some to the left (x<0).
+        assert!(laid.children.iter().any(|c| c.x > 1.0));
+        assert!(laid.children.iter().any(|c| c.x < -1.0));
+        // First-level branches carry their own section index.
+        let sections: Vec<i32> = laid.children.iter().map(|c| c.section).collect();
+        assert_eq!(sections, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn descendants_inherit_branch_section() {
+        let d = match crate::parse::parse(
+            "mindmap\nroot((R))\n  Branch\n    Child\n      Grandchild\n",
+        )
+        .unwrap()
+        {
+            crate::parse::Diagram::Mindmap(m) => m,
+            _ => panic!("not mindmap"),
+        };
         let root = d.root.clone().unwrap();
-        let font_size = 14.0;
-        let root_w = node_width(&root.text, font_size);
-        let right = layout(&root.children[0], 1, font_size);
-        let mut left = layout(&root.children[1], 1, font_size);
-        mirror(&mut left, root_w);
-        // The even-index branch grows right (dir +1, to the right of the root);
-        // the odd-index branch is mirrored to the left (dir -1).
-        assert_eq!(right.dir, 1.0);
-        assert_eq!(left.dir, -1.0);
-        assert!(right.x >= root_w, "right branch starts past the root");
-        assert!(left.x + left.w <= 0.0, "left branch ends before the root");
-        // Both labels still make it into the rendered document.
+        let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+        let branch = &laid.children[0];
+        assert_eq!(branch.section, 0);
+        assert_eq!(branch.children[0].section, 0);
+        assert_eq!(branch.children[0].children[0].section, 0);
+    }
+
+    #[test]
+    fn icon_attaches_to_annotated_node() {
+        // The book icon annotates `Mindmap`, the clock annotates `Gantt`; each
+        // glyph must render inside its own node, not float onto a sibling.
+        let d = match crate::parse::parse(
+            "mindmap\nroot((R))\n  Diagrams\n    Mindmap\n      ::icon(fa fa-book)\n    Gantt\n      ::icon(fa fa-clock)\n",
+        )
+        .unwrap()
+        {
+            crate::parse::Diagram::Mindmap(m) => m,
+            _ => panic!("not mindmap"),
+        };
+        let diagrams = &d.root.as_ref().unwrap().children[0];
+        assert_eq!(diagrams.children[0].text, "Mindmap");
+        assert_eq!(diagrams.children[0].icon.as_deref(), Some("fa fa-book"));
+        assert_eq!(diagrams.children[1].text, "Gantt");
+        assert_eq!(diagrams.children[1].icon.as_deref(), Some("fa fa-clock"));
+        // Both glyphs are drawn, and no raw class string leaks.
         let svg = render(&d, &Theme::default());
-        assert!(svg.contains(">Right<") && svg.contains(">Left<"));
+        assert!(!svg.contains("fa-book"));
+        assert!(!svg.contains("fa-clock"));
+    }
+
+    #[test]
+    fn branch_nodes_are_filled_from_the_scale() {
+        let d = match crate::parse::parse("mindmap\nroot((R))\n  First\n  Second\n").unwrap() {
+            crate::parse::Diagram::Mindmap(m) => m,
+            _ => panic!("not mindmap"),
+        };
+        let theme = Theme::default();
+        let svg = render(&d, &theme);
+        // Nodes are filled rounded rects in the branch (cScale) colors, not bare
+        // underlined text.
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
+        assert!(svg.contains("rx=\"8\""));
     }
 
     #[test]
@@ -478,5 +586,16 @@ mod tests {
         assert_eq!(icon_name("fab fa-github"), "github");
         assert_eq!(icon_name("book"), "book");
         assert_eq!(icon_name(""), "");
+    }
+
+    #[test]
+    fn color_helpers() {
+        assert_eq!(darken("#ffffff", 0.5), "#808080");
+        assert_eq!(darken("#B9B9FF", 0.0), "#b9b9ff");
+        // Non-hex passes through untouched.
+        assert_eq!(darken("red", 0.5), "red");
+        assert!(is_dark("#000000"));
+        assert!(!is_dark("#ffffff"));
+        assert!(!is_dark("#B9B9FF"));
     }
 }
