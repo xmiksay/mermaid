@@ -1,5 +1,7 @@
 //! ZenUML parser. ZenUML is a sequence-style notation; we translate it to a
-//! [`SequenceDiagram`] so it reuses the sequence renderer.
+//! [`SequenceDiagram`] (with its `zenuml` flag set) that the dedicated ZenUML
+//! renderer in `src/svg/sequence/zenuml.rs` draws with call-nesting activation
+//! bars, hierarchical numbering, and top-only boxed participants.
 //!
 //! Supported subset:
 //!
@@ -83,7 +85,10 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
     let mut p = Parser {
         toks,
         pos: 0,
-        diag: SequenceDiagram::default(),
+        diag: SequenceDiagram {
+            zenuml: true,
+            ..SequenceDiagram::default()
+        },
         starter: None,
         error: None,
     };
@@ -536,7 +541,9 @@ mod tests {
         let d = parse_ok("zenuml\nforeach (item) {\n  A.step()\n}\n");
         assert!(matches!(
             d.items.first(),
-            Some(SequenceItem::Loop(b)) if b.label == "item" && b.items.len() == 1
+            // A.step() is a method call: message + activate/deactivate band.
+            Some(SequenceItem::Loop(b)) if b.label == "item"
+                && matches!(b.items.first(), Some(SequenceItem::Message(_)))
         ));
     }
 

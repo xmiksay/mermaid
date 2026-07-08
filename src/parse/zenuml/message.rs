@@ -36,6 +36,11 @@ impl Parser {
         } = call;
         self.ensure(&from);
         self.ensure(&to);
+        // A method invocation (`Recv.method(...)`) carries a `(` in its text; a
+        // plain `A -> B: label` message does not. Invocations (and any call that
+        // opens a body) activate the receiver.
+        let has_brace = self.peek() == Some(&Tok::Open);
+        let activate = has_brace || text.contains('(');
         items.push(SequenceItem::Message(Message {
             from: from.clone(),
             to: to.clone(),
@@ -43,22 +48,32 @@ impl Parser {
             arrow,
         }));
 
-        let has_brace = self.peek() == Some(&Tok::Open);
+        // The receiver is activated for the duration of the call: a nested band
+        // encodes the call depth (ZenUML draws these grey activation rectangles).
+        if activate {
+            items.push(SequenceItem::Activate(to.clone()));
+        }
         if has_brace {
             // The body runs in the receiver's context; a `return` there replies
             // to this call's sender.
             let body = self.braced(Some(&to), Some(&from));
             items.extend(body);
         }
-        // A nested call or an assigned result draws a dashed return back to the
-        // caller (skipped for self-calls, which need no reply arrow).
-        if (has_brace || assign.is_some()) && from != to {
-            items.push(SequenceItem::Message(Message {
-                from: to,
-                to: from,
-                text: assign.unwrap_or_default(),
-                arrow: ArrowKind::DashedArrow,
-            }));
+        if activate {
+            items.push(SequenceItem::Deactivate(to.clone()));
+        }
+        // Only a *labeled* return is drawn: an `x = call()` assignment shows the
+        // result on a dashed reply. Unlabeled synthesized returns are implied by
+        // the activation ending, so ZenUML omits them (issue #266).
+        if let Some(label) = assign {
+            if from != to {
+                items.push(SequenceItem::Message(Message {
+                    from: to,
+                    to: from,
+                    text: label,
+                    arrow: ArrowKind::DashedArrow,
+                }));
+            }
         }
     }
 
@@ -255,8 +270,9 @@ mod tests {
     #[test]
     fn nesting_braces_body_and_return() {
         let d = parse_ok("zenuml\nA -> B.method() {\n  ret = process()\n}\n");
-        // A -> B: method(), then B -> B: process() (self, no return), then the
-        // implicit dashed return B --> A for the closed brace.
+        // A -> B: method(), then B -> B: process() (self). The unlabeled return
+        // for the closed brace is implied by B's activation ending, so it is not
+        // drawn (issue #266); `process()` is a self-call so it has no return.
         let msgs: Vec<_> = d
             .items
             .iter()
@@ -265,11 +281,18 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs.len(), 2);
         assert_eq!((&*msgs[0].from, &*msgs[0].to), ("A", "B"));
         assert_eq!((&*msgs[1].from, &*msgs[1].to), ("B", "B"));
-        assert_eq!((&*msgs[2].from, &*msgs[2].to), ("B", "A"));
-        assert_eq!(msgs[2].arrow, ArrowKind::DashedArrow);
+        // The braced call activates its receiver for the body's duration.
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Activate(id) if id == "B")));
+        assert!(d
+            .items
+            .iter()
+            .any(|i| matches!(i, SequenceItem::Deactivate(id) if id == "B")));
     }
 
     #[test]

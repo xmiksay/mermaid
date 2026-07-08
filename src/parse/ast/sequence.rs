@@ -8,6 +8,11 @@ pub struct SequenceDiagram {
     /// True if any `autonumber` on-directive was seen. Message numbering itself
     /// is positional — see [`SequenceItem::AutoNumber`].
     pub autonumber: bool,
+    /// True when this diagram came from the `zenuml` parser. ZenUML reuses the
+    /// sequence AST but renders with its own chrome: activation bars from call
+    /// nesting, hierarchical `1.1.1` numbering, top-only boxed participants,
+    /// suppressed synthesized returns, and a title frame.
+    pub zenuml: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,12 +1,13 @@
 # ZenUML — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/zenuml/` · Renderer: `reuses the sequence renderer`.
+Parser: `src/parse/zenuml/` · Renderer: `src/svg/sequence/zenuml.rs`
+(a ZenUML-chrome pass over the shared sequence layout).
 
 - zenuml (`src/parse/zenuml/`: `mod.rs` header/tokenize/dispatch + declarations,
   `message.rs` calls/returns/assignment, `blocks.rs` if/try chains) is a
   **brace-structured** translation to a
-  `SequenceDiagram` (reuses the sequence renderer). After the `zenuml` header the
+  `SequenceDiagram` with its `zenuml` flag set. After the `zenuml` header the
   body is `tokenize`d into `{`/`}`/statement `Tok`s (braces inside `(…)`/quotes
   stay literal; `\n`/`;` end statements; `//` and `%%` are comments), then a
   recursive `Parser::parse_items(ctx, ret)` walks them. `ctx` is the current
@@ -31,12 +32,16 @@ Parser: `src/parse/zenuml/` · Renderer: `reuses the sequence renderer`.
     `«create»` creation message from the current context — no longer a Starter
     self-call.
   - Method calls carry a context: `Recv.method()` → `ctx -> Recv`, `method()`
-    (no dot) is a self-call on `ctx`. A `{ … }` body after a call runs in the
-    receiver's context and, on close, draws an implicit dashed **return** to the
-    caller; an `x = call()` assignment draws a dashed return labeled `x`
-    (self-calls get no return arrow). A **typed** assignment `SomeType a = A.m()`
-    (`split_assignment` accepts a multi-word identifier LHS) labels the return
-    with the trailing variable (`a`), not a participant named `SomeType a = A`.
+    (no dot) is a self-call on `ctx`. Every invocation (a call whose text carries
+    `(`, or any call opening a `{ … }` body) brackets the receiver with
+    `Activate`/`Deactivate` items, so the renderer draws a **nested activation
+    bar** encoding call depth. A `{ … }` body runs in the receiver's context; on
+    close the receiver deactivates. **Synthesized returns are suppressed** — the
+    activation ending *implies* the reply, so only *labeled* returns are drawn:
+    an `x = call()` assignment draws a dashed return labeled `x` (self-calls get
+    none). A **typed** assignment `SomeType a = A.m()` (`split_assignment` accepts
+    a multi-word identifier LHS) labels the return with the trailing variable
+    (`a`), not a participant named `SomeType a = A`.
   - `return <v>` (and the `@return`/`@reply <v>` annotation aliases) emits a
     dashed reply from `ctx` to `ret`; a caller-less bare-value `return` (no
     enclosing method-call body) is a `ParseError::Syntax`, not silently dropped.
@@ -47,3 +52,21 @@ Parser: `src/parse/zenuml/` · Renderer: `reuses the sequence renderer`.
     `while/for/forEach/foreach/loop` → `Loop`, `opt` → `Opt`, `par` → `Par`,
     `try/catch/finally` → `Critical` (catch/finally as option branches). The
     `else`/`catch`/`finally` chain tokens are consumed by their opener's handler.
+
+## Renderer (`src/svg/sequence/zenuml.rs`)
+
+`sequence::render` dispatches to `zenuml::render` when `SequenceDiagram.zenuml`
+is set. It reuses the shared layout pass (`layout_items`), activation bands
+(`draw_activations`), and message drawing, but swaps in ZenUML chrome:
+
+- **Hierarchical numbering** — `number_calls` walks the event list keeping an
+  activation-depth counter stack: each forward call (solid arrow) increments the
+  counter at its level and its `Activate` pushes a fresh child level, yielding
+  `1`, `1.1`, `1.1.1`, `1.2`…. Dashed returns are not numbered.
+- **Top-only participants** — `draw_participant` frames each stereotype/actor
+  glyph in a bordered box drawn once at the top; there is no bottom actor row.
+- **Fragment chrome** — `draw_block_frames(…, zenuml=true)` draws a shaded header
+  band with the operator + condition (instead of a corner tab) and shades the
+  `else`/`catch` region.
+- **Title frame** — the whole diagram is wrapped in a frame whose top-left tab
+  carries the title, rather than a centered heading. Lifelines are solid.
