@@ -23,16 +23,23 @@ word (`Mind maps`) so it stays dual-renderable.
   upstream's radial silhouette. `build` recurses over the tree: the root sits at
   the origin and its children are dealt around the full circle by *angular
   sector*, each sector sized in proportion to the subtree's leaf count
-  (`leaves`); every descendant is fanned outward within its parent's sector at
-  radius `depth * RING_GAP`. `bounds` frames the whole disc (root circle + all
-  rings) into positive space.
+  (`leaves`) at radius `depth * RING_GAP`. To avoid the earlier **sprawl** (leaves
+  flung far from their parent with long diagonal edges), a *non-root* node packs
+  its children into a `CHILD_SPREAD`-narrowed cone centred on the parent's own
+  radial line rather than across the full inherited sector, so each subtree stays
+  compact around its branch node. `bounds` frames the whole disc (root circle +
+  all rings) into positive space.
 - **Branch coloring.** Each first-level branch owns a `section` index that all
   its descendants inherit; `branch_color` reads the categorical theme scale
-  (`Theme::cscale_color`) for that slot. `draw_nodes` fills every node as a
-  rounded rect in its branch color with a darker border (`darken`), picking
-  white or `theme.fg` label text by the fill's luminance (`is_dark`); a bare
-  `Default` node renders as a filled rounded rect too (no more thin-underline
-  text). The root is a solid dark disc (`darken(flow_node_stroke, …)`) with white
+  **one slot past** the section (`section 0 → cScale1`, section 1 → cScale2, …) —
+  upstream's mindmap section palette is offset one past the generic scale, giving
+  the yellow/green/purple/magenta branch rotation. `draw_nodes` fills every node
+  as a borderless (stroke `none`), drop-shadowed (`SHADOW_FILTER`) rounded rect in
+  its branch color, picking white or `theme.fg` label text by the fill's luminance
+  (`is_dark`); a bare `Default` node renders as a filled rounded rect too (no more
+  thin-underline text). Label font size scales down with depth (`depth_font`) so
+  the root/first ring read largest. The root is a solid **bright-blue** disc
+  (`Theme::git_color(0)`, the theme's saturated primary lane color) with white
   text. `draw_edges` draws each parent→child spoke as a thick line in the child's
   branch color, tapering with depth. A top-level `classDef <name> <props>` line
   fills `MindmapDiagram.class_defs`; `draw_nodes` resolves each node's `:::`

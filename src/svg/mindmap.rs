@@ -11,18 +11,39 @@ use crate::parse::ast::Style;
 use crate::parse::{MindmapDiagram, MindmapNode, MindmapShape};
 
 use super::builder::{fnum, SvgBuilder};
-use super::metrics::text_width;
+use super::metrics::{text_width, BASE_FONT_SIZE};
 use super::style::resolve_style;
 use super::theme::Theme;
 
 const NODE_PAD_X: f64 = 14.0;
 const NODE_H: f64 = 32.0;
 /// Radius added per depth level; first ring sits this far from the centre.
-const RING_GAP: f64 = 160.0;
+const RING_GAP: f64 = 130.0;
 const TEXT_PX: f64 = 7.0;
 const ICON_SIZE: f64 = 16.0;
 /// Gap between an in-node icon glyph and its label text.
 const ICON_GAP: f64 = 6.0;
+/// Fraction of a non-root parent's angular sector its children occupy, centred
+/// on the parent's radial line. Below 1 it pulls each subtree into a compact
+/// cone around its branch node instead of fanning it across the full inherited
+/// sector — the fix for the sprawling long diagonal edges.
+const CHILD_SPREAD: f64 = 0.72;
+
+/// Drop-shadow filter for the borderless nodes (upstream renders shadowed,
+/// borderless nodes rather than uniformly bordered rects).
+const SHADOW_FILTER: &str = "<filter id=\"mm-shadow\" x=\"-30%\" y=\"-30%\" width=\"160%\" height=\"160%\">\
+     <feDropShadow dx=\"0\" dy=\"1.5\" stdDeviation=\"2\" flood-color=\"#000000\" flood-opacity=\"0.2\"/></filter>";
+
+/// Label font size (px) at `depth`, scaling `base` down for deeper rings so the
+/// root and first ring read largest — upstream sizes node type by depth.
+fn depth_font(base: f64, depth: usize) -> f64 {
+    base * match depth {
+        0 => 1.2,
+        1 => 1.05,
+        2 => 0.95,
+        _ => 0.88,
+    }
+}
 
 #[derive(Clone)]
 struct Laid {
@@ -34,6 +55,8 @@ struct Laid {
     h: f64,
     /// Radius of the root circle (only meaningful at `depth == 0`).
     r: f64,
+    /// Label font size (px) for this node, scaled down by depth.
+    font: f64,
     depth: usize,
     /// Index of the first-level branch this node belongs to (`-1` for the root),
     /// used to pick a branch color from the theme scale.
@@ -70,6 +93,7 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     let height = (max_y - min_y) + margin * 2.0;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
+    svg.defs_raw(SHADOW_FILTER);
 
     draw_edges(&laid, &mut svg, theme);
     draw_nodes(&laid, &mut svg, theme, &d.class_defs);
@@ -92,29 +116,42 @@ fn node_size(n: &MindmapNode, font_size: f64) -> (f64, f64) {
     } else {
         0.0
     };
+    let scale = font_size / BASE_FONT_SIZE;
     let tw = text_width(&n.text, TEXT_PX, font_size);
-    let w = (tw + NODE_PAD_X * 2.0 + icon_w).max(48.0);
-    (w, NODE_H)
+    let w = (tw + NODE_PAD_X * 2.0 + icon_w).max(48.0 * scale);
+    (w, NODE_H * scale)
 }
 
 /// Build the laid-out subtree for `n`, placing it at the centre of the angular
 /// sector `[a0, a1)` at radius `depth * RING_GAP` and recursing on its children.
-fn build(n: &MindmapNode, depth: usize, section: i32, a0: f64, a1: f64, font_size: f64) -> Laid {
+/// Children of a non-root node are packed into a [`CHILD_SPREAD`]-narrowed cone
+/// centred on the parent's angle so each subtree stays compact around its
+/// branch node instead of sprawling across the full inherited sector.
+fn build(n: &MindmapNode, depth: usize, section: i32, a0: f64, a1: f64, base_font: f64) -> Laid {
     let angle = (a0 + a1) / 2.0;
-    let (w, h) = node_size(n, font_size);
+    let font = depth_font(base_font, depth);
+    let (w, h) = node_size(n, font);
     let r = depth as f64 * RING_GAP;
     let (x, y) = (r * angle.cos(), r * angle.sin());
     let root_r = if depth == 0 {
-        (text_width(&n.text, TEXT_PX, font_size) / 2.0 + NODE_PAD_X + 6.0).max(28.0)
+        (text_width(&n.text, TEXT_PX, font) / 2.0 + NODE_PAD_X + 6.0).max(28.0)
     } else {
         0.0
     };
 
+    // Root children fan around the full circle; deeper children hug their
+    // parent's radial line within a narrowed cone.
+    let (c0, c1) = if depth == 0 {
+        (a0, a1)
+    } else {
+        let half = (a1 - a0) * 0.5 * CHILD_SPREAD;
+        (angle - half, angle + half)
+    };
     let total = leaves(n).max(1) as f64;
-    let mut cursor = a0;
+    let mut cursor = c0;
     let mut children = Vec::with_capacity(n.children.len());
     for (i, c) in n.children.iter().enumerate() {
-        let span = (a1 - a0) * (leaves(c) as f64) / total;
+        let span = (c1 - c0) * (leaves(c) as f64) / total;
         let child_section = if depth == 0 { i as i32 } else { section };
         children.push(build(
             c,
@@ -122,7 +159,7 @@ fn build(n: &MindmapNode, depth: usize, section: i32, a0: f64, a1: f64, font_siz
             child_section,
             cursor,
             cursor + span,
-            font_size,
+            base_font,
         ));
         cursor += span;
     }
@@ -134,6 +171,7 @@ fn build(n: &MindmapNode, depth: usize, section: i32, a0: f64, a1: f64, font_siz
         w,
         h,
         r: root_r,
+        font,
         depth,
         section,
         children,
@@ -194,10 +232,14 @@ fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
     }
 }
 
-/// Branch color for `section` from the categorical scale (`-1`/root falls back
-/// to slot 0).
+/// Branch color for `section` from the categorical scale. Upstream's mindmap
+/// section palette sits one slot past the generic scale (section 0 = `cScale1`,
+/// …), giving the yellow/green/purple/magenta branch rotation; `-1`/root falls
+/// back to `cScale0`.
 fn branch_color(theme: &Theme, section: i32) -> String {
-    theme.cscale_color(section.max(0) as usize).to_string()
+    theme
+        .cscale_color((section + 1).max(0) as usize)
+        .to_string()
 }
 
 fn draw_nodes(
@@ -210,16 +252,17 @@ fn draw_nodes(
     let rs = resolve_style(class_defs, &n.classes, &Style::new());
     let is_root = laid.depth == 0;
 
-    // Defaults: the root is a solid dark disc; every other node is filled in its
-    // branch color with a slightly darker border. Explicit `:::class` styling
-    // still overrides fill/stroke/label color.
+    // Defaults: the root is a solid bright-blue disc (the theme's saturated
+    // primary lane color, matching upstream's blue root); every other node is a
+    // borderless disc/rect filled in its branch color with a drop shadow.
+    // Explicit `:::class` styling still overrides fill/stroke/label color.
     let default_fill = if is_root {
-        darken(&theme.flow_node_stroke, 0.45)
+        theme.git_color(0).to_string()
     } else {
         branch_color(theme, laid.section)
     };
     let fill = rs.fill.clone().unwrap_or_else(|| default_fill.clone());
-    let stroke = rs.stroke.clone().unwrap_or_else(|| darken(&fill, 0.22));
+    let stroke = rs.stroke.clone().unwrap_or_else(|| "none".to_string());
     let default_text = if is_dark(&fill) {
         "#ffffff".to_string()
     } else {
@@ -234,7 +277,9 @@ fn draw_nodes(
             cx,
             cy,
             laid.r,
-            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"3\""),
+            &format!(
+                "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\" filter=\"url(#mm-shadow)\""
+            ),
         );
     } else {
         draw_shape(svg, laid, &fill, &stroke);
@@ -253,7 +298,8 @@ fn draw_nodes(
         text_cx,
         cy + 4.0,
         &format!(
-            "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\"{}",
+            "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"{}\"{}",
+            fnum(laid.font),
             rs.text_attrs()
         ),
         &n.text,
@@ -264,12 +310,14 @@ fn draw_nodes(
     }
 }
 
-/// Draw a non-root node's outline centered on `(laid.x, laid.y)`.
+/// Draw a non-root node's borderless, drop-shadowed body centered on
+/// `(laid.x, laid.y)`.
 fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
     let (cx, cy) = (laid.x, laid.y);
     let (hw, hh) = (laid.w / 2.0, laid.h / 2.0);
     let x = cx - hw;
     let y = cy - hh;
+    let base = format!("fill=\"{fill}\" stroke=\"{stroke}\" filter=\"url(#mm-shadow)\"");
     match laid.node.shape {
         // A bare `Default` node is a filled rounded rect like `Rounded` — never
         // the old thin-underline text (that was the "nodes unstyled" bug).
@@ -279,26 +327,15 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
                 y,
                 laid.w,
                 laid.h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\" rx=\"8\""),
+                &format!("{base} stroke-width=\"2\" rx=\"8\""),
             );
         }
         MindmapShape::Square => {
-            svg.rect(
-                x,
-                y,
-                laid.w,
-                laid.h,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
-            );
+            svg.rect(x, y, laid.w, laid.h, &format!("{base} stroke-width=\"2\""));
         }
         MindmapShape::Circle => {
             let r = hw.max(hh);
-            svg.circle(
-                cx,
-                cy,
-                r,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
-            );
+            svg.circle(cx, cy, r, &format!("{base} stroke-width=\"2\""));
         }
         MindmapShape::Bang => {
             svg.rect(
@@ -306,9 +343,7 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
                 y,
                 laid.w,
                 laid.h,
-                &format!(
-                    "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2.5\" stroke-dasharray=\"4 2\" rx=\"4\""
-                ),
+                &format!("{base} stroke-width=\"2.5\" stroke-dasharray=\"4 2\" rx=\"4\""),
             );
         }
         MindmapShape::Cloud => {
@@ -317,10 +352,7 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
                 y,
                 laid.w,
                 laid.h,
-                &format!(
-                    "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\" rx=\"{}\"",
-                    fnum(hh)
-                ),
+                &format!("{base} stroke-width=\"2\" rx=\"{}\"", fnum(hh)),
             );
         }
         MindmapShape::Hexagon => {
@@ -334,10 +366,7 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
                 a = fnum(x + hh),
                 b = fnum(x + laid.w - hh),
             );
-            svg.path(
-                &d,
-                &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
-            );
+            svg.path(&d, &format!("{base} stroke-width=\"2\""));
         }
     }
 }
@@ -417,22 +446,6 @@ fn parse_hex(s: &str) -> Option<(f64, f64, f64)> {
         Some(if dup { v * 17.0 } else { v })
     };
     Some((ch(r)?, ch(g)?, ch(b)?))
-}
-
-/// Darken a hex color toward black by `f` (0..1); non-hex colors pass through.
-fn darken(color: &str, f: f64) -> String {
-    match parse_hex(color) {
-        Some((r, g, b)) => {
-            let k = 1.0 - f;
-            format!(
-                "#{:02x}{:02x}{:02x}",
-                (r * k).round() as u8,
-                (g * k).round() as u8,
-                (b * k).round() as u8,
-            )
-        }
-        None => color.to_string(),
-    }
 }
 
 /// Whether `color` is dark enough to warrant white label text (perceptual
@@ -557,11 +570,17 @@ mod tests {
         };
         let theme = Theme::default();
         let svg = render(&d, &theme);
-        // Nodes are filled rounded rects in the branch (cScale) colors, not bare
-        // underlined text.
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
+        // Branch nodes are filled rounded rects one slot past the generic scale
+        // (section 0 = cScale1, section 1 = cScale2 — the upstream rotation), not
+        // bare underlined text.
         assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(2))));
         assert!(svg.contains("rx=\"8\""));
+        // The root disc is the theme's bright-blue primary lane color, not the
+        // old dark-purple disc; nodes are borderless (stroke none) + shadowed.
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.git_color(0))));
+        assert!(svg.contains("stroke=\"none\""));
+        assert!(svg.contains("filter=\"url(#mm-shadow)\""));
     }
 
     #[test]
@@ -590,12 +609,10 @@ mod tests {
 
     #[test]
     fn color_helpers() {
-        assert_eq!(darken("#ffffff", 0.5), "#808080");
-        assert_eq!(darken("#B9B9FF", 0.0), "#b9b9ff");
-        // Non-hex passes through untouched.
-        assert_eq!(darken("red", 0.5), "red");
         assert!(is_dark("#000000"));
         assert!(!is_dark("#ffffff"));
         assert!(!is_dark("#B9B9FF"));
+        // The bright-blue root (git0) is dark enough to warrant white label text.
+        assert!(is_dark("#6D6DFF"));
     }
 }
