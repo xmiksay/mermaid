@@ -195,6 +195,64 @@ fn all_asymmetric_shapes_render() {
     assert!(svg.starts_with("<svg"));
 }
 
+// Parse the 5 vertices of the single `M.. L.. L.. L.. L.. Z` polygon in `svg`.
+fn asymmetric_points(svg: &str) -> Vec<(f64, f64)> {
+    let d_start = svg
+        .match_indices("d=\"M")
+        .map(|(i, _)| &svg[i + 3..])
+        .find(|s| {
+            let end = s.find('"').unwrap();
+            s[..end].matches(" L").count() == 4 && s[..end].trim_end().ends_with('Z')
+        })
+        .expect("no 5-point asymmetric polygon found");
+    let end = d_start.find('"').unwrap();
+    d_start[..end]
+        .replace(['M', 'Z'], " ")
+        .replace('L', " ")
+        .split_whitespace()
+        .map(|t| t.parse::<f64>().unwrap())
+        .collect::<Vec<_>>()
+        .chunks(2)
+        .map(|c| (c[0], c[1]))
+        .collect()
+}
+
+#[test]
+fn asymmetric_shape_has_left_notch_and_straight_right_edge() {
+    // #251: the odd `>flag]` shape must mirror upstream `rect_left_inv_arrow`:
+    // a concave notch on the LEFT edge and a straight vertical right edge.
+    let svg = render(&parse_flow("flowchart LR\nE>flag]\n"), &Theme::default());
+    let pts = asymmetric_points(&svg);
+    assert_eq!(pts.len(), 5, "asymmetric polygon must have 5 vertices");
+
+    let min_x = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let max_x = pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let cy = pts.iter().map(|p| p.1).sum::<f64>() / pts.len() as f64;
+
+    // Straight right edge: two vertices sit on the rightmost x.
+    let on_right = pts.iter().filter(|p| (p.0 - max_x).abs() < 0.01).count();
+    assert_eq!(
+        on_right, 2,
+        "right edge must be a straight vertical segment"
+    );
+
+    // Concave notch on the left: exactly one vertex lies strictly inside the
+    // left edge (x between the edges) at the vertical mid-line.
+    let notch = pts
+        .iter()
+        .find(|p| p.0 > min_x + 0.01 && p.0 < max_x - 0.01)
+        .expect("left edge must have an inward notch vertex");
+    assert!(
+        (notch.1 - cy).abs() < 0.01,
+        "notch tip must sit on the vertical mid-line"
+    );
+    // The notch is nearer the left edge than the right one.
+    assert!(
+        notch.0 - min_x < max_x - notch.0,
+        "notch must be on the left half of the shape"
+    );
+}
+
 #[test]
 fn node_label_br_splits_into_lines() {
     let svg = render(
