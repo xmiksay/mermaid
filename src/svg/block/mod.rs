@@ -1,6 +1,7 @@
 //! block-beta renderer. Grid layout: items flow into cells by column count;
-//! a composite `block:id … end` takes one slot as a solid container with its
-//! children scaled to hug it (#259).
+//! a composite `block:id … end` is a solid container that hugs its children at
+//! their natural size (never shrinking them below text size) and claims the
+//! whole grid columns it needs (#310, correcting #259).
 
 mod edges;
 
@@ -38,8 +39,8 @@ const CELL_H: f64 = 38.0;
 /// Floor for the content-derived uniform column width.
 const MIN_CELL_W: f64 = 40.0;
 const GAP: f64 = 8.0;
-/// Inner padding between a composite container and its scaled children.
-const GROUP_PAD: f64 = 6.0;
+/// Inner padding between a composite container and its natural-size children.
+const GROUP_PAD: f64 = 8.0;
 
 /// Maps a laid-out child frame (local coords) onto its parent frame:
 /// `parent = (tx, ty) + s · local`. Composite groups scale their children
@@ -77,8 +78,8 @@ struct Laid {
     h: f64,
     /// Children in this node's own (local, pre-scale) coordinate frame.
     children: Vec<Laid>,
-    /// For a composite group: maps `children` onto this frame (translate +
-    /// scale into the slot). `None` for leaf blocks and edges.
+    /// For a composite group: maps `children` onto this frame (translate to the
+    /// padded container; scale stays 1). `None` for leaf blocks and edges.
     child_tf: Option<Transform>,
 }
 
@@ -184,41 +185,48 @@ fn layout_items(
 ) -> (Vec<Laid>, f64, f64) {
     let mut laid = Vec::new();
     let mut col = 0usize;
-    let mut row = 0usize;
-    let row_h = ch;
     let cols = cols.max(1);
+    // Rows carry their own height so a composite taller than one cell pushes the
+    // next row down instead of overlapping it (#310).
+    let mut row_y = y0;
+    let mut row_h: f64 = 0.0;
+    // Advance to the next row, growing `row_y` by the tallest cell placed so far.
+    macro_rules! wrap_row {
+        () => {{
+            col = 0;
+            row_y += row_h + GAP;
+            row_h = 0.0;
+        }};
+    }
 
     for item in items {
         match item {
             BlockItem::Block(b) => {
                 let span = b.span.max(1);
                 if col + span > cols && col != 0 {
-                    col = 0;
-                    row += 1;
+                    wrap_row!();
                 }
                 let x = x0 + col as f64 * (cw + GAP);
-                let y = y0 + row as f64 * (row_h + GAP);
                 let w = span as f64 * cw + (span - 1) as f64 * GAP;
                 laid.push(Laid {
                     item: item.clone(),
                     x,
-                    y,
+                    y: row_y,
                     w,
-                    h: row_h,
+                    h: ch,
                     children: Vec::new(),
                     child_tf: None,
                 });
+                row_h = row_h.max(ch);
                 col += span;
                 if col >= cols {
-                    col = 0;
-                    row += 1;
+                    wrap_row!();
                 }
             }
             BlockItem::Space(n) => {
                 col += n;
                 if col >= cols {
-                    col = 0;
-                    row += 1;
+                    wrap_row!();
                 }
             }
             BlockItem::Edge(_) => {
@@ -233,41 +241,43 @@ fn layout_items(
                 });
             }
             BlockItem::Group(g) => {
-                // A composite block takes one grid slot (its `span`, default 1),
-                // like any leaf — not a whole row. Its children are laid out in
-                // their own frame and scaled to hug that slot (#259).
-                let span = g.span.max(1);
-                if col + span > cols && col != 0 {
-                    col = 0;
-                    row += 1;
-                }
-                let x = x0 + col as f64 * (cw + GAP);
-                let y = y0 + row as f64 * (row_h + GAP);
-                let w = span as f64 * cw + (span - 1) as f64 * GAP;
-                let h = row_h;
+                // A composite block hugs its children at their natural size plus
+                // an inner pad on every side — it never shrinks them below text
+                // size (#310, correcting #259's over-compaction). It then claims
+                // as many whole grid columns as it needs, so a sibling wraps
+                // rather than overlapping it.
                 let (child_laid, content_w, content_h) =
                     layout_items(&g.items, g.columns.unwrap_or(cols), 0.0, 0.0, cw, ch);
-                let avail_w = (w - GROUP_PAD * 2.0).max(1.0);
-                let avail_h = (h - GROUP_PAD * 2.0).max(1.0);
-                let scale = (avail_w / content_w).min(avail_h / content_h).min(1.0);
+                let inner_w = content_w + GROUP_PAD * 2.0;
+                let inner_h = content_h + GROUP_PAD * 2.0;
+                let need = ((inner_w + GAP) / (cw + GAP)).ceil() as usize;
+                let span = need.max(g.span.max(1));
+                if col + span > cols && col != 0 {
+                    wrap_row!();
+                }
+                let x = x0 + col as f64 * (cw + GAP);
+                let w = (span as f64 * cw + (span - 1) as f64 * GAP).max(inner_w);
+                let h = inner_h;
+                // Children keep their own frame at natural scale, centered in the
+                // container with the inner pad above.
                 let tf = Transform {
-                    tx: x + (w - content_w * scale) / 2.0,
-                    ty: y + (h - content_h * scale) / 2.0,
-                    s: scale,
+                    tx: x + (w - content_w) / 2.0,
+                    ty: row_y + GROUP_PAD,
+                    s: 1.0,
                 };
                 laid.push(Laid {
                     item: item.clone(),
                     x,
-                    y,
+                    y: row_y,
                     w,
                     h,
                     children: child_laid,
                     child_tf: Some(tf),
                 });
+                row_h = row_h.max(h);
                 col += span;
                 if col >= cols {
-                    col = 0;
-                    row += 1;
+                    wrap_row!();
                 }
             }
         }
@@ -294,15 +304,16 @@ fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme, class_defs: &HashMap<Stri
     match &l.item {
         BlockItem::Block(b) => draw_block(b, l.x, l.y, l.w, l.h, svg, theme, class_defs),
         BlockItem::Group(_) => {
-            // Composite container: a solid pale fill filling one slot, no title
-            // text — its children scale down inside it (#259).
+            // Composite container: a solid pale fill hugging its children at
+            // natural size, no title text — near-square corners like upstream,
+            // not the old large radius (#310).
             svg.rect(
                 l.x,
                 l.y,
                 l.w,
                 l.h,
                 &format!(
-                    "fill=\"{}\" stroke=\"{}\" stroke-width=\"1\" rx=\"5\"",
+                    "fill=\"{}\" stroke=\"{}\" stroke-width=\"1\" rx=\"1\"",
                     theme.flow_cluster_fill, theme.flow_cluster_stroke
                 ),
             );
@@ -534,7 +545,8 @@ mod tests {
     #[test]
     fn composite_group_is_solid_untitled_and_scaled() {
         // #259: a composite block draws a solid pale container (theme cluster
-        // fill), no dashed frame, no title text, and scales its children in.
+        // fill), no dashed frame, no title text, with its children inside a
+        // group transform.
         let src = "block-beta\n  columns 3\n  a b c\n  block:group1\n    x y z\n  end\n";
         let svg = render_from(src);
         let t = Theme::default();
@@ -542,9 +554,34 @@ mod tests {
         assert!(!svg.contains("stroke-dasharray=\"5 4\""));
         // no bold title label for the group id
         assert!(!svg.contains(">group1<"));
-        // children still rendered, inside a scaling group transform
+        // children still rendered, inside a group transform
         assert!(svg.contains(">x<") && svg.contains(">z<"));
         assert!(svg.contains("<g transform=\"translate("));
+    }
+
+    #[test]
+    fn composite_children_keep_natural_size() {
+        // #310: the #259 compaction over-shrank children into ~10px dots. The
+        // container must hug them at natural scale (no shrink) so labels stay
+        // legible, and it must be at least as tall as one cell plus its pad.
+        let src = "block-beta\n  columns 3\n  a b c\n  block:group1\n    x y z\n  end\n";
+        let svg = render_from(src);
+        // children rendered at scale 1 — never scaled down.
+        assert!(svg.contains("scale(1)"));
+        assert!(!svg.contains("scale(0"));
+        // container tall enough for a full cell + inner pad on both sides.
+        let d = match crate::parse::parse(src).unwrap() {
+            crate::parse::Diagram::Block(d) => d,
+            _ => unreachable!(),
+        };
+        let (cw, ch) = cell_dims(&d.items, Theme::default().font_size);
+        let (laid, _, _) = layout_items(&d.items, 3, PAD, PAD, cw, ch);
+        let group = laid
+            .iter()
+            .find(|l| matches!(l.item, BlockItem::Group(_)))
+            .unwrap();
+        assert!(group.h >= CELL_H + GROUP_PAD * 2.0);
+        assert_eq!(group.child_tf.unwrap().s, 1.0);
     }
 
     #[test]
