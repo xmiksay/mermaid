@@ -63,7 +63,16 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
         h: CHART_H,
     };
     let mut next_id = 0usize;
-    layout(&d.root, area, 0, "", &mut svg, &ctx, &mut next_id);
+    let mut next_color = 0usize;
+    layout(
+        &d.root,
+        area,
+        None,
+        &mut svg,
+        &ctx,
+        &mut next_id,
+        &mut next_color,
+    );
 
     svg.finish()
 }
@@ -91,11 +100,11 @@ fn order_by_value(nodes: &[TreemapNode]) -> Vec<usize> {
 fn layout(
     nodes: &[TreemapNode],
     area: Rect,
-    depth: usize,
-    branch: &str,
+    parent_color: Option<&str>,
     svg: &mut SvgBuilder,
     ctx: &Ctx,
     next_id: &mut usize,
+    next_color: &mut usize,
 ) {
     if nodes.is_empty() || area.w <= 2.0 || area.h <= 2.0 {
         return;
@@ -103,16 +112,21 @@ fn layout(
     let order = order_by_value(nodes);
     let values: Vec<f64> = order.iter().map(|&i| node_value(&nodes[i])).collect();
     let rects = squarify(&values, area);
-    for (rank, (&i, r)) in order.iter().zip(rects.iter()).enumerate() {
+    for (&i, r) in order.iter().zip(rects.iter()) {
         let n = &nodes[i];
-        // Top-level sections seed the branch hue; descendants inherit it so a
-        // whole branch stays one color family.
-        let base = if depth == 0 {
-            ctx.theme.cscale_color(rank).to_string()
-        } else {
-            branch.to_string()
+        // Every section takes the next palette hue in traversal order; its
+        // leaves inherit that hue uniformly. A top-level leaf (no parent
+        // section) also gets its own hue. This matches upstream, where each
+        // branch is one flat color and nested sections switch hue.
+        let color = match (n.children.is_empty(), parent_color) {
+            (true, Some(pc)) => pc.to_string(),
+            _ => {
+                let c = ctx.theme.cscale_color(*next_color).to_string();
+                *next_color += 1;
+                c
+            }
         };
-        draw_node(n, *r, rank, &base, svg, ctx, next_id);
+        draw_node(n, *r, &color, svg, ctx, next_id);
         if !n.children.is_empty() && r.w > 30.0 && r.h > HEADER_H + 10.0 {
             let inner = Rect {
                 x: r.x + 4.0,
@@ -120,7 +134,15 @@ fn layout(
                 w: r.w - 8.0,
                 h: r.h - HEADER_H - 4.0,
             };
-            layout(&n.children, inner, depth + 1, &base, svg, ctx, next_id);
+            layout(
+                &n.children,
+                inner,
+                Some(&color),
+                svg,
+                ctx,
+                next_id,
+                next_color,
+            );
         }
     }
 }
@@ -128,8 +150,7 @@ fn layout(
 fn draw_node(
     n: &TreemapNode,
     r: Rect,
-    rank: usize,
-    base: &str,
+    color: &str,
     svg: &mut SvgBuilder,
     ctx: &Ctx,
     next_id: &mut usize,
@@ -138,32 +159,50 @@ fn draw_node(
     // A `:::class` reference overrides the branch fill/stroke.
     let classes: Vec<String> = n.class_name.iter().cloned().collect();
     let rs = resolve_style(ctx.class_defs, &classes, &Style::new());
-    let fill = rs.fill.clone().unwrap_or_else(|| {
-        if leaf {
-            // Siblings step through darker shades of the branch hue.
-            darken(base, (0.09 * rank as f64).min(0.45))
-        } else {
-            // Section band is a light tint so nested leaves read on top.
-            lighten(base, 0.5)
-        }
-    });
-    let stroke = rs.stroke.as_deref().unwrap_or("#fff");
+    // Sections and their leaves share one flat hue (upstream draws no
+    // per-sibling shading); white strokes keep adjacent cells legible.
+    let fill = rs.fill.clone().unwrap_or_else(|| color.to_string());
+    let stroke = rs.stroke.as_deref().unwrap_or("#ffffff");
     svg.rect(
         r.x,
         r.y,
         r.w,
         r.h,
-        &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
+        &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\""),
     );
+    let ink = text_color(&fill, ctx.theme);
     if leaf {
-        draw_leaf_label(n, r, svg, ctx, next_id);
+        draw_leaf_label(n, r, &ink, svg, ctx, next_id);
     } else {
-        draw_section_header(n, r, svg, ctx, next_id);
+        draw_section_header(n, r, &ink, svg, ctx, next_id);
     }
 }
 
-/// Centered dark name over its value, clipped to the cell.
-fn draw_leaf_label(n: &TreemapNode, r: Rect, svg: &mut SvgBuilder, ctx: &Ctx, next_id: &mut usize) {
+/// Pick white or the theme foreground for text drawn on `fill`, by luminance —
+/// upstream uses white on its darker section fills, dark ink on light ones.
+fn text_color(fill: &str, theme: &Theme) -> String {
+    match parse_hex(fill) {
+        Some((r, g, b)) => {
+            let lum = 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+            if lum < 140.0 {
+                "#ffffff".to_string()
+            } else {
+                theme.fg.to_string()
+            }
+        }
+        None => theme.fg.to_string(),
+    }
+}
+
+/// Centered name over its value, clipped to the cell.
+fn draw_leaf_label(
+    n: &TreemapNode,
+    r: Rect,
+    ink: &str,
+    svg: &mut SvgBuilder,
+    ctx: &Ctx,
+    next_id: &mut usize,
+) {
     if r.w <= 24.0 || r.h <= 16.0 {
         return;
     }
@@ -178,25 +217,19 @@ fn draw_leaf_label(n: &TreemapNode, r: Rect, svg: &mut SvgBuilder, ctx: &Ctx, ne
     let name_y = if value_text.is_some() {
         cy - 2.0
     } else {
-        cy + 4.0
+        cy + 5.0
     };
     svg.text(
         cx,
         name_y,
-        &format!(
-            "text-anchor=\"middle\" fill=\"{}\" font-size=\"14\"",
-            ctx.theme.fg
-        ),
+        &format!("text-anchor=\"middle\" fill=\"{ink}\" font-size=\"16\""),
         &n.label,
     );
     if let Some(v) = value_text {
         svg.text(
             cx,
-            cy + 14.0,
-            &format!(
-                "text-anchor=\"middle\" fill=\"{}\" font-size=\"11\"",
-                ctx.theme.fg_muted
-            ),
+            cy + 16.0,
+            &format!("text-anchor=\"middle\" fill=\"{ink}\" font-size=\"12\""),
             &v,
         );
     }
@@ -207,6 +240,7 @@ fn draw_leaf_label(n: &TreemapNode, r: Rect, svg: &mut SvgBuilder, ctx: &Ctx, ne
 fn draw_section_header(
     n: &TreemapNode,
     r: Rect,
+    ink: &str,
     svg: &mut SvgBuilder,
     ctx: &Ctx,
     next_id: &mut usize,
@@ -219,20 +253,14 @@ fn draw_section_header(
     svg.text(
         r.x + 6.0,
         y,
-        &format!(
-            "text-anchor=\"start\" fill=\"{}\" font-size=\"13\" font-weight=\"bold\"",
-            ctx.theme.fg
-        ),
+        &format!("text-anchor=\"start\" fill=\"{ink}\" font-size=\"13\" font-weight=\"bold\""),
         &n.label,
     );
     if ctx.show_values {
         svg.text(
             r.x + r.w - 6.0,
             y,
-            &format!(
-                "text-anchor=\"end\" fill=\"{}\" font-size=\"12\" font-style=\"italic\"",
-                ctx.theme.fg_muted
-            ),
+            &format!("text-anchor=\"end\" fill=\"{ink}\" font-size=\"12\" font-style=\"italic\""),
             &format_value(node_value(n), ctx.value_format),
         );
     }
@@ -278,30 +306,6 @@ fn parse_hex(c: &str) -> Option<(u8, u8, u8)> {
         u8::from_str_radix(g, 16).ok()?,
         u8::from_str_radix(b, 16).ok()?,
     ))
-}
-
-/// Mix `c` toward white by `t` in `[0,1]`; passthrough for non-hex colors.
-fn lighten(c: &str, t: f64) -> String {
-    mix(c, 255.0, t)
-}
-
-/// Mix `c` toward black by `t` in `[0,1]`; passthrough for non-hex colors.
-fn darken(c: &str, t: f64) -> String {
-    mix(c, 0.0, t)
-}
-
-fn mix(c: &str, target: f64, t: f64) -> String {
-    match parse_hex(c) {
-        Some((r, g, b)) => {
-            let m = |v: u8| {
-                (v as f64 + (target - v as f64) * t)
-                    .round()
-                    .clamp(0.0, 255.0) as u8
-            };
-            format!("#{:02X}{:02X}{:02X}", m(r), m(g), m(b))
-        }
-        None => c.to_string(),
-    }
 }
 
 /// Squarified treemap: pack `values` into `area`, one output rect per value, in
@@ -584,18 +588,17 @@ mod tests {
     }
 
     #[test]
-    fn shade_helpers_stay_in_family() {
-        assert_eq!(lighten("#B9B9FF", 0.0), "#B9B9FF");
-        assert_eq!(darken("#B9B9FF", 0.0), "#B9B9FF");
-        assert_eq!(lighten("#000000", 1.0), "#FFFFFF");
-        assert_eq!(darken("#FFFFFF", 1.0), "#000000");
-        // Short hex expands; non-hex passes through untouched.
-        assert_eq!(darken("#fff", 1.0), "#000000");
-        assert_eq!(lighten("red", 0.5), "red");
+    fn text_color_flips_on_luminance() {
+        let t = Theme::default();
+        // Light pastel → dark theme ink; dark fill → white.
+        assert_eq!(text_color("#B9B9FF", &t), t.fg);
+        assert_eq!(text_color("#101010", &t), "#ffffff");
+        // Non-hex passes through to the theme foreground.
+        assert_eq!(text_color("url(#g)", &t), t.fg);
     }
 
     #[test]
-    fn leaves_inherit_branch_hue() {
+    fn each_section_gets_its_own_hue_leaves_uniform() {
         let section = |label: &str, kids: Vec<TreemapNode>| TreemapNode {
             label: label.into(),
             value: None,
@@ -605,23 +608,33 @@ mod tests {
         let d = TreemapDiagram {
             title: None,
             root: vec![
+                // Cold(65) sorts before Hot(60); Hot nests a Tea section.
                 section("Cold", vec![leaf("Water", 40.0), leaf("Soda", 25.0)]),
-                section("Hot", vec![leaf("Coffee", 30.0), leaf("Tea", 20.0)]),
+                section(
+                    "Hot",
+                    vec![
+                        leaf("Coffee", 35.0),
+                        section("Tea", vec![leaf("Black", 12.0), leaf("Green", 8.0)]),
+                    ],
+                ),
             ],
             class_defs: HashMap::new(),
             value_format: None,
             show_values: None,
         };
         let svg = render(&d, &Theme::default());
-        // Cold (65) sorts first → branch hue cScale0; largest leaf uses it neat.
+        // Cold = cScale0, Hot = cScale1, nested Tea takes its own cScale2 hue
+        // rather than inheriting Hot's yellow.
+        assert!(svg.contains("fill=\"#B9B9FF\""), "Cold hue missing: {svg}");
+        assert!(svg.contains("fill=\"#FFFFAB\""), "Hot hue missing: {svg}");
         assert!(
-            svg.contains("fill=\"#B9B9FF\""),
-            "branch base hue missing: {svg}"
+            svg.contains("fill=\"#E8FFB9\""),
+            "nested Tea hue missing: {svg}"
         );
-        // Hot (50) → cScale1 family.
+        // No progressive darkening: siblings never step to an off-palette shade.
         assert!(
-            svg.contains("fill=\"#FFFFAB\""),
-            "second branch hue missing: {svg}"
+            !svg.contains("fill=\"#A6A6E6"),
+            "sibling darkening leaked: {svg}"
         );
     }
 

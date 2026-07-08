@@ -12,16 +12,22 @@ Parser: `src/parse/treemap.rs` · Renderer: `src/svg/treemap.rs`.
   `src/svg/treemap.rs`), not slice-and-dice, so rectangles stay near square.
   Siblings are sorted by value descending at every level before layout
   (`order_by_value`, stable so ties keep source order), matching upstream.
-- **Branch color inheritance.** Each top-level section seeds a branch hue from
-  the theme `cScale` (`cscale_color(rank)`); descendants inherit it so a whole
-  branch stays one color family (in the drinks sample: Cold = purple, Hot =
-  yellow). Leaf siblings step through darker shades of the branch hue
-  (`darken`), section bands a light tint (`lighten`); `darken`/`lighten` mix a
-  `#rgb`/`#rrggbb` color toward black/white and pass any other syntax through.
-- **Labels.** Leaves center a dark name over its value (both clipped to the
-  cell via a per-cell `<clipPath>`); section bands put the name left and the
-  running total right-aligned in italics. `showValues !== false` gates both the
-  leaf value and the section total.
+- **Per-section color.** Every section (any node with children) takes the next
+  theme `cScale` hue in traversal order (`cscale_color(next_color)`); its direct
+  leaves inherit that hue **uniformly** — no per-sibling shading. A nested
+  section switches to its own hue rather than keeping the parent's, and a
+  top-level leaf (no parent section) also gets its own hue. In the drinks
+  sample: Cold = purple (`cScale0`), Hot = yellow (`cScale1`), the nested Tea
+  section = yellow-green (`cScale2`) with its Black/Green/Herbal leaves all that
+  same yellow-green. Sections and their leaves share the one flat fill; the
+  white `stroke` around every cell keeps same-color neighbors legible. This
+  matches upstream, which draws each branch one color and gives nested sections
+  a fresh hue.
+- **Labels.** Leaves center a name over its value (both clipped to the cell via
+  a per-cell `<clipPath>`); section bands put the name left and the running
+  total right-aligned in italics. Text color flips by fill luminance
+  (`text_color`) — white on dark fills, the theme foreground on light ones.
+  `showValues !== false` gates both the leaf value and the section total.
   `config.treemap.valueFormat` (frontmatter) flows through
   `DiagramMeta.value_format` → `TreemapDiagram.value_format` and formats leaf
   values via `format_value`: `$` prefix, `,` thousands, `.N` decimals, `%`
