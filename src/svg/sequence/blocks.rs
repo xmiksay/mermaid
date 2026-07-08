@@ -317,6 +317,7 @@ pub(super) fn draw_block_frames(
     events: &[Event],
     x_of: &HashMap<String, f64>,
     theme: &Theme,
+    zenuml: bool,
 ) {
     let fg = &theme.fg;
     let close_of = pair_blocks(events);
@@ -333,25 +334,54 @@ pub(super) fn draw_block_frames(
                 stack.push((i, *kind, label.clone(), min_x, max_x));
             }
             EventKind::BlockBranch { label } => {
-                if let Some(&(_, _, _, min_x, max_x)) = stack.last() {
+                if let Some(&(open_idx, _, _, min_x, max_x)) = stack.last() {
                     let y_branch = ev.y;
-                    let divider = &theme.actor_stroke;
-                    svg.line(
-                        min_x - 16.0,
-                        y_branch,
-                        max_x + 16.0,
-                        y_branch,
-                        &format!(
-                            "stroke=\"{divider}\" stroke-width=\"1\" stroke-dasharray=\"2 2\""
-                        ),
-                    );
-                    if !label.is_empty() {
-                        svg.text(
-                            (min_x + max_x) / 2.0,
-                            y_branch - 4.0,
-                            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
-                            &format!("[{label}]"),
+                    if zenuml {
+                        // ZenUML shades the alternate (else/catch) region and
+                        // separates it with a solid divider rather than a
+                        // dashed one — no `[…]` corner label.
+                        let y_bot = close_of.get(&open_idx).map_or(y_branch, |&c| events[c].y);
+                        svg.rect(
+                            min_x - 16.0,
+                            y_branch,
+                            (max_x + 16.0) - (min_x - 16.0),
+                            (y_bot - y_branch).max(0.0),
+                            "fill=\"rgba(0,0,0,0.04)\" stroke=\"none\"",
                         );
+                        svg.line(
+                            min_x - 16.0,
+                            y_branch,
+                            max_x + 16.0,
+                            y_branch,
+                            "stroke=\"#888\" stroke-width=\"1\"",
+                        );
+                        if !label.is_empty() {
+                            svg.text(
+                                min_x - 12.0,
+                                y_branch + 13.0,
+                                &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
+                                &format!("[{label}]"),
+                            );
+                        }
+                    } else {
+                        let divider = &theme.actor_stroke;
+                        svg.line(
+                            min_x - 16.0,
+                            y_branch,
+                            max_x + 16.0,
+                            y_branch,
+                            &format!(
+                                "stroke=\"{divider}\" stroke-width=\"1\" stroke-dasharray=\"2 2\""
+                            ),
+                        );
+                        if !label.is_empty() {
+                            svg.text(
+                                (min_x + max_x) / 2.0,
+                                y_branch - 4.0,
+                                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+                                &format!("[{label}]"),
+                            );
+                        }
                     }
                 }
             }
@@ -359,7 +389,7 @@ pub(super) fn draw_block_frames(
                 if let Some((open_idx, kind, label, min_x, max_x)) = stack.pop() {
                     let y_top = events[open_idx].y;
                     let y_bot = ev.y;
-                    draw_block_frame(svg, kind, &label, min_x, max_x, y_top, y_bot, theme);
+                    draw_block_frame(svg, kind, &label, min_x, max_x, y_top, y_bot, theme, zenuml);
                 }
             }
             _ => {}
@@ -377,6 +407,7 @@ fn draw_block_frame(
     y_top: f64,
     y_bot: f64,
     theme: &Theme,
+    zenuml: bool,
 ) {
     let fg = &theme.fg;
     let frame_label_fill = &theme.frame_label_fill;
@@ -384,6 +415,44 @@ fn draw_block_frame(
     let frame_x = min_x - 16.0;
     let frame_w = (max_x + 16.0) - frame_x;
     let frame_h = y_bot - y_top;
+    let title = match kind {
+        BlockKind::Alt => "alt",
+        BlockKind::Par => "par",
+        BlockKind::Critical => "critical",
+        BlockKind::Loop => "loop",
+        BlockKind::Opt => "opt",
+        BlockKind::Break => "break",
+    };
+    if zenuml {
+        // ZenUML: a solid frame with a shaded header band spanning the whole
+        // fragment width, carrying the operator and its condition.
+        svg.rect(
+            frame_x,
+            y_top,
+            frame_w,
+            frame_h,
+            "fill=\"none\" stroke=\"#666\" stroke-width=\"1\"",
+        );
+        svg.rect(
+            frame_x,
+            y_top,
+            frame_w,
+            18.0,
+            &format!("fill=\"{frame_label_fill}\" stroke=\"#666\" stroke-width=\"1\""),
+        );
+        let header = if label.is_empty() {
+            title.to_string()
+        } else {
+            format!("{title} [{label}]")
+        };
+        svg.text(
+            frame_x + 6.0,
+            y_top + 13.0,
+            &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
+            &header,
+        );
+        return;
+    }
     // Dotted, theme-colored border (upstream's frame chrome).
     svg.rect(
         frame_x,
@@ -394,14 +463,6 @@ fn draw_block_frame(
             "fill=\"none\" stroke=\"{frame_stroke}\" stroke-width=\"1\" stroke-dasharray=\"2 2\""
         ),
     );
-    let title = match kind {
-        BlockKind::Alt => "alt",
-        BlockKind::Par => "par",
-        BlockKind::Critical => "critical",
-        BlockKind::Loop => "loop",
-        BlockKind::Opt => "opt",
-        BlockKind::Break => "break",
-    };
     // Pentagon/flag label tab in the upper-left: a rectangle with the
     // bottom-right corner beveled (upstream's `.labelBox`).
     let tab_h = 18.0;

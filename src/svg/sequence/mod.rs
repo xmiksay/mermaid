@@ -15,6 +15,7 @@ mod blocks;
 mod glyphs;
 mod messages;
 mod participants;
+mod zenuml;
 
 use blocks::*;
 use glyphs::*;
@@ -53,6 +54,9 @@ const CREATE_GAP: f64 = 15.0; // gap above an inline `create`d actor box
 const DESTROY_CROSS: f64 = 7.0; // half-size of the `destroy` termination cross
 
 pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
+    if d.zenuml {
+        return zenuml::render(d, theme);
+    }
     let fg = &theme.fg;
     let lifeline = &theme.lifeline;
     if d.participants.is_empty() {
@@ -174,7 +178,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     draw_activations(&mut svg, &events, &x_of, lifeline_bottom, theme);
 
     // Block frames
-    draw_block_frames(&mut svg, &events, &x_of, theme);
+    draw_block_frames(&mut svg, &events, &x_of, theme, false);
 
     // Headers (top + bottom). A created participant's top box is drawn inline
     // at its create point instead; a destroyed one gets no footer box.

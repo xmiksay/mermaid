@@ -104,7 +104,7 @@ primary, visibly distinct from `default`, meant to be recolored via
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards, `id[Label]` form, `@{…}` metadata (assigned/priority/ticket), priority-colored borders, hyperlinked tickets |
 | Treemap | `treemap-beta`, `treemap` | squarified nested weighted rectangles, `config.treemap.valueFormat` value formatting (defaults to `,` thousands grouping), `config.treemap.showValues` toggle, `classDef` + `:::class` fill/stroke overrides |
-| ZenUML | `zenuml` | annotators, method calls, nesting braces, `return`, if/while/opt/par/try; rendered via the sequence renderer |
+| ZenUML | `zenuml` | annotators, method calls, nesting braces, `return`, if/while/opt/par/try; ZenUML chrome — call-nesting activation bars, hierarchical `1.1.1` numbering, top-only boxed participants, shaded fragment headers, title frame |
 
 ### Cross-cutting features
 

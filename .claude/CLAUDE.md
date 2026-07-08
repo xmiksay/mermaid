@@ -45,7 +45,7 @@ Extension seams:
 | pie · sequence · flowchart · state · class · ER · gantt parsers | done |
 | journey · timeline · sankey · quadrant · xychart · radar · packet parsers | done |
 | mindmap · gitGraph · requirement · C4 · block · architecture · kanban · treemap · zenuml parsers | done |
-| Matching SVG renderers (zenuml reuses sequence renderer) | done |
+| Matching SVG renderers (zenuml = sequence layout + ZenUML chrome) | done |
 | Themes (default, base, dark, forest, neutral + user-defined) | done |
 | CLI binary (`mermaid-svg`) | done |
 | Cross-cutting preamble (frontmatter title/theme, `%%{init}%%`, accTitle/accDescr) | done |

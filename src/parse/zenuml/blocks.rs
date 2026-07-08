@@ -112,7 +112,9 @@ mod tests {
         let d = parse_ok("zenuml\nwhile (more) {\n  A.next()\n}\n");
         assert!(matches!(
             d.items.first(),
-            Some(SequenceItem::Loop(b)) if b.label == "more" && b.items.len() == 1
+            // A.next() is a method call: message + activate/deactivate band.
+            Some(SequenceItem::Loop(b)) if b.label == "more"
+                && matches!(b.items.first(), Some(SequenceItem::Message(_)))
         ));
     }
 
