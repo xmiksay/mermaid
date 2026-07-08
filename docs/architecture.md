@@ -39,15 +39,16 @@ src/
 │   ├── style.rs     resolves classDef/style/linkStyle into inline fill/stroke
 │   ├── gantt_date.rs civil day-count date math (days_from_civil/format_date/Excludes)
 │   ├── interact.rs  shared click/link wrappers (open_click/close_click)
-│   ├── {sequence,flowchart,state,class,c4,block}/  multi-file per-diagram renderers (mod + submodules)
-│   └── {pie,er,gantt,journey,timeline,sankey,quadrant,xychart,radar,packet,
+│   ├── sankey_layout.rs  d3-sankey column assignment + ordering relaxation
+│   ├── {sequence,flowchart,state,class,c4,block,timeline}/  multi-file per-diagram renderers (mod + submodules)
+│   └── {pie,er,gantt,journey,sankey,quadrant,xychart,radar,packet,
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
 │   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
 examples/render_user.rs        small one-shot example
-examples/gen-doc-diagrams.rs   regenerates assets/gallery.md (the rustdoc gallery)
+examples/gen-doc-diagrams.rs   regenerates assets/gallery/<stem>.md (the rustdoc gallery)
 tests/integration.rs           end-to-end tests; writes samples to target/test-samples/
 samples/                       one `.mmd` per diagram kind, shared by benches + gallery
 assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry,

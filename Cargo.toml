@@ -1,6 +1,6 @@
 [package]
 name = "mermaid-svg"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 description = "Render 23 Mermaid diagram types (pie, sequence, flowchart, state, class, ER, gantt, journey, timeline, sankey, quadrant, xychart, radar, packet, mindmap, gitGraph, requirement, C4, block, architecture, kanban, treemap, zenuml) to SVG. Pure Rust, no Node.js or native deps."
