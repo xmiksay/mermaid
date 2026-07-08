@@ -14,14 +14,34 @@ use super::interact::{close_click, open_click};
 use super::metrics::text_width;
 use super::theme::Theme;
 
-const LABEL_COL_W: f64 = 200.0;
 const BAR_H: f64 = 20.0;
 const ROW_GAP: f64 = 12.0;
+const ROW_H: f64 = BAR_H + ROW_GAP;
 const HEADER_H: f64 = 56.0;
 const AXIS_H: f64 = 26.0;
-const SECTION_H: f64 = 24.0;
 const PAD: f64 = 16.0;
 const TIME_COL_MIN_W: f64 = 480.0;
+/// Narrow left gutter reserved for section names when a chart has any; the
+/// gutter widens to fit the longest section label. Upstream keeps task names in
+/// the chart (inside/next to their bars), so only section names live here.
+const LABEL_GUTTER_MIN: f64 = 75.0;
+
+/// Task label font; sampled at [`AXIS_LABEL_CHAR_W`] to decide whether a name
+/// fits inside its bar (upstream draws it inside when it fits, else just right).
+const TASK_FONT_SIZE: f64 = 11.0;
+/// Section-title font (left gutter).
+const SECTION_FONT_SIZE: f64 = 13.0;
+
+/// Full-width section background bands, cycling through four styles like
+/// upstream's `section0..3`. The default theme resolves to a pale lavender /
+/// blank / pale-yellow / blank pattern; the `(fill, fill-opacity)` pairs bake
+/// in the `.section { opacity: 0.2 }` rule so a plain `rect` reproduces it.
+const SECTION_BANDS: [(&str, &str); 4] = [
+    ("#6666ff", "0.098"), // sectionBkgColor rgba(102,102,255,0.49) × 0.2
+    ("#ffffff", "0.2"),   // altSectionBkgColor white × 0.2
+    ("#fff400", "0.2"),   // sectionBkgColor2 × 0.2
+    ("#ffffff", "0.2"),   // altSectionBkgColor white × 0.2
+];
 
 /// Axis tick labels are drawn at this font size; the per-glyph width below is
 /// tuned so an ISO date (`2026-01-01`) estimates to ~59px, matching what the
@@ -38,16 +58,19 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let (start_day, total_days, sub_day) = chart_span(&resolved);
     let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
 
-    // Step 2 — compute dimensions. `vert` markers are excluded from row
-    // allocation (they span the chart rather than occupying a list row).
+    // Step 2 — compute dimensions. One row per task (task names render in the
+    // chart, not in a left column); section names share the left gutter,
+    // vertically centered across their tasks. `vert` markers span the chart
+    // rather than occupying a row, so they're excluded from row allocation.
     let n_rows: usize = d
         .sections
         .iter()
-        .map(|s| s.tasks.iter().filter(|t| !t.vert).count() + if s.name.is_empty() { 0 } else { 1 })
+        .map(|s| s.tasks.iter().filter(|t| !t.vert).count())
         .sum();
-    let body_h = n_rows as f64 * (BAR_H + ROW_GAP);
+    let body_h = n_rows as f64 * ROW_H;
+    let label_gutter = section_gutter(d);
     let time_col_w = TIME_COL_MIN_W;
-    let width = LABEL_COL_W + time_col_w + PAD * 2.0;
+    let width = label_gutter + time_col_w + PAD * 2.0;
     let height = HEADER_H + AXIS_H + body_h + PAD * 2.0;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
@@ -62,7 +85,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         );
     }
 
-    let body_x = PAD + LABEL_COL_W;
+    let body_x = PAD + label_gutter;
     let body_w = time_col_w;
     // Upstream's default layout draws the axis at the bottom; `topAxis` moves it
     // to the top. `body_top` is where the task rows begin, `axis_y` the top of
@@ -102,6 +125,29 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             &format!("fill=\"{fg}\" font-size=\"11\""),
             &label,
         );
+    }
+
+    // Full-width section background bands behind the rows (upstream draws one
+    // colored band per section, cycling four styles). Bands span the gutter and
+    // the chart so section names sit over their own band.
+    let band_x = PAD;
+    let band_w = label_gutter + body_w;
+    {
+        let mut band_y = body_top;
+        for (i, section) in d.sections.iter().enumerate() {
+            let h = section.tasks.iter().filter(|t| !t.vert).count() as f64 * ROW_H;
+            if h > 0.0 {
+                let (fill, opacity) = SECTION_BANDS[i % SECTION_BANDS.len()];
+                svg.rect(
+                    band_x,
+                    band_y,
+                    band_w,
+                    h,
+                    &format!("fill=\"{fill}\" fill-opacity=\"{opacity}\" stroke=\"none\""),
+                );
+            }
+            band_y += h;
+        }
     }
 
     // Excluded-day shading (weekends etc.): a light band per non-working day
@@ -148,26 +194,19 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Body
+    // Body — one row per task, task labels drawn in the chart. Section names go
+    // in the left gutter, vertically centered across the section's rows.
     let mut y = body_top;
     let mut flat_idx = 0;
     for section in &d.sections {
-        if !section.name.is_empty() {
-            svg.text(
-                PAD,
-                y + 16.0,
-                &format!("fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
-                &section.name,
-            );
-            y += SECTION_H;
-        }
+        let section_top = y;
         for task in &section.tasks {
             let r = &resolved[flat_idx];
             let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
             if task.vert {
                 // Vertical marker: a solid full-height line at the start date
                 // with the bold label centered below the axis. Excluded from
-                // row allocation — it prints no left-column name and does not
+                // row allocation — it consumes no row height and does not
                 // advance `y`. Duration is ignored.
                 svg.line(
                     x,
@@ -194,21 +233,15 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 flat_idx += 1;
                 continue;
             }
-            // Task name in left column
-            svg.text(
-                PAD,
-                y + 14.0,
-                &format!("fill=\"{fg}\" font-size=\"12\""),
-                &task.name,
-            );
+            let cy = y + BAR_H / 2.0;
             let (fill, stroke) = colors_for(task.status, task.crit);
             let sw = if task.crit { 2 } else { 1 };
             if let Some(click) = &task.click {
                 open_click(&mut svg, click);
             }
             if task.milestone {
-                // Diamond centered on the start date; duration is ignored.
-                let cy = y + BAR_H / 2.0;
+                // Diamond centered on the start date; duration is ignored, label
+                // to the right of the diamond.
                 let rad = (BAR_H - 4.0) / 2.0;
                 svg.path(
                     &format!(
@@ -231,25 +264,71 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                     &task.name,
                 );
             } else {
-                // Bar
-                let w = (r.duration.max(min_bar_dur) / total_days) * body_w;
+                // Bar with its label inside when it fits, otherwise just right
+                // of the bar (upstream behavior).
+                let w = ((r.duration.max(min_bar_dur) / total_days) * body_w).max(2.0);
                 svg.rect(
                     x,
                     y + 2.0,
-                    w.max(2.0),
+                    w,
                     BAR_H - 4.0,
                     &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" rx=\"3\""),
                 );
+                let label_w = text_width(&task.name, AXIS_LABEL_CHAR_W, TASK_FONT_SIZE);
+                if label_w + 8.0 <= w {
+                    svg.text(
+                        x + w / 2.0,
+                        cy + 4.0,
+                        &format!(
+                            "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"{TASK_FONT_SIZE}\""
+                        ),
+                        &task.name,
+                    );
+                } else {
+                    svg.text(
+                        x + w + 4.0,
+                        cy + 4.0,
+                        &format!("fill=\"{fg}\" font-size=\"{TASK_FONT_SIZE}\""),
+                        &task.name,
+                    );
+                }
             }
             if let Some(click) = &task.click {
                 close_click(&mut svg, click);
             }
-            y += BAR_H + ROW_GAP;
+            y += ROW_H;
             flat_idx += 1;
+        }
+        if !section.name.is_empty() && y > section_top {
+            // Section title centered vertically over its band, left-aligned in
+            // the gutter.
+            svg.text(
+                PAD,
+                (section_top + y) / 2.0 + 4.0,
+                &format!("fill=\"{fg}\" font-size=\"{SECTION_FONT_SIZE}\" font-weight=\"bold\""),
+                &section.name,
+            );
         }
     }
 
     svg.finish()
+}
+
+/// Width of the left gutter reserved for section names: enough for the widest
+/// section label plus padding, or `0` when no section is named. Task names no
+/// longer live here, so the gutter stays narrow.
+fn section_gutter(d: &GanttDiagram) -> f64 {
+    let widest = d
+        .sections
+        .iter()
+        .filter(|s| !s.name.is_empty())
+        .map(|s| text_width(&s.name, AXIS_LABEL_CHAR_W, SECTION_FONT_SIZE))
+        .fold(0.0_f64, f64::max);
+    if widest <= 0.0 {
+        0.0
+    } else {
+        (widest + PAD).max(LABEL_GUTTER_MIN)
+    }
 }
 
 struct Resolved {
@@ -533,6 +612,38 @@ mod tests {
     }
 
     #[test]
+    fn draws_section_background_bands() {
+        // Two sections → two full-width bands with the first two band styles.
+        let d = build(
+            "gantt\ndateFormat YYYY-MM-DD\nsection Design\nSpec : 2026-01-01, 5d\nsection Build\nBackend : 2026-01-08, 5d\n",
+        );
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#6666ff\" fill-opacity=\"0.098\""));
+        assert!(svg.contains(">Design<"));
+        assert!(svg.contains(">Build<"));
+    }
+
+    #[test]
+    fn narrow_gutter_scales_to_section_names_only() {
+        // A chart with long task names but short section names keeps a narrow
+        // gutter — task names no longer inflate the left column.
+        let short = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nA very long descriptive task name here : 2026-01-01, 5d\n");
+        // Gutter is sized from the (short) section name, not the long task name.
+        assert!(section_gutter(&short) <= LABEL_GUTTER_MIN + 1e-6);
+    }
+
+    #[test]
+    fn short_task_label_sits_right_of_bar() {
+        // A 1-day bar in a 40-day span is too narrow for its name, so the label
+        // is drawn to the right (left-anchored), not inside (middle-anchored).
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nKickoff task : 2026-01-01, 1d\nTail : 2026-02-10, 1d\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">Kickoff task<"));
+        // No left-column duplicate: the name appears exactly once.
+        assert_eq!(svg.matches(">Kickoff task<").count(), 1);
+    }
+
+    #[test]
     fn task_after_id_starts_right_of_predecessor() {
         let d = build("gantt\nsection S\nA : a, 2026-01-01, 5d\nB : after a, 3d\n");
         let resolved = resolve_tasks(&d);
@@ -786,8 +897,8 @@ mod tests {
         let src =
             "gantt\ndateFormat YYYY-MM-DD\nsection S\nA : 2026-01-01, 5d\nB : 2026-01-03, 4d\n";
         let d = build(src);
-        // One named section row + two task rows.
-        let body_h = 3.0 * (BAR_H + ROW_GAP);
+        // Two task rows (section names share the gutter, not their own rows).
+        let body_h = 2.0 * ROW_H;
         // Default: baseline at HEADER_H + body_h; top: at HEADER_H + AXIS_H - 1.
         let bottom = render(&d, &Theme::default());
         let top = render(
