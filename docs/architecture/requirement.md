@@ -18,7 +18,11 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   (`r:::important`). Requirement/element/relation names are **quote-aware** —
   `find_unquoted` locates the body brace and `token::unquote` strips the
   surrounding quotes (`requirement "My Req" { … }` renders `My Req`, matching
-  upstream's `qString`). The `contains` relation draws upstream's crossed-circle
+  upstream's `qString`). **Upstream-compat gotcha:** a bare attribute value
+  containing dots or dashes (`docref: user-guide.md`) parses here but upstream
+  11.x requires quotes (`docref: "user-guide.md"`); the shipped
+  `samples/requirement.mmd` uses the quoted form so it stays dual-renderable.
+  The `contains` relation draws upstream's crossed-circle
   containment head (`req-contains` marker) instead of the plain arrow, placed at
   the **container** (`from`) end as a `marker-start` (upstream puts ⊕ on the
   container's box edge). Because the parser normalizes both `src - contains ->

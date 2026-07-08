@@ -16,7 +16,7 @@ element test_entity {
 }
 element user_doc {
     type: document
-    docref: user-guide.md
+    docref: "user-guide.md"
 }
 test_entity - satisfies -> test_req
 user_doc - traces -> test_req
