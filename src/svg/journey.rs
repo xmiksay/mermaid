@@ -12,6 +12,7 @@
 use crate::parse::JourneyDiagram;
 
 use super::builder::{fnum, SvgBuilder};
+use super::color::readable_text_color;
 use super::theme::Theme;
 
 const MARGIN: f64 = 20.0;
@@ -186,10 +187,13 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
             &format!("rx=\"3\" ry=\"3\" fill=\"{color}\" stroke=\"{color}\""),
         );
         if !sec.name.is_empty() {
+            let tc = readable_text_color(color);
             svg.text(
                 band_x0 + band_w / 2.0,
                 band_y + SECTION_BAND_H / 2.0 + 4.0,
-                "text-anchor=\"middle\" fill=\"#fff\" font-size=\"13\" font-weight=\"bold\"",
+                &format!(
+                    "text-anchor=\"middle\" fill=\"{tc}\" font-size=\"13\" font-weight=\"bold\""
+                ),
                 &sec.name,
             );
         }
@@ -300,6 +304,14 @@ mod tests {
         assert!(svg.contains(">Day<"));
         assert!(svg.contains(">Wake<"));
         assert!(svg.contains(">Morning<"));
+    }
+
+    #[test]
+    fn section_title_uses_dark_text_on_pale_band() {
+        // Regression for #314: pale cScale bands need dark text, not white.
+        let svg = render(&sample(), &Theme::default());
+        assert!(svg.contains("fill=\"#333333\" font-size=\"13\" font-weight=\"bold\""));
+        assert!(!svg.contains("fill=\"#fff\" font-size=\"13\" font-weight=\"bold\""));
     }
 
     #[test]

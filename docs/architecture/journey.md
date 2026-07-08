@@ -17,7 +17,10 @@ Parser: `src/parse/journey.rs` · Renderer: `src/svg/journey.rs`.
   actors are indexed
   independently). The legend is sorted **alphabetically** (upstream order),
   not by first appearance — and the sorted index is what colors both legend
-  and dots.
+  and dots. The section title sits on the pale `cScale` band, so its text uses
+  the contrast-aware `readable_text_color` (`src/svg/color.rs`) — dark on light
+  fills, white on dark — instead of a fixed white that vanished on the pastels
+  (issue #314).
 - Score is encoded twice, matching upstream: a **face glyph** (smiley for
   score ≥ 4, neutral for 3, sad for ≤ 2) *and* its **vertical position**.
   Below the task row a horizontal arrow-tipped **time axis** (`marker`

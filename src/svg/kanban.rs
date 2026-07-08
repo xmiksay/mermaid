@@ -3,6 +3,7 @@
 use crate::parse::KanbanDiagram;
 
 use super::builder::{escape, SvgBuilder};
+use super::color::readable_text_color;
 use super::theme::Theme;
 
 const PAD: f64 = 24.0;
@@ -36,10 +37,11 @@ pub(crate) fn render(d: &KanbanDiagram, theme: &Theme) -> String {
             HEAD_H,
             &format!("fill=\"{color}\" fill-opacity=\"0.85\" rx=\"6\""),
         );
+        let tc = readable_text_color(color);
         svg.text(
             x + COL_W / 2.0,
             PAD + HEAD_H / 2.0 + 5.0,
-            "text-anchor=\"middle\" fill=\"#fff\" font-size=\"14\" font-weight=\"bold\"",
+            &format!("text-anchor=\"middle\" fill=\"{tc}\" font-size=\"14\" font-weight=\"bold\""),
             &col.label,
         );
         // Column body.
@@ -155,6 +157,22 @@ mod tests {
         assert!(svg.contains(">Todo<"));
         assert!(svg.contains(">Task A<"));
         assert!(svg.contains("@Alice"));
+    }
+
+    #[test]
+    fn column_header_uses_dark_text_on_pale_fill() {
+        // Regression for #314: pale cScale headers need dark text, not white.
+        let d = KanbanDiagram {
+            columns: vec![KanbanColumn {
+                id: "doing".into(),
+                label: "In Progress".into(),
+                tasks: vec![],
+            }],
+            ticket_base_url: None,
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#333333\" font-size=\"14\" font-weight=\"bold\""));
+        assert!(!svg.contains("fill=\"#fff\" font-size=\"14\" font-weight=\"bold\""));
     }
 
     #[test]
