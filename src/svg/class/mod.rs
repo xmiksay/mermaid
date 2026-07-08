@@ -14,6 +14,7 @@ use super::style::resolve_style;
 use super::theme::Theme;
 
 mod members;
+mod namespace;
 mod relations;
 
 use members::{convert_generics, member_display};
@@ -79,9 +80,6 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         FlowDirection::LeftRight | FlowDirection::RightLeft => (raw_h, raw_w),
     };
 
-    let mut width = canvas_w + CANVAS_PAD * 2.0;
-    let mut height = canvas_h + CANVAS_PAD * 2.0;
-
     let transform = move |(sx, sy): (f64, f64)| -> (f64, f64) {
         let (tx, ty) = match dir {
             FlowDirection::TopDown => (sx, sy),
@@ -91,6 +89,51 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         };
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
+
+    // Work in screen space so namespace containment can be enforced after
+    // layout: build node positions and edge polylines, then push any class
+    // declared outside a namespace clear of that namespace's frame.
+    let mut pos: HashMap<NodeId, (f64, f64)> = (0..d.classes.len() as NodeId)
+        .map(|u| (u, transform(layout.node_pos[&u])))
+        .collect();
+    let mut edge_pts: HashMap<(NodeId, NodeId), Vec<(f64, f64)>> = layout
+        .edge_points
+        .iter()
+        .map(|(k, v)| (*k, v.iter().map(|&p| transform(p)).collect()))
+        .collect();
+
+    let frames = namespace::frames(d, &id_to_u32, &pos, &sizes);
+    namespace::separate_outsiders(d, &id_to_u32, &sizes, &frames, &mut pos, &mut edge_pts);
+
+    // A left-side push can carry a node past the canvas edge; translate
+    // everything right so nothing is clipped, then recompute frames on the
+    // final positions.
+    let min_left = pos
+        .iter()
+        .map(|(u, &(x, _))| x - sizes[*u as usize].0 / 2.0)
+        .chain(frames.iter().map(|f| f.x))
+        .fold(f64::INFINITY, f64::min);
+    if min_left < 0.0 {
+        let shift = -min_left;
+        for p in pos.values_mut() {
+            p.0 += shift;
+        }
+        for v in edge_pts.values_mut() {
+            for p in v.iter_mut() {
+                p.0 += shift;
+            }
+        }
+    }
+    let frames = namespace::frames(d, &id_to_u32, &pos, &sizes);
+
+    let mut width = canvas_w + CANVAS_PAD * 2.0;
+    let mut height = canvas_h + CANVAS_PAD * 2.0;
+    for (u, &(x, _)) in &pos {
+        width = width.max(x + sizes[*u as usize].0 / 2.0 + CANVAS_PAD);
+    }
+    for f in &frames {
+        width = width.max(f.x + f.w + CANVAS_PAD);
+    }
 
     // Notes are laid out in a row below the diagram body; grow the canvas to fit.
     let mut notes: Vec<NoteBox> = Vec::new();
@@ -122,19 +165,18 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.from), id_to_u32.get(&rel.to)) else {
             continue;
         };
-        let Some(raw_pts) = layout.edge_points.get(&(u, v)) else {
+        let Some(pts) = edge_pts.get(&(u, v)) else {
             continue;
         };
-        if raw_pts.len() < 2 {
+        if pts.len() < 2 {
             continue;
         }
-        let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
+        draw_relation(&mut svg, pts, rel, &sizes, &id_to_u32, theme);
     }
 
     // Classes.
     for (i, c) in d.classes.iter().enumerate() {
-        let center = transform(layout.node_pos[&(i as NodeId)]);
+        let center = pos[&(i as NodeId)];
         draw_class(&mut svg, center, sizes[i], c, &d.class_defs, theme);
     }
 
@@ -142,42 +184,18 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     // classes count toward its ancestors' bounds too (the parser registers each
     // class with every enclosing namespace), so a deeper namespace draws a
     // smaller frame nested inside its parent's.
-    let max_depth = d.namespaces.iter().map(|n| n.depth).max().unwrap_or(0);
-    for ns in &d.namespaces {
-        let mut min_x = f64::INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
-        for name in &ns.class_names {
-            let Some(&u) = id_to_u32.get(name) else {
-                continue;
-            };
-            let (cx, cy) = transform(layout.node_pos[&u]);
-            let (w, h) = sizes[u as usize];
-            min_x = min_x.min(cx - w / 2.0);
-            max_x = max_x.max(cx + w / 2.0);
-            min_y = min_y.min(cy - h / 2.0);
-            max_y = max_y.max(cy + h / 2.0);
-        }
-        if !min_x.is_finite() {
-            continue;
-        }
-        let pad = 12.0 + (max_depth - ns.depth) as f64 * 10.0;
-        let header_h = 18.0;
-        let x = min_x - pad;
-        let y = min_y - pad - header_h;
-        let w = (max_x - min_x) + pad * 2.0;
-        let h = (max_y - min_y) + pad * 2.0 + header_h;
+    for f in &frames {
+        let ns = &d.namespaces[f.idx];
         svg.rect(
-            x,
-            y,
-            w,
-            h,
+            f.x,
+            f.y,
+            f.w,
+            f.h,
             "fill=\"none\" stroke=\"#888\" stroke-width=\"1\" rx=\"4\" stroke-dasharray=\"4 3\"",
         );
         svg.text(
-            x + 8.0,
-            y + 14.0,
+            f.x + 8.0,
+            f.y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
             ns.label.as_deref().unwrap_or(&ns.name),
         );
@@ -187,7 +205,7 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     for nb in &notes {
         if let Some(target) = &nb.note.target {
             if let Some(&u) = id_to_u32.get(target) {
-                let center = transform(layout.node_pos[&u]);
+                let center = pos[&u];
                 let anchor = (nb.x + nb.w / 2.0, nb.y);
                 let end = clip_rect(anchor, center, sizes[u as usize]);
                 svg.line(
@@ -460,6 +478,64 @@ mod tests {
         assert!(!svg.contains('['));
         // Two dashed namespace frames are drawn.
         assert!(svg.matches("stroke-dasharray=\"4 3\"").count() >= 2);
+    }
+
+    /// Every `<rect .../>` as `(x, y, w, h, attrs)`.
+    fn rects(svg: &str) -> Vec<(f64, f64, f64, f64, String)> {
+        svg.match_indices("<rect ")
+            .map(|(i, _)| {
+                let tag = &svg[i..i + svg[i..].find("/>").unwrap()];
+                let get = |k: &str| -> f64 {
+                    let start = tag.find(&format!("{k}=\"")).unwrap() + k.len() + 2;
+                    let end = tag[start..].find('"').unwrap();
+                    tag[start..start + end].parse().unwrap()
+                };
+                (
+                    get("x"),
+                    get("y"),
+                    get("width"),
+                    get("height"),
+                    tag.to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn outsider_class_does_not_straddle_namespace_border() {
+        // `Cat` is declared outside `namespace Domain`; its box must land fully
+        // clear of the dashed frame, never straddling the border (issue #249).
+        let d = build(
+            "classDiagram\n\
+             namespace Domain {\n\
+             class Animal\n\
+             class Dog\n\
+             }\n\
+             class Cat\n\
+             Animal <|-- Dog\n\
+             Animal <|-- Cat\n",
+        );
+        let svg = render(&d, &Theme::default());
+        let all = rects(&svg);
+        let frame = all
+            .iter()
+            .find(|(.., attrs)| attrs.contains("stroke=\"#888\""))
+            .expect("namespace frame drawn");
+        let (fx, fy, fw, fh, _) = frame;
+        let (fx1, fy1) = (fx + fw, fy + fh);
+
+        for (x, y, w, h, attrs) in all.iter().filter(|(.., a)| a.contains("rx=\"2\"")) {
+            let (x1, y1) = (x + w, y + h);
+            let overlaps = *x < fx1 && x1 > *fx && *y < fy1 && y1 > *fy;
+            let inside = *x >= *fx && x1 <= fx1 && *y >= *fy && y1 <= fy1;
+            // A class box either sits fully inside the frame (member) or fully
+            // clear of it (outsider) — it must never straddle the border.
+            assert!(
+                !overlaps || inside,
+                "class box ({x},{y},{w},{h}) straddles namespace frame \
+                 ({fx},{fy},{fw},{fh}); attrs={attrs}"
+            );
+        }
     }
 
     #[test]
