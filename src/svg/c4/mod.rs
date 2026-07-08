@@ -116,7 +116,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 22.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\""),
             t,
         );
     }

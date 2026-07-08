@@ -52,6 +52,9 @@ fn produces_svg() {
     assert!(svg.starts_with("<svg"));
     assert!(svg.contains(">User<"));
     assert!(svg.contains(">Sys<"));
+    // Title uses upstream regular weight, not bold (#332).
+    assert!(svg.contains("font-size=\"18\">Sys</text>"));
+    assert!(!svg.contains("font-weight=\"bold\">Sys<"));
 }
 
 fn container(alias: &str, label: &str, members: Vec<C4Element>) -> C4Element {

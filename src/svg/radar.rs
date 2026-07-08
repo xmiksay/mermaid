@@ -46,7 +46,7 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             m_top + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\""),
             t,
         );
     }
@@ -304,6 +304,9 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">Power<"));
         assert!(svg.contains(">A<"));
+        // Title uses upstream regular weight, not bold (#332).
+        assert!(svg.contains("font-size=\"18\">Skills</text>"));
+        assert!(!svg.contains("font-weight=\"bold\">Skills<"));
     }
 
     #[test]

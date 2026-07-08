@@ -130,7 +130,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\""),
             t,
         );
     }
@@ -316,6 +316,9 @@ mod tests {
         assert!(svg.contains(">Login<"));
         assert!(svg.contains(">hi<"));
         assert!(svg.contains("arrow-filled"));
+        // Title uses upstream regular weight, not bold (#332).
+        assert!(svg.contains("font-size=\"18\">Login</text>"));
+        assert!(!svg.contains("font-weight=\"bold\">Login<"));
     }
 
     #[test]

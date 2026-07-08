@@ -45,7 +45,7 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\""),
             t,
         );
     }
@@ -474,6 +474,9 @@ mod tests {
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
+        // Title uses upstream regular weight, not bold (#332).
+        assert!(svg.contains("font-size=\"18\">Tree</text>"));
+        assert!(!svg.contains("font-weight=\"bold\">Tree<"));
         assert!(svg.contains(">Tree<"));
         assert!(svg.contains(">A1<"));
     }
