@@ -1,12 +1,13 @@
 //! ZenUML renderer. Reuses the sequence layout pass but draws ZenUML's own
-//! chrome (issue #266): grey activation bars derived from call nesting,
-//! hierarchical `1.1.1` message numbers, top-only boxed participants (no bottom
-//! actor row), suppressed synthesized returns, a shaded-header fragment style,
-//! and a top-left title frame around the whole diagram.
+//! chrome (issues #266, #315): grey activation bars derived from call nesting,
+//! hierarchical `1.1.1` message numbers dimmed gray (returns included), top-only
+//! white/gray participant boxes (icon left of the name, no bottom actor row),
+//! suppressed synthesized returns, a `◇ Operator` fragment header, and a
+//! top-left title frame around the whole diagram.
 
 use std::collections::HashMap;
 
-use crate::parse::{ArrowKind, ParticipantKind, SequenceDiagram};
+use crate::parse::{ParticipantKind, SequenceDiagram};
 use crate::svg::metrics::text_width;
 
 use super::*;
@@ -17,6 +18,20 @@ const FRAME_INSET: f64 = 8.0;
 const FRAME_HEADER_H: f64 = 22.0;
 /// Gap between the title tab and the participant row.
 const FRAME_HEADER_GAP: f64 = 10.0;
+/// Width of the left icon column inside a stereotype/actor participant box.
+const ICON_W: f64 = 26.0;
+
+/// A ZenUML participant box's `(width, height)`. It reuses the sequence
+/// `actor_size` measurement and reserves a left icon column for the
+/// stereotype/actor glyph (which sits beside the name, not above it).
+fn participant_size(label: &str, kind: ParticipantKind, font_size: f64) -> (f64, f64) {
+    let (w, h) = actor_size(label, font_size);
+    if matches!(kind, ParticipantKind::Participant) {
+        (w, h)
+    } else {
+        (w + ICON_W, h)
+    }
+}
 
 pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     if d.participants.is_empty() {
@@ -35,11 +50,11 @@ pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         return svg.finish();
     }
 
-    // Column geometry: same measurement as the sequence renderer.
+    // Column geometry: sequence measurement plus a left icon column.
     let sizes: Vec<(f64, f64)> = d
         .participants
         .iter()
-        .map(|p| actor_size(&p.display, theme.font_size))
+        .map(|p| participant_size(&p.display, p.kind, theme.font_size))
         .collect();
     let actor_h = sizes.iter().map(|s| s.1).fold(ACTOR_H, f64::max);
 
@@ -123,9 +138,14 @@ pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         match &ev.kind {
             EventKind::Message { msg, .. } => {
                 if let (Some(&x1), Some(&x2)) = (x_of.get(&msg.from), x_of.get(&msg.to)) {
+                    // The sequence number is dimmed gray (upstream `.number`); the
+                    // gray run is emitted as an inline `<span>` so the label text
+                    // keeps the default color beside it.
+                    let num =
+                        |n: &str| format!("<span style=\"color:{}\">{n}</span>", theme.fg_muted);
                     let label = match numbers.get(&i) {
-                        Some(n) if !msg.text.is_empty() => format!("{n} {}", msg.text),
-                        Some(n) => n.clone(),
+                        Some(n) if !msg.text.is_empty() => format!("{} {}", num(n), msg.text),
+                        Some(n) => num(n),
                         None => msg.text.clone(),
                     };
                     draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &label, theme);
@@ -139,38 +159,66 @@ pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-/// Assign each forward call (solid arrow) an outline number keyed by its event
-/// index. Depth follows the activation stack: a call increments the counter at
-/// its level, and its `Activate` pushes a fresh child level. Returns (dashed)
-/// are not numbered.
+/// Assign every message an outline number keyed by its event index. Depth
+/// follows the call tree: each message increments the counter at the current
+/// level, an `Activate` pushes a fresh child level, and a fragment (`BlockOpen`)
+/// counts as a step and opens its own level so its returns nest under it.
+///
+/// A call's own reply (an `x = A.m()` assignment return) is emitted *after* the
+/// receiver's `Deactivate`, so it is numbered as the last child of the call's
+/// frame — recognised as the dashed message right after `Deactivate(id)` whose
+/// `from` is `id`. Explicit `return`s sit inside the body (before the
+/// deactivate) and number naturally at their own level. This yields upstream
+/// ZenUML's `1`, `1.1`, `1.1.1`, `1.1.1.1 found`, `1.1.2.1 token`,
+/// `1.1.2.2 denied`, `1.2`.
 fn number_calls(events: &[Event]) -> HashMap<usize, String> {
     let mut stack: Vec<u32> = vec![0];
     let mut out = HashMap::new();
     for (i, ev) in events.iter().enumerate() {
         match &ev.kind {
-            EventKind::Message { msg, .. }
-                if matches!(msg.arrow, ArrowKind::Solid | ArrowKind::SolidArrow) =>
-            {
-                if let Some(last) = stack.last_mut() {
-                    *last += 1;
-                }
-                out.insert(
-                    i,
-                    stack
-                        .iter()
-                        .map(u32::to_string)
-                        .collect::<Vec<_>>()
-                        .join("."),
-                );
+            // Already numbered as its call's reply during the `Deactivate` below.
+            EventKind::Message { .. } if out.contains_key(&i) => {}
+            EventKind::Message { .. } => {
+                let n = bump(&mut stack);
+                out.insert(i, n);
             }
             EventKind::Activate(_) => stack.push(0),
-            EventKind::Deactivate(_) if stack.len() > 1 => {
+            // A fragment is itself a numbered step; its own level holds the
+            // returns drawn inside its branches.
+            EventKind::BlockOpen { .. } => {
+                bump(&mut stack);
+                stack.push(0);
+            }
+            EventKind::Deactivate(id) if stack.len() > 1 => {
+                if let Some((ret_i, EventKind::Message { msg, .. })) =
+                    events.get(i + 1).map(|e| (i + 1, &e.kind))
+                {
+                    if msg.from == *id {
+                        let n = bump(&mut stack);
+                        out.insert(ret_i, n);
+                    }
+                }
+                stack.pop();
+            }
+            EventKind::BlockClose if stack.len() > 1 => {
                 stack.pop();
             }
             _ => {}
         }
     }
     out
+}
+
+/// Increment the counter at the deepest level and return the dotted path.
+fn bump(stack: &mut [u32]) -> String {
+    if let Some(last) = stack.last_mut() {
+        *last += 1;
+    }
+    stack
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 fn draw_frame(
@@ -213,8 +261,9 @@ fn draw_frame(
     }
 }
 
-/// A top-only ZenUML participant: a bordered box carrying the stereotype icon
-/// (or actor figure) and the name. Plain participants are just the boxed name.
+/// A top-only ZenUML participant: a white, gray-bordered box (issue #315). A
+/// stereotype/actor glyph sits in a left icon column with the name centered in
+/// the remaining space; a plain participant is just the centered name.
 #[allow(clippy::too_many_arguments)]
 fn draw_participant(
     svg: &mut SvgBuilder,
@@ -226,20 +275,42 @@ fn draw_participant(
     kind: ParticipantKind,
     theme: &Theme,
 ) {
-    if !matches!(kind, ParticipantKind::Participant) {
-        // Frame the stereotype/actor glyph in a border box (ZenUML chrome).
-        svg.rect(
-            cx - w / 2.0,
-            top,
-            w,
-            h,
-            &format!(
-                "fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" rx=\"2\"",
-                theme.actor_fill, theme.actor_stroke
-            ),
+    let left = cx - w / 2.0;
+    // White fill with a gray border (upstream ZenUML), not the lavender actor box.
+    svg.rect(
+        left,
+        top,
+        w,
+        h,
+        &format!(
+            "fill=\"{}\" stroke=\"#666\" stroke-width=\"1\" rx=\"2\"",
+            theme.bg
+        ),
+    );
+    let name_cx = if matches!(kind, ParticipantKind::Participant) {
+        cx
+    } else {
+        // Icon on the left, name centered in the space to its right.
+        draw_participant_icon(svg, left + ICON_W / 2.0, top + h / 2.0, kind, theme);
+        left + ICON_W + (w - ICON_W) / 2.0
+    };
+    draw_box_name(svg, name_cx, top, h, label, theme);
+}
+
+/// Draw a participant's name lines vertically centered in a box of height `h`.
+fn draw_box_name(svg: &mut SvgBuilder, cx: f64, top: f64, h: f64, label: &str, theme: &Theme) {
+    let fg = theme.actor_text();
+    let lines = label_lines(label);
+    let n = lines.len() as f64;
+    let y0 = top + h / 2.0 - (n - 1.0) * ACTOR_LINE_H / 2.0 + 5.0;
+    for (i, line) in lines.iter().enumerate() {
+        svg.text(
+            cx,
+            y0 + i as f64 * ACTOR_LINE_H,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\""),
+            line,
         );
     }
-    draw_actor(svg, cx, top, w, h, label, kind, theme);
 }
 
 #[cfg(test)]
@@ -282,18 +353,70 @@ mod tests {
     #[test]
     fn alt_uses_zenuml_fragment_chrome() {
         let svg = render(&build(SAMPLE), &Theme::default());
-        // Header band names the operator + condition; else region is shaded.
-        assert!(svg.contains(">alt [found]<"), "shaded header band");
-        assert!(svg.contains("rgba(0,0,0,0.04)"), "shaded else region");
+        // ◇ Alt header row with the guard `[ found ]` beneath it (issue #315).
+        assert!(svg.contains("\u{25c7} Alt"), "diamond operator header");
+        assert!(svg.contains(">[ found ]<"), "guard row beneath header");
+        assert!(svg.contains(">[ else ]<"), "else compartment guard");
+        // The classic-sequence gray bar and the shaded else region are gone.
+        assert!(!svg.contains(">alt [found]<"), "no gray operator bar");
+        assert!(!svg.contains("rgba(0,0,0,0.04)"), "else region not shaded");
     }
 
     #[test]
     fn emits_hierarchical_numbers() {
         let svg = render(&build(SAMPLE), &Theme::default());
-        assert!(svg.contains("1 login(name, pass)"), "top call is 1");
-        assert!(svg.contains("1.1 verify(name, pass)"), "nested call is 1.1");
-        assert!(svg.contains("1.1.1 query(name)"), "deep call is 1.1.1");
-        assert!(svg.contains("1.2 render()"), "sibling call is 1.2");
+        // Forward calls and their labels sit in separate runs: the number is a
+        // gray `<span>`, the text keeps the default fill.
+        assert!(svg.contains(">1</tspan>"), "top call is 1");
+        assert!(svg.contains("> login(name, pass)</tspan>"));
+        assert!(svg.contains(">1.1</tspan>") && svg.contains("> verify(name, pass)</tspan>"));
+        assert!(svg.contains(">1.1.1</tspan>") && svg.contains("> query(name)</tspan>"));
+        assert!(svg.contains(">1.2</tspan>") && svg.contains("> render()</tspan>"));
+    }
+
+    #[test]
+    fn returns_are_numbered_and_dimmed() {
+        let svg = render(&build(SAMPLE), &Theme::default());
+        // Dashed returns now carry numbers (issue #315): the call's own reply
+        // nests under it, explicit returns number at their branch level.
+        assert!(svg.contains(">1.1.1.1</tspan>") && svg.contains("> found</tspan>"));
+        assert!(svg.contains(">1.1.2.1</tspan>") && svg.contains("> token</tspan>"));
+        assert!(svg.contains(">1.1.2.2</tspan>") && svg.contains("> denied</tspan>"));
+        // The number run is dimmed gray (fg_muted), not the label color.
+        assert!(svg.contains(&format!(
+            "fill=\"{}\">1.1.1.1</tspan>",
+            Theme::default().fg_muted
+        )));
+    }
+
+    #[test]
+    fn first_message_has_an_arrowhead() {
+        // ZenUML `->` is a sync call and carries a filled head like the rest, so
+        // `login` no longer ends flush at the activation bar (issue #315). The
+        // explicit-arrow form now classifies as `SolidArrow`, not bare `Solid`.
+        let d = build(SAMPLE);
+        let first = d
+            .items
+            .iter()
+            .find_map(|i| match i {
+                crate::parse::SequenceItem::Message(m) => Some(m),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(first.arrow, crate::parse::ArrowKind::SolidArrow);
+    }
+
+    #[test]
+    fn participants_are_white_boxed_with_left_icon() {
+        let svg = render(&build(SAMPLE), &Theme::default());
+        // Every participant box is white-filled with a gray border — not the
+        // lavender actor box (issue #315). Four participants → four such rects.
+        assert_eq!(
+            svg.matches("fill=\"#fff\" stroke=\"#666\" stroke-width=\"1\" rx=\"2\"")
+                .count(),
+            4,
+            "white/gray participant boxes"
+        );
     }
 
     #[test]

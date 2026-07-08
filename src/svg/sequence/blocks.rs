@@ -334,33 +334,25 @@ pub(super) fn draw_block_frames(
                 stack.push((i, *kind, label.clone(), min_x, max_x));
             }
             EventKind::BlockBranch { label } => {
-                if let Some(&(open_idx, _, _, min_x, max_x)) = stack.last() {
+                if let Some(&(_, _, _, min_x, max_x)) = stack.last() {
                     let y_branch = ev.y;
                     if zenuml {
-                        // ZenUML shades the alternate (else/catch) region and
-                        // separates it with a solid divider rather than a
-                        // dashed one — no `[…]` corner label.
-                        let y_bot = close_of.get(&open_idx).map_or(y_branch, |&c| events[c].y);
-                        svg.rect(
-                            min_x - 16.0,
-                            y_branch,
-                            (max_x + 16.0) - (min_x - 16.0),
-                            (y_bot - y_branch).max(0.0),
-                            "fill=\"rgba(0,0,0,0.04)\" stroke=\"none\"",
-                        );
+                        // ZenUML separates the alternate (else/catch) compartment
+                        // with a solid divider and a `[ … ]` guard row — the
+                        // region is *not* shaded (issue #315).
                         svg.line(
                             min_x - 16.0,
                             y_branch,
                             max_x + 16.0,
                             y_branch,
-                            "stroke=\"#888\" stroke-width=\"1\"",
+                            "stroke=\"#666\" stroke-width=\"1\"",
                         );
                         if !label.is_empty() {
                             svg.text(
                                 min_x - 12.0,
                                 y_branch + 13.0,
-                                &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
-                                &format!("[{label}]"),
+                                &format!("fill=\"{fg}\" font-size=\"11\""),
+                                &format!("[ {label} ]"),
                             );
                         }
                     } else {
@@ -424,8 +416,9 @@ fn draw_block_frame(
         BlockKind::Break => "break",
     };
     if zenuml {
-        // ZenUML: a solid frame with a shaded header band spanning the whole
-        // fragment width, carrying the operator and its condition.
+        // ZenUML: a solid frame whose header row carries a `◇ Operator` diamond
+        // (no gray bar), a divider beneath it, and the guard `[ … ]` on its own
+        // row below the header (issue #315).
         svg.rect(
             frame_x,
             y_top,
@@ -433,24 +426,28 @@ fn draw_block_frame(
             frame_h,
             "fill=\"none\" stroke=\"#666\" stroke-width=\"1\"",
         );
-        svg.rect(
-            frame_x,
-            y_top,
-            frame_w,
-            18.0,
-            &format!("fill=\"{frame_label_fill}\" stroke=\"#666\" stroke-width=\"1\""),
-        );
-        let header = if label.is_empty() {
-            title.to_string()
-        } else {
-            format!("{title} [{label}]")
-        };
         svg.text(
             frame_x + 6.0,
             y_top + 13.0,
             &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
-            &header,
+            // `◇ Alt` — the operator capitalized (`alt` → `Alt`, ASCII titles).
+            &format!("\u{25c7} {}{}", title[..1].to_uppercase(), &title[1..]),
         );
+        svg.line(
+            frame_x,
+            y_top + 18.0,
+            frame_x + frame_w,
+            y_top + 18.0,
+            "stroke=\"#666\" stroke-width=\"1\"",
+        );
+        if !label.is_empty() {
+            svg.text(
+                frame_x + 8.0,
+                y_top + 31.0,
+                &format!("fill=\"{fg}\" font-size=\"11\""),
+                &format!("[ {label} ]"),
+            );
+        }
         return;
     }
     // Dotted, theme-colored border (upstream's frame chrome).
