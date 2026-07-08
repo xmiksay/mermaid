@@ -103,7 +103,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     // Stack the parallel regions of multi-region composites into disjoint
     // vertical bands; record how far each moved so routed edges follow.
     let orig_pos = pos.clone();
-    let dividers = stack_regions(d, &id_to_u32, &sizes, &mut pos);
+    let mut dividers = stack_regions(d, &id_to_u32, &sizes, &mut pos);
     let node_offset: HashMap<NodeId, (f64, f64)> = pos
         .iter()
         .filter_map(|(&u, &(x, y))| {
@@ -113,22 +113,51 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         })
         .collect();
 
-    let boxes = compute_composite_boxes(d, &id_to_u32, &pos, &sizes);
+    let mut boxes = compute_composite_boxes(d, &id_to_u32, &pos, &sizes);
 
-    // Canvas extent from node boundaries and cluster frames.
+    // Canvas extent from node boundaries and cluster frames. A frame reserves
+    // header room above its members for the title, so its top/left can fall
+    // above/left of the topmost node — measure both corners of every box and
+    // shift everything back into a positive CANVAS_PAD margin so the title band
+    // is not clipped by the viewBox top edge (issue #242).
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
     let mut max_x = 0.0_f64;
     let mut max_y = 0.0_f64;
     for (&u, &(x, y)) in &pos {
         let (w, h) = sizes[u as usize];
+        min_x = min_x.min(x - w / 2.0);
+        min_y = min_y.min(y - h / 2.0);
         max_x = max_x.max(x + w / 2.0);
         max_y = max_y.max(y + h / 2.0);
     }
-    for &(_, _, bx1, by1) in boxes.values() {
-        max_x = max_x.max(bx1 + FRAME_PAD);
-        max_y = max_y.max(by1 + FRAME_PAD);
+    for &(bx0, by0, bx1, by1) in boxes.values() {
+        min_x = min_x.min(bx0);
+        min_y = min_y.min(by0);
+        max_x = max_x.max(bx1);
+        max_y = max_y.max(by1);
     }
-    let width = max_x + CANVAS_PAD;
-    let height = max_y + CANVAS_PAD;
+    let shift_x = (CANVAS_PAD - min_x).max(0.0);
+    let shift_y = (CANVAS_PAD - min_y).max(0.0);
+    if shift_x != 0.0 || shift_y != 0.0 {
+        for p in pos.values_mut() {
+            p.0 += shift_x;
+            p.1 += shift_y;
+        }
+        for b in boxes.values_mut() {
+            b.0 += shift_x;
+            b.1 += shift_y;
+            b.2 += shift_x;
+            b.3 += shift_y;
+        }
+        for ys in dividers.values_mut() {
+            for y in ys {
+                *y += shift_y;
+            }
+        }
+    }
+    let width = max_x + shift_x + CANVAS_PAD;
+    let height = max_y + shift_y + CANVAS_PAD;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_marker(&mut svg, theme);
@@ -155,7 +184,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
                     p.iter()
                         .map(|&q| {
                             let (x, y) = transform(q);
-                            (x + ox, y + oy)
+                            (x + ox + shift_x, y + oy + shift_y)
                         })
                         .collect()
                 }
@@ -422,9 +451,10 @@ mod tests {
         assert!(svg.contains("<a href=\"https://x.test\">"));
     }
 
-    /// Bounds `(x, y, w, h)` of the dashed composite frame rect.
+    /// Bounds `(x, y, w, h)` of the composite frame rect (the solid
+    /// purple-bordered `rx="5"` rect drawn before its title band).
     fn frame_rect(svg: &str) -> (f64, f64, f64, f64) {
-        let key = "stroke-dasharray=\"5 3\"";
+        let key = "rx=\"5\"";
         let kpos = svg.find(key).expect("no composite frame");
         let open = svg[..kpos].rfind("<rect ").unwrap();
         let tag = &svg[open..kpos];
@@ -477,11 +507,35 @@ mod tests {
         // rounded rect (the detached artifact the issue describes).
         let d = build("stateDiagram-v2\n[*] --> A\nstate A {\n[*] --> a1\n}\n");
         let svg = render(&d, &Theme::default());
-        // Exactly one dashed frame (for `A`) and, in total, two `rx="10"` rects:
-        // the frame plus the single member node `a1`. A third would mean `A` was
-        // also emitted as a standalone node.
-        assert_eq!(svg.matches("rx=\"10\" stroke-dasharray").count(), 1);
-        assert_eq!(svg.matches("rx=\"10\"").count(), 2);
+        // Exactly one composite frame (one bold title), and its single member
+        // `a1` is the only rounded normal-state node (`rx="10"`). A second would
+        // mean `A` was also emitted as a standalone node. Frames use `rx="5"`.
+        assert_eq!(svg.matches("font-weight=\"bold\"").count(), 1);
+        assert_eq!(svg.matches("rx=\"10\"").count(), 1);
+    }
+
+    #[test]
+    fn composite_frame_not_clipped_by_top_edge() {
+        // Regression for #242: a composite whose members sit at the top of the
+        // layout must keep its title band inside the canvas — the frame top,
+        // header included, stays at or below y=0 rather than being clipped.
+        let d = build(
+            "stateDiagram-v2\n[*] --> Idle\nstate Workflow {\n[*] --> Step1\nStep1 --> [*]\n}\nIdle --> Workflow\n",
+        );
+        let svg = render(&d, &Theme::default());
+        let (_, fy, _, _) = frame_rect(&svg);
+        assert!(fy >= 0.0, "composite frame top {fy} clipped above viewBox");
+    }
+
+    #[test]
+    fn composite_uses_solid_border_and_title_band() {
+        // Issue #242 styling: solid (not dashed) frame plus a filled title band.
+        let d = build("stateDiagram-v2\n[*] --> A\nstate A {\n[*] --> a1\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(!svg.contains("stroke-dasharray=\"5 3\""));
+        // Purple border and lavender title band, from the theme node colors.
+        assert!(svg.contains("stroke=\"#9370DB\""));
+        assert!(svg.contains("fill=\"#ECECFF\""));
     }
 
     #[test]

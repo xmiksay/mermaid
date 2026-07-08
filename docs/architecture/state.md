@@ -7,9 +7,16 @@ Parser: `src/parse/state/` · Renderer: `src/svg/state/`.
   separated by `--`. Composites are **clusters, not nodes** (like flowchart
   subgraphs): the composite id is excluded from the sugiyama graph, its members
   (gathered recursively through nested composites in `compute_composite_boxes`)
-  lay out inside a dashed rounded frame, and an external transition naming the
-  composite id clips to the frame box via `endpoint_clip` (a `StateEndClip` with
-  `kind: None` → rect clip). Synthesized `__start_N`/`__end_N`/`__hist_N` ids are
+  lay out inside a solid purple-bordered rounded frame with a filled lavender
+  title band (theme `flow_node_stroke`/`flow_node_fill`) and a divider under the
+  title, matching upstream, and an external transition naming the composite id
+  clips to the frame box via `endpoint_clip` (a `StateEndClip` with
+  `kind: None` → rect clip). The box reserves `FRAME_HEADER` of headroom above
+  its members for the title; because that top edge can fall above the topmost
+  laid-out node, `render` measures the min corner of every node **and** frame
+  box and shifts the whole drawing (`pos`/`boxes`/`dividers`, plus routed edge
+  points) back into a positive `CANVAS_PAD` margin so the title band is never
+  clipped by the viewBox top edge (issue #242). Synthesized `__start_N`/`__end_N`/`__hist_N` ids are
   registered in `existing` by `push_pseudo` so region-tracking counts them as
   members and their circles render inside the frame. Pseudo-state (start/end/
   fork/join) fills use `theme.fg` so they stay visible on the dark theme.
