@@ -20,6 +20,11 @@ Parser: `src/parse/er.rs` · Renderer: `src/svg/er.rs`.
   relation already materialized the entity.
 - ER `direction TB/BT/LR/RL` fills `ErDiagram.direction`; the renderer drives
   the same size-swap/transpose the flowchart and class renderers use.
+- ER Crow's-Foot markers are drawn as explicit paths (`draw_cardinality`),
+  positioned along the edge from the entity boundary. Shared geometry lives in
+  the `FOOT_TIP` / `CARD_CIRCLE_R` / `ZERO_MORE_CIRCLE_D` constants: the
+  zero-or-more circle sits ~one marker length past the foot tip so it reads as a
+  separate glyph rather than merging into the foot (issue #256).
 - ER styling: `classDef <name> <props>` fills `ErDiagram.class_defs`, `class
   <ids> <name>` fills `Entity.classes`, and `style <id> <props>` fills
   `Entity.style` (`entity_index` materializes a placeholder for a
