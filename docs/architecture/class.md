@@ -11,6 +11,17 @@ Parser: `src/parse/class/` · Renderer: `src/svg/class/`.
   stack, so an outer frame's bounds enclose the inner one's classes;
   `Namespace.depth` (0 = outermost) makes the renderer draw shallower frames
   with more padding so the outer visibly wraps the inner.
+- Class **namespace containment** (`src/svg/class/namespace.rs`): the shared
+  sugiyama layout is cluster-agnostic, so a class declared *outside* a namespace
+  can land horizontally inside a member's bounding box and straddle the dashed
+  border (issue #249). After layout the renderer computes each frame strictly
+  from its members (`frames`), then `separate_outsiders` pushes any class that
+  belongs to no namespace but overlaps a frame out to the nearer side (keeping a
+  `CLEAR_GAP`). Members never move, so the frames stay valid; a moved node's
+  incident edges are re-straightened to its new center (it sits in open margin
+  space, so a direct line can't collide). A left-side push that runs past the
+  canvas edge is absorbed by translating the whole diagram right before final
+  frame computation.
 - Class **two-way relations** (`relationType lineType relationType`, e.g.
   `<|--|>`, `*--*`, `o--o`, `<-->`, `<..>`) glue a mirror marker onto the base
   token; `detect_two_way` (`src/parse/class/relation.rs`) consumes that trailing
