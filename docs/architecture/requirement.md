@@ -20,3 +20,6 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   surrounding quotes (`requirement "My Req" { … }` renders `My Req`, matching
   upstream's `qString`). The `contains` relation draws upstream's crossed-circle
   containment head (`req-contains` marker) instead of the plain arrow.
+- Relation stroke style matches upstream 11.x: `contains` is the only solid
+  relation; every other kind (`copies`, `derives`, `satisfies`, `verifies`,
+  `refines`, `traces`) is dashed and ends in the thin `req-arrow` head.

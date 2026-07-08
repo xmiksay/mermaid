@@ -221,13 +221,10 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             ReqRelationKind::Refines => "«refines»",
             ReqRelationKind::Traces => "«traces»",
         };
-        let dashed = matches!(
-            rel.kind,
-            ReqRelationKind::Satisfies
-                | ReqRelationKind::Verifies
-                | ReqRelationKind::Refines
-                | ReqRelationKind::Traces
-        );
+        // Upstream draws only `contains` solid (crossed-circle head); every
+        // other relation kind (copies/derives/satisfies/verifies/refines/
+        // traces) is dashed with a thin arrowhead.
+        let dashed = !matches!(rel.kind, ReqRelationKind::Contains);
         let dash_attr = if dashed {
             " stroke-dasharray=\"5 3\""
         } else {
@@ -363,6 +360,61 @@ mod tests {
         assert!(svg.contains(">req1<"));
         assert!(svg.contains(">e1<"));
         assert!(svg.contains("req-arrow"));
+    }
+
+    fn render_single_relation(kind: ReqRelationKind) -> String {
+        let d = RequirementDiagram {
+            requirements: vec![
+                Requirement {
+                    kind: RequirementKind::Requirement,
+                    name: "a".into(),
+                    id: None,
+                    text: None,
+                    risk: None,
+                    verifymethod: None,
+                },
+                Requirement {
+                    kind: RequirementKind::Requirement,
+                    name: "b".into(),
+                    id: None,
+                    text: None,
+                    risk: None,
+                    verifymethod: None,
+                },
+            ],
+            elements: vec![],
+            relations: vec![ReqRelation {
+                from: "a".into(),
+                to: "b".into(),
+                kind,
+            }],
+            ..Default::default()
+        };
+        render(&d, &Theme::default())
+    }
+
+    #[test]
+    fn relation_stroke_style_table_matches_upstream() {
+        use ReqRelationKind::*;
+        // Upstream 11.x: only `contains` is solid; every other relation is
+        // dashed with the thin arrowhead.
+        for kind in [Copies, Derives, Satisfies, Verifies, Refines, Traces] {
+            let svg = render_single_relation(kind);
+            assert!(
+                svg.contains("stroke-dasharray=\"5 3\""),
+                "{kind:?} should be dashed"
+            );
+            assert!(
+                svg.contains("marker-end=\"url(#req-arrow)\""),
+                "{kind:?} should use the thin arrowhead"
+            );
+        }
+        let svg = render_single_relation(Contains);
+        assert!(
+            !svg.contains("stroke-dasharray"),
+            "contains should be solid"
+        );
+        assert!(svg.contains("marker-end=\"url(#req-contains)\""));
     }
 
     #[test]
