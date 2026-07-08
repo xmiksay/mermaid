@@ -5,14 +5,22 @@ use std::fmt::Write as _;
 
 use crate::parse::{CommitKind, GitDirection, GitEvent, GitGraphDiagram};
 
-use super::builder::{escape, fnum, SvgBuilder};
+use super::builder::{fnum, SvgBuilder};
+use super::metrics;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
-const COMMIT_R: f64 = 8.0;
+const COMMIT_R: f64 = 10.0;
 const COMMIT_GAP: f64 = 50.0;
 const LANE_GAP: f64 = 50.0;
 const TITLE_GAP: f64 = 32.0;
+/// Thick branch trunk / join line weight (upstream `.arrow` stroke-width).
+const LINE_W: f64 = 8.0;
+/// Corner radius of a rounded right-angle branch/merge join.
+const ELBOW_R: f64 = 10.0;
+/// Upstream default tag fill / border (a yellow luggage tag).
+const TAG_FILL: &str = "#fff5ad";
+const TAG_STROKE: &str = "#aaaa33";
 
 struct CommitNode {
     id: String,
@@ -70,20 +78,18 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     let mut col_of: BTreeMap<String, usize> = BTreeMap::new();
     let parallel = d.config.parallel_commits;
     let mut col: usize = 0;
-    let mut auto_idx = 0usize;
-    let next_id = |id: Option<String>, auto_idx: &mut usize| -> String {
-        if let Some(i) = id {
-            i
-        } else {
-            *auto_idx += 1;
-            format!("c{}", *auto_idx)
-        }
+    // Sequence counter across every commit node. Auto ids hash it into an
+    // upstream-style `<seq>-<hash>` id (deterministic, not a real RNG).
+    let mut seq = 0usize;
+    let next_id = |id: Option<String>, seq: usize| -> String {
+        id.unwrap_or_else(|| format!("{seq}-{}", seq_hash(seq)))
     };
 
     for ev in &d.events {
         match ev {
             GitEvent::Commit { id, tags, kind } => {
-                let id = next_id(id.clone(), &mut auto_idx);
+                let id = next_id(id.clone(), seq);
+                seq += 1;
                 let parents = head
                     .get(&current_branch)
                     .map(|p| vec![p.clone()])
@@ -128,7 +134,8 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 tags,
                 kind,
             } => {
-                let id = next_id(id.clone(), &mut auto_idx);
+                let id = next_id(id.clone(), seq);
+                seq += 1;
                 let mut parents = Vec::new();
                 if let Some(p) = head.get(&current_branch) {
                     parents.push(p.clone());
@@ -150,6 +157,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 });
             }
             GitEvent::CherryPick { commit_id, tag, .. } => {
+                seq += 1;
                 let new_id = format!("cp:{commit_id}");
                 let parents = head
                     .get(&current_branch)
@@ -219,97 +227,148 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     let origin_x = PAD + 60.0;
     let origin_y = PAD + title_h + 30.0;
 
-    let pos = |n: &CommitNode| -> (f64, f64) {
+    // Position of an arbitrary (col, lane) cell; `pos` specializes it to a node.
+    let point = |col: usize, lane: usize| -> (f64, f64) {
         if horizontal {
             (
-                origin_x + n.col as f64 * COMMIT_GAP,
-                origin_y + n.lane as f64 * LANE_GAP,
+                origin_x + col as f64 * COMMIT_GAP,
+                origin_y + lane as f64 * LANE_GAP,
             )
         } else {
             // BT flows bottom-to-top: newer commits sit higher up the axis.
             let row = if bottom_top {
-                (cols - 1 - n.col) as f64
+                (cols - 1 - col) as f64
             } else {
-                n.col as f64
+                col as f64
             };
             (
-                origin_x + n.lane as f64 * LANE_GAP,
+                origin_x + lane as f64 * LANE_GAP,
+                origin_y + row * COMMIT_GAP,
+            )
+        }
+    };
+    let pos = |n: &CommitNode| -> (f64, f64) { point(n.col, n.lane) };
+    // End of the trailing dotted continuation for `lane`: a little past the
+    // newest commit column, along the time axis.
+    let axis_end = |lane: usize| -> (f64, f64) {
+        if horizontal {
+            (
+                origin_x + (cols.saturating_sub(1) as f64 + 0.75) * COMMIT_GAP,
+                origin_y + lane as f64 * LANE_GAP,
+            )
+        } else {
+            let row = if bottom_top {
+                -0.75
+            } else {
+                cols as f64 - 0.25
+            };
+            (
+                origin_x + lane as f64 * LANE_GAP,
                 origin_y + row * COMMIT_GAP,
             )
         }
     };
 
-    // Branch labels and lane lines (suppressed by `showBranches: false`).
-    if d.config.show_branches {
-        for (i, b) in branches.iter().enumerate() {
-            let lane = lane_of_seq[i];
-            let (x, y) = if horizontal {
-                (PAD, origin_y + lane as f64 * LANE_GAP + 4.0)
-            } else {
-                (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 14.0)
-            };
-            let color = theme.git_color(lane);
-            svg.text(
-                x,
-                y,
-                &format!("fill=\"{color}\" font-size=\"12\" font-weight=\"bold\""),
-                b,
+    // Per-lane commit column extent — the span of the thick trunk line.
+    let mut lane_min: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut lane_max: BTreeMap<usize, usize> = BTreeMap::new();
+    for n in &nodes {
+        lane_min
+            .entry(n.lane)
+            .and_modify(|c| *c = (*c).min(n.col))
+            .or_insert(n.col);
+        lane_max
+            .entry(n.lane)
+            .and_modify(|c| *c = (*c).max(n.col))
+            .or_insert(n.col);
+    }
+
+    // Thick branch trunks + trailing dotted continuation.
+    for (&lane, &minc) in &lane_min {
+        let maxc = lane_max[&lane];
+        let color = theme.git_color(lane);
+        let (x0, y0) = point(minc, lane);
+        let (x1, y1) = point(maxc, lane);
+        if minc != maxc {
+            svg.line(
+                x0,
+                y0,
+                x1,
+                y1,
+                &format!(
+                    "stroke=\"{color}\" stroke-width=\"{}\" stroke-linecap=\"round\"",
+                    fnum(LINE_W)
+                ),
             );
         }
+        if d.config.show_branches {
+            let (ex, ey) = axis_end(lane);
+            svg.line(
+                x1,
+                y1,
+                ex,
+                ey,
+                &format!("stroke=\"{color}\" stroke-width=\"2\" stroke-dasharray=\"4 4\" stroke-linecap=\"round\""),
+            );
+        }
+    }
 
-        for (i, _) in branches.iter().enumerate() {
-            let lane = lane_of_seq[i];
-            let color = theme.git_color(lane);
-            if horizontal {
-                let y = origin_y + lane as f64 * LANE_GAP;
-                svg.line(
-                    origin_x,
-                    y,
-                    origin_x + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
-                    y,
-                    &format!("stroke=\"{color}\" stroke-width=\"2\""),
-                );
-            } else {
-                let x = origin_x + lane as f64 * LANE_GAP;
-                svg.line(
-                    x,
-                    origin_y,
-                    x,
-                    origin_y + (cols.saturating_sub(1) as f64) * COMMIT_GAP,
-                    &format!("stroke=\"{color}\" stroke-width=\"2\""),
+    // Cross-lane joins: branch starts and merges as rounded right-angle elbows.
+    for n in &nodes {
+        let (nx, ny) = pos(n);
+        for parent in &n.parents {
+            if let Some(p) = nodes.iter().find(|m| &m.id == parent) {
+                if p.lane == n.lane {
+                    continue;
+                }
+                let (px, py) = pos(p);
+                // A merge arrow carries the incoming (source) branch color; a
+                // branch start carries the new (child) branch color.
+                let color = if matches!(n.kind, CommitKind::Merge) {
+                    theme.git_color(p.lane)
+                } else {
+                    theme.git_color(n.lane)
+                };
+                let path = elbow_path(px, py, nx, ny, horizontal);
+                svg.path(
+                    &path,
+                    &format!(
+                        "fill=\"none\" stroke=\"{color}\" stroke-width=\"{}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"",
+                        fnum(LINE_W)
+                    ),
                 );
             }
         }
     }
 
-    // Parent edges (for merges, draw curve to parent lane).
-    for n in &nodes {
-        let (nx, ny) = pos(n);
-        for parent in &n.parents {
-            if let Some(p) = nodes.iter().find(|m| &m.id == parent) {
-                let (px, py) = pos(p);
-                if p.lane == n.lane {
-                    continue;
-                }
-                let mut path = String::new();
-                let _ = write!(
-                    path,
-                    "M{} {}C{} {}, {} {}, {} {}",
-                    fnum(px),
-                    fnum(py),
-                    fnum((px + nx) / 2.0),
-                    fnum(py),
-                    fnum((px + nx) / 2.0),
-                    fnum(ny),
-                    fnum(nx),
-                    fnum(ny),
-                );
-                let color = theme.git_color(n.lane);
-                svg.path(
-                    &path,
-                    &format!("fill=\"none\" stroke=\"{color}\" stroke-width=\"1.5\""),
-                );
-            }
+    // Branch label pills (suppressed by `showBranches: false`).
+    if d.config.show_branches {
+        for (i, b) in branches.iter().enumerate() {
+            let lane = lane_of_seq[i];
+            let fill = theme.git_color(lane);
+            let w = metrics::text_width(b, 7.0, theme.font_size).max(10.0) + 16.0;
+            let h = 20.0;
+            let (cx, cy) = if horizontal {
+                (origin_x - 14.0 - w / 2.0, origin_y + lane as f64 * LANE_GAP)
+            } else {
+                (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 12.0)
+            };
+            svg.rect(
+                cx - w / 2.0,
+                cy - h / 2.0,
+                w,
+                h,
+                &format!("fill=\"{fill}\" rx=\"10\" ry=\"10\""),
+            );
+            let tc = label_text_color(fill);
+            svg.text(
+                cx,
+                cy + 4.0,
+                &format!(
+                    "text-anchor=\"middle\" fill=\"{tc}\" font-size=\"12\" font-weight=\"bold\""
+                ),
+                b,
+            );
         }
     }
 
@@ -341,26 +400,20 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
             CommitKind::Merge => draw_merge_glyph(&mut svg, x, y, color),
             CommitKind::CherryPick => draw_cherry_pick_glyph(&mut svg, x, y, color, fg),
         }
-        // Commit id label.
+        // Commit id label, nudged clear of the (now larger) dot.
         if d.config.show_commit_label {
             let mut attrs =
                 format!("text-anchor=\"middle\" fill=\"{commit_label}\" font-size=\"10\"");
-            let ly = y + COMMIT_R + 12.0;
+            let ly = y + COMMIT_R + 16.0;
             if d.config.rotate_commit_label && horizontal {
                 let _ = write!(attrs, " transform=\"rotate(-45 {} {})\"", fnum(x), fnum(ly));
             }
             svg.text(x, ly, &attrs, &n.id);
         }
-        // Tags stack upward from the node (upstream `tags+=STRING`).
+        // Tag-shaped labels stack upward from the node (upstream `tags+=STRING`).
         for (ti, t) in n.tags.iter().enumerate() {
-            svg.text(
-                x,
-                y - COMMIT_R - 6.0 - ti as f64 * 13.0,
-                &format!(
-                    "text-anchor=\"middle\" fill=\"{tag_label}\" font-size=\"10\" font-weight=\"bold\""
-                ),
-                &format!("[{}]", escape(t)),
-            );
+            let ty = y - COMMIT_R - 16.0 - ti as f64 * 26.0;
+            draw_tag(&mut svg, x, ty, t, tag_label, fg, theme.font_size);
         }
     }
 
@@ -373,14 +426,135 @@ fn draw_merge_glyph(svg: &mut SvgBuilder, x: f64, y: f64, color: &str) {
     svg.circle(
         x,
         y,
-        COMMIT_R + 1.0,
+        COMMIT_R,
         &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\""),
     );
     svg.circle(
         x,
         y,
-        COMMIT_R - 3.0,
+        COMMIT_R / 2.0,
         &format!("fill=\"#fff\" stroke=\"{color}\" stroke-width=\"1.5\""),
+    );
+}
+
+/// Deterministic 7-hex digest of a commit's sequence number — mimics upstream's
+/// `<seq>-<hash>` auto commit ids (e.g. `0-f56b5f2`) without a real RNG.
+fn seq_hash(seq: usize) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in (seq as u64).to_le_bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:07x}", h & 0x0fff_ffff)
+}
+
+/// Readable text color for a pill filled with `hex` — dark on light fills,
+/// white on dark ones (the default git palette is pastel, so most read dark).
+fn label_text_color(hex: &str) -> &'static str {
+    let h = hex.trim_start_matches('#');
+    if h.len() >= 6 {
+        if let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&h[0..2], 16),
+            u8::from_str_radix(&h[2..4], 16),
+            u8::from_str_radix(&h[4..6], 16),
+        ) {
+            let lum = 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+            return if lum > 140.0 { "#333333" } else { "#ffffff" };
+        }
+    }
+    "#333333"
+}
+
+/// Rounded right-angle join from parent `(px,py)` to child `(nx,ny)`. In the
+/// horizontal layout it drops (changes lane) at the parent column, then runs to
+/// the child; the vertical layout runs to the child lane, then advances in time.
+fn elbow_path(px: f64, py: f64, nx: f64, ny: f64, horizontal: bool) -> String {
+    let mut s = String::new();
+    let r = ELBOW_R;
+    if horizontal {
+        let vdir = (ny - py).signum();
+        let hdir = (nx - px).signum();
+        let _ = write!(
+            s,
+            "M{} {}L{} {}Q{} {} {} {}L{} {}",
+            fnum(px),
+            fnum(py),
+            fnum(px),
+            fnum(ny - r * vdir),
+            fnum(px),
+            fnum(ny),
+            fnum(px + r * hdir),
+            fnum(ny),
+            fnum(nx),
+            fnum(ny),
+        );
+    } else {
+        let hdir = (nx - px).signum();
+        let vdir = (ny - py).signum();
+        let _ = write!(
+            s,
+            "M{} {}L{} {}Q{} {} {} {}L{} {}",
+            fnum(px),
+            fnum(py),
+            fnum(nx - r * hdir),
+            fnum(py),
+            fnum(nx),
+            fnum(py),
+            fnum(nx),
+            fnum(py + r * vdir),
+            fnum(nx),
+            fnum(ny),
+        );
+    }
+    s
+}
+
+/// A tag-shaped label (upstream's yellow luggage tag) centered at `(cx, cy)`:
+/// a rounded body with a pointed left edge, a punch hole, and the tag text.
+fn draw_tag(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    cy: f64,
+    label: &str,
+    text_color: &str,
+    hole: &str,
+    font_size: f64,
+) {
+    let tw = metrics::text_width(label, 7.0, font_size).max(8.0);
+    let body_w = tw + 14.0;
+    let point_w = 8.0;
+    let th = 18.0;
+    let total = body_w + point_w;
+    let tip = cx - total / 2.0;
+    let body_l = tip + point_w;
+    let body_r = tip + total;
+    let top = cy - th / 2.0;
+    let bot = cy + th / 2.0;
+    let mut path = String::new();
+    let _ = write!(
+        path,
+        "M{} {}L{} {}L{} {}L{} {}L{} {}Z",
+        fnum(tip),
+        fnum(cy),
+        fnum(body_l),
+        fnum(top),
+        fnum(body_r),
+        fnum(top),
+        fnum(body_r),
+        fnum(bot),
+        fnum(body_l),
+        fnum(bot),
+    );
+    svg.path(
+        &path,
+        &format!("fill=\"{TAG_FILL}\" stroke=\"{TAG_STROKE}\" stroke-width=\"1\""),
+    );
+    svg.circle(body_l + 4.0, cy, 2.0, &format!("fill=\"{hole}\""));
+    svg.text(
+        (body_l + body_r) / 2.0 + 2.0,
+        cy + 3.5,
+        &format!("text-anchor=\"middle\" fill=\"{text_color}\" font-size=\"11\""),
+        label,
     );
 }
 
@@ -576,8 +750,8 @@ mod tests {
             ..Default::default()
         };
         let svg = render(&d, &Theme::default());
-        // Cherry-pick tag is drawn.
-        assert!(svg.contains(">[cp]<"));
+        // Cherry-pick tag renders inside a tag shape (plain text, no brackets).
+        assert!(svg.contains(">cp<"));
         // The cherry glyph draws small r="2.5" circles; the merge glyph an
         // inner r="5" ring — neither is a rotated square (reverse glyph).
         assert!(svg.contains("r=\"2.5\""));
@@ -617,9 +791,9 @@ mod tests {
             ..Default::default()
         };
         let svg = render(&d, &Theme::default());
-        // The highlight glyph is an r="10" circle (COMMIT_R + 2); the merge
+        // The highlight glyph is an r="12" circle (COMMIT_R + 2); the merge
         // glyph's inner ring is r="5" — absent here.
-        assert!(svg.contains("r=\"10\""));
+        assert!(svg.contains("r=\"12\""));
         assert!(!svg.contains("r=\"5\""));
     }
 
@@ -634,8 +808,8 @@ mod tests {
             ..Default::default()
         };
         let svg = render(&d, &Theme::default());
-        assert!(svg.contains(">[v1]<"));
-        assert!(svg.contains(">[v2]<"));
+        assert!(svg.contains(">v1<"));
+        assert!(svg.contains(">v2<"));
     }
 
     #[test]
@@ -665,6 +839,113 @@ mod tests {
         let main_x = lane_x_before(&svg, svg.find(">main<").unwrap());
         let dev_x = lane_x_before(&svg, svg.find(">dev<").unwrap());
         assert!(dev_x < main_x, "dev should claim the earlier lane");
+    }
+
+    #[test]
+    fn branch_labels_render_as_filled_pills() {
+        let d = GitGraphDiagram {
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // A rounded pill rect precedes the "main" label text.
+        let label = svg.find(">main<").unwrap();
+        let rect = svg[..label].rfind("<rect").unwrap();
+        assert!(svg[rect..label].contains("rx=\"10\""));
+    }
+
+    #[test]
+    fn tags_render_as_tag_shapes() {
+        let d = GitGraphDiagram {
+            events: vec![GitEvent::Commit {
+                id: Some("a".into()),
+                tags: vec!["v1.0".into()],
+                kind: CommitKind::Normal,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Tag body path + yellow luggage-tag fill, no bracketed text.
+        assert!(svg.contains(TAG_FILL));
+        assert!(svg.contains(">v1.0<"));
+        assert!(!svg.contains("[v1.0]"));
+    }
+
+    #[test]
+    fn thick_trunk_and_trailing_dash() {
+        let d = GitGraphDiagram {
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Commit {
+                    id: Some("b".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // The branch trunk is thick, and a dotted continuation trails the last
+        // commit.
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", fnum(LINE_W))));
+        assert!(svg.contains("stroke-dasharray=\"4 4\""));
+    }
+
+    #[test]
+    fn auto_ids_are_seq_hash_style() {
+        // Auto ids look like upstream's `0-<hash>`, not `c1`.
+        let d = GitGraphDiagram {
+            events: vec![GitEvent::Commit {
+                id: None,
+                tags: Vec::new(),
+                kind: CommitKind::Normal,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">0-"));
+        assert!(!svg.contains(">c1<"));
+    }
+
+    #[test]
+    fn merge_join_is_a_rounded_elbow() {
+        // Cross-lane joins use a quadratic-cornered elbow, not an S-curve.
+        let d = GitGraphDiagram {
+            events: vec![
+                GitEvent::Commit {
+                    id: Some("a".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+                GitEvent::Branch {
+                    name: "dev".into(),
+                    order: None,
+                },
+                GitEvent::Commit {
+                    id: Some("b".into()),
+                    tags: Vec::new(),
+                    kind: CommitKind::Normal,
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // A rounded elbow path uses an `L…Q…L` shape (no cubic `C`).
+        assert!(svg.contains("Q"));
     }
 
     /// Reads the `x="…"` of the `<text>` element ending just before byte `end`.

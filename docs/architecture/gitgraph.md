@@ -41,3 +41,16 @@ Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph.rs`.
   Merge}.tags`, upstream `tags+=STRING`; the renderer stacks them upward), and a
   `merge <branch> type: NORMAL|REVERSE|HIGHLIGHT` overrides the merge glyph via
   `GitEvent::Merge.kind` (default `CommitKind::Merge`).
+- gitGraph **visual metrics track upstream 11.16.0** (issue #267): commit dots
+  are `COMMIT_R = 10`; branch trunks and cross-lane joins are drawn at
+  `LINE_W = 8` with round caps. A lane's trunk is one thick line from its first
+  to its last commit column (`lane_min`/`lane_max`), followed by a **trailing
+  dotted continuation** (`axis_end`, `stroke-dasharray`) past the newest commit.
+  Cross-lane joins are **rounded right-angle elbows** (`elbow_path`, an `L…Q…L`
+  drop-then-run, `ELBOW_R = 10`) rather than S-curves; a merge arrow takes the
+  incoming (source) branch color, a branch start the child color. Branch labels
+  are **colored rounded pills** (`git_color` fill, `rx=10`, contrast text via
+  `label_text_color`); tags are **luggage-tag shapes** (`draw_tag`, pointed left
+  edge + punch hole, upstream's `#fff5ad`/`#aaaa33` yellow). Auto commit ids are
+  upstream-style `<seq>-<hash>` (`seq_hash`, a deterministic FNV digest of the
+  commit's sequence number), not `c1`/`c2`.
