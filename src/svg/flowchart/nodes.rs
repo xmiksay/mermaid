@@ -217,19 +217,20 @@ pub(super) fn draw_node(
             svg.path(&d, &fill_attr);
         }
         NodeShape::Asymmetric => {
-            // >  ]  — arrow flag pointing right
+            // >  ]  — flag with a concave notch on the LEFT edge and a straight
+            // vertical right edge (upstream `rect_left_inv_arrow`).
             let d = format!(
                 "M{} {} L{} {} L{} {} L{} {} L{} {} Z",
                 fnum(x),
                 fnum(y),
-                fnum(x + w - off),
+                fnum(x + w),
                 fnum(y),
                 fnum(x + w),
-                fnum(cy),
-                fnum(x + w - off),
                 fnum(y + h),
                 fnum(x),
-                fnum(y + h)
+                fnum(y + h),
+                fnum(x + off),
+                fnum(cy)
             );
             svg.path(&d, &fill_attr);
         }

@@ -107,6 +107,8 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
   `src/parse/flowchart/node.rs` and rendered in `src/svg/flowchart/nodes.rs`.
+  The flag mirrors upstream `rect_left_inv_arrow`: a concave notch on the left
+  edge and a straight vertical right edge (not a right-pointing arrow).
 - Flowchart v11 attribute syntax `id@{ shape: …, label: … }` is handled in
   `parse_at_node` (`src/parse/flowchart/node.rs`): the `@{…}` block right after a
   node id is split into `key: value` pairs (quote-aware comma/colon split), the
