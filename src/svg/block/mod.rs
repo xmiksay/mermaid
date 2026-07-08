@@ -1,5 +1,6 @@
-//! block-beta renderer. Grid layout: items flow into cells by column count,
-//! groups draw a labeled box around inner items.
+//! block-beta renderer. Grid layout: items flow into cells by column count;
+//! a composite `block:id … end` takes one slot as a solid container with its
+//! children scaled to hug it (#259).
 
 mod edges;
 
@@ -9,6 +10,8 @@ use crate::parse::ast::Style;
 use crate::parse::{Block, BlockDiagram, BlockItem, BlockShape};
 
 use super::builder::{fnum, SvgBuilder};
+use super::markup::strip_tags;
+use super::metrics::text_width;
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -24,11 +27,46 @@ pub(super) struct Geom {
     pub(super) shape: Option<BlockShape>,
 }
 
-const PAD: f64 = 30.0;
-const CELL_W: f64 = 100.0;
-const CELL_H: f64 = 60.0;
+/// Outer canvas margin — upstream's small `diagramPadding`, not the old 30px.
+const PAD: f64 = 8.0;
+/// Per-glyph width for block labels (shared with the flowchart estimate).
+const CHAR_W: f64 = 7.5;
+/// Horizontal text padding each side — boxes hug their label (#259).
+const PAD_X: f64 = 14.0;
+/// Uniform row height; tuned to upstream's compact hug, not the old 60px.
+const CELL_H: f64 = 38.0;
+/// Floor for the content-derived uniform column width.
+const MIN_CELL_W: f64 = 40.0;
 const GAP: f64 = 8.0;
-const GROUP_PAD: f64 = 14.0;
+/// Inner padding between a composite container and its scaled children.
+const GROUP_PAD: f64 = 6.0;
+
+/// Maps a laid-out child frame (local coords) onto its parent frame:
+/// `parent = (tx, ty) + s · local`. Composite groups scale their children
+/// into a single grid slot, so nested geometry composes these.
+#[derive(Clone, Copy)]
+struct Transform {
+    tx: f64,
+    ty: f64,
+    s: f64,
+}
+
+impl Transform {
+    const IDENTITY: Transform = Transform {
+        tx: 0.0,
+        ty: 0.0,
+        s: 1.0,
+    };
+
+    /// `self ∘ inner` — apply `inner` (child frame) then `self`.
+    fn compose(&self, inner: &Transform) -> Transform {
+        Transform {
+            tx: self.tx + self.s * inner.tx,
+            ty: self.ty + self.s * inner.ty,
+            s: self.s * inner.s,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Laid {
@@ -37,29 +75,40 @@ struct Laid {
     y: f64,
     w: f64,
     h: f64,
+    /// Children in this node's own (local, pre-scale) coordinate frame.
     children: Vec<Laid>,
+    /// For a composite group: maps `children` onto this frame (translate +
+    /// scale into the slot). `None` for leaf blocks and edges.
+    child_tf: Option<Transform>,
 }
 
 pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
-    let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD);
+    let (cw, ch) = cell_dims(&d.items, theme.font_size);
+    let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD, cw, ch);
     let width = PAD * 2.0 + total_w;
-    let height = PAD * 2.0 + total_h + 20.0;
-    let mut svg = SvgBuilder::new(width.max(200.0), height.max(100.0)).theme(theme);
+    let height = PAD * 2.0 + total_h;
+    let mut svg = SvgBuilder::new(width.max(120.0), height.max(60.0)).theme(theme);
 
     // Resolve node geometry (recursively) for edges — leaf blocks *and*
     // composite groups, so an edge can target a `block:ID … end` group.
+    // `tf` maps each frame onto the absolute canvas so scaled children of a
+    // composite group report their on-screen box, not their pre-scale one.
     let mut nodes: BTreeMap<String, Geom> = BTreeMap::new();
-    fn collect(laid: &[Laid], out: &mut BTreeMap<String, Geom>) {
+    fn collect(laid: &[Laid], out: &mut BTreeMap<String, Geom>, tf: &Transform) {
         for l in laid {
+            let cx = tf.tx + tf.s * (l.x + l.w / 2.0);
+            let cy = tf.ty + tf.s * (l.y + l.h / 2.0);
+            let w = l.w * tf.s;
+            let h = l.h * tf.s;
             match &l.item {
                 BlockItem::Block(b) => {
                     out.insert(
                         b.id.clone(),
                         Geom {
-                            cx: l.x + l.w / 2.0,
-                            cy: l.y + l.h / 2.0,
-                            w: l.w,
-                            h: l.h,
+                            cx,
+                            cy,
+                            w,
+                            h,
                             shape: Some(b.shape),
                         },
                     );
@@ -69,21 +118,23 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
                         out.insert(
                             g.id.clone(),
                             Geom {
-                                cx: l.x + l.w / 2.0,
-                                cy: l.y + l.h / 2.0,
-                                w: l.w,
-                                h: l.h,
+                                cx,
+                                cy,
+                                w,
+                                h,
                                 shape: None,
                             },
                         );
                     }
-                    collect(&l.children, out);
+                    if let Some(inner) = &l.child_tf {
+                        collect(&l.children, out, &tf.compose(inner));
+                    }
                 }
                 _ => {}
             }
         }
     }
-    collect(&laid, &mut nodes);
+    collect(&laid, &mut nodes, &Transform::IDENTITY);
 
     // Draw items.
     for l in &laid {
@@ -99,11 +150,42 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     svg.finish()
 }
 
-fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid>, f64, f64) {
+/// Uniform grid cell size for a diagram. Columns share one width — the widest
+/// label's hug box (text + `PAD_X`), divided down for multi-span blocks so a
+/// `d["Wide"]:2` never forces every column wide. Rows share [`CELL_H`].
+fn cell_dims(items: &[BlockItem], font_size: f64) -> (f64, f64) {
+    fn walk(items: &[BlockItem], font_size: f64, w: &mut f64) {
+        for it in items {
+            match it {
+                BlockItem::Block(b) => {
+                    let span = b.span.max(1) as f64;
+                    let nat = text_width(&strip_tags(&b.label), CHAR_W, font_size) + PAD_X * 2.0;
+                    // Per-column need once the block's own inner gaps are removed.
+                    let per_col = (nat - (span - 1.0) * GAP) / span;
+                    *w = w.max(per_col);
+                }
+                BlockItem::Group(g) => walk(&g.items, font_size, w),
+                _ => {}
+            }
+        }
+    }
+    let mut w = MIN_CELL_W;
+    walk(items, font_size, &mut w);
+    (w, CELL_H)
+}
+
+fn layout_items(
+    items: &[BlockItem],
+    cols: usize,
+    x0: f64,
+    y0: f64,
+    cw: f64,
+    ch: f64,
+) -> (Vec<Laid>, f64, f64) {
     let mut laid = Vec::new();
     let mut col = 0usize;
     let mut row = 0usize;
-    let row_h = CELL_H;
+    let row_h = ch;
     let cols = cols.max(1);
 
     for item in items {
@@ -114,9 +196,9 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
                     col = 0;
                     row += 1;
                 }
-                let x = x0 + col as f64 * (CELL_W + GAP);
+                let x = x0 + col as f64 * (cw + GAP);
                 let y = y0 + row as f64 * (row_h + GAP);
-                let w = span as f64 * CELL_W + (span - 1) as f64 * GAP;
+                let w = span as f64 * cw + (span - 1) as f64 * GAP;
                 laid.push(Laid {
                     item: item.clone(),
                     x,
@@ -124,6 +206,7 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
                     w,
                     h: row_h,
                     children: Vec::new(),
+                    child_tf: None,
                 });
                 col += span;
                 if col >= cols {
@@ -146,33 +229,46 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
                     w: 0.0,
                     h: 0.0,
                     children: Vec::new(),
+                    child_tf: None,
                 });
             }
             BlockItem::Group(g) => {
-                if col != 0 {
+                // A composite block takes one grid slot (its `span`, default 1),
+                // like any leaf — not a whole row. Its children are laid out in
+                // their own frame and scaled to hug that slot (#259).
+                let span = g.span.max(1);
+                if col + span > cols && col != 0 {
                     col = 0;
                     row += 1;
                 }
-                let inner_x = x0 + GROUP_PAD;
-                let inner_y = y0 + row as f64 * (row_h + GAP) + GROUP_PAD + 8.0;
-                let (child_laid, cw, ch) =
-                    layout_items(&g.items, g.columns.unwrap_or(cols), inner_x, inner_y);
-                // Honor `block:id:span` — the group is at least `span` cells wide.
-                let span_w = g.span.max(1) as f64 * CELL_W + (g.span.max(1) - 1) as f64 * GAP;
-                let w = (cw + GROUP_PAD * 2.0).max(span_w);
-                let h = ch + GROUP_PAD * 2.0 + 18.0;
+                let x = x0 + col as f64 * (cw + GAP);
+                let y = y0 + row as f64 * (row_h + GAP);
+                let w = span as f64 * cw + (span - 1) as f64 * GAP;
+                let h = row_h;
+                let (child_laid, content_w, content_h) =
+                    layout_items(&g.items, g.columns.unwrap_or(cols), 0.0, 0.0, cw, ch);
+                let avail_w = (w - GROUP_PAD * 2.0).max(1.0);
+                let avail_h = (h - GROUP_PAD * 2.0).max(1.0);
+                let scale = (avail_w / content_w).min(avail_h / content_h).min(1.0);
+                let tf = Transform {
+                    tx: x + (w - content_w * scale) / 2.0,
+                    ty: y + (h - content_h * scale) / 2.0,
+                    s: scale,
+                };
                 laid.push(Laid {
                     item: item.clone(),
-                    x: x0,
-                    y: y0 + row as f64 * (row_h + GAP),
+                    x,
+                    y,
                     w,
                     h,
                     children: child_laid,
+                    child_tf: Some(tf),
                 });
-                // Group takes whole rows; advance row pointer.
-                let rows_used = ((h + GAP) / (row_h + GAP)).ceil() as usize;
-                row += rows_used;
-                let _ = col;
+                col += span;
+                if col >= cols {
+                    col = 0;
+                    row += 1;
+                }
             }
         }
     }
@@ -186,32 +282,41 @@ fn layout_items(items: &[BlockItem], cols: usize, x0: f64, y0: f64) -> (Vec<Laid
         }
     }
     if max_x == 0.0 {
-        max_x = cols as f64 * CELL_W + (cols - 1) as f64 * GAP;
+        max_x = cols as f64 * cw + (cols - 1) as f64 * GAP;
     }
     if max_y == 0.0 {
-        max_y = CELL_H;
+        max_y = ch;
     }
     (laid, max_x, max_y)
 }
 
 fn draw(l: &Laid, svg: &mut SvgBuilder, theme: &Theme, class_defs: &HashMap<String, Style>) {
-    let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
     match &l.item {
         BlockItem::Block(b) => draw_block(b, l.x, l.y, l.w, l.h, svg, theme, class_defs),
-        BlockItem::Group(g) => {
-            svg.rect(l.x, l.y, l.w, l.h,
-                &format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" rx=\"4\""));
-            if !g.id.is_empty() {
-                svg.text(
-                    l.x + 8.0,
-                    l.y + 14.0,
-                    &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
-                    &g.id,
-                );
-            }
-            for c in &l.children {
-                draw(c, svg, theme, class_defs);
+        BlockItem::Group(_) => {
+            // Composite container: a solid pale fill filling one slot, no title
+            // text — its children scale down inside it (#259).
+            svg.rect(
+                l.x,
+                l.y,
+                l.w,
+                l.h,
+                &format!(
+                    "fill=\"{}\" stroke=\"{}\" stroke-width=\"1\" rx=\"5\"",
+                    theme.flow_cluster_fill, theme.flow_cluster_stroke
+                ),
+            );
+            if let Some(tf) = &l.child_tf {
+                svg.raw(&format!(
+                    "<g transform=\"translate({} {}) scale({})\">",
+                    fnum(tf.tx),
+                    fnum(tf.ty),
+                    fnum(tf.s)
+                ));
+                for c in &l.children {
+                    draw(c, svg, theme, class_defs);
+                }
+                svg.raw("</g>");
             }
         }
         BlockItem::Edge(_) | BlockItem::Space(_) => {}
@@ -424,6 +529,38 @@ mod tests {
         let svg = render_from("block-beta\n  a<[\"go\"]>(right)\n");
         assert!(svg.contains("<path"));
         assert!(svg.contains(">go<"));
+    }
+
+    #[test]
+    fn composite_group_is_solid_untitled_and_scaled() {
+        // #259: a composite block draws a solid pale container (theme cluster
+        // fill), no dashed frame, no title text, and scales its children in.
+        let src = "block-beta\n  columns 3\n  a b c\n  block:group1\n    x y z\n  end\n";
+        let svg = render_from(src);
+        let t = Theme::default();
+        assert!(svg.contains(&format!("fill=\"{}\"", t.flow_cluster_fill)));
+        assert!(!svg.contains("stroke-dasharray=\"5 4\""));
+        // no bold title label for the group id
+        assert!(!svg.contains(">group1<"));
+        // children still rendered, inside a scaling group transform
+        assert!(svg.contains(">x<") && svg.contains(">z<"));
+        assert!(svg.contains("<g transform=\"translate("));
+    }
+
+    #[test]
+    fn composite_group_occupies_one_slot_not_full_row() {
+        // The container hugs a single grid slot, so a sibling that follows it
+        // shares the row instead of being pushed below a full-width group.
+        let src = "block-beta\n  columns 3\n  block:g\n    x\n  end\n  sib\n";
+        let svg = render_from(src);
+        // The whole canvas is ~3 columns wide, well under the old full-row size.
+        let width = svg
+            .split("viewBox=\"0 0 ")
+            .nth(1)
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap();
+        assert!(width < 200.0, "canvas unexpectedly wide: {width}");
     }
 
     #[test]
