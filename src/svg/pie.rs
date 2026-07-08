@@ -7,9 +7,17 @@ use crate::parse::PieDiagram;
 use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
-const RADIUS: f64 = 150.0;
-const PAD: f64 = 24.0;
-const TITLE_GAP: f64 = 30.0;
+/// Slice radius. Upstream sizes the pie as `min(w,h)/2 - 40` on a 450² canvas
+/// (`185`), so the pie fills most of its box rather than floating in whitespace.
+const RADIUS: f64 = 185.0;
+/// Margin between the pie and the canvas edge (upstream's `- 40`).
+const PAD: f64 = 40.0;
+/// Vertical band reserved above the pie for the title.
+const TITLE_GAP: f64 = 40.0;
+/// Title font size (upstream `pieTitleTextSize` 25px, regular weight).
+const TITLE_SIZE: f64 = 25.0;
+/// Slice/outer-circle stroke width (upstream `pieStrokeWidth` 2px).
+const SLICE_STROKE_W: f64 = 2.0;
 const LEGEND_ROW: f64 = 22.0;
 const SWATCH: f64 = 14.0;
 const LEGEND_LABEL_MAX: usize = 24;
@@ -137,9 +145,10 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
     if let Some(t) = &p.title {
         svg.text(
             width / 2.0,
-            PAD + 18.0,
+            PAD + TITLE_SIZE,
             &format!(
-                "text-anchor=\"middle\" fill=\"{title_color}\" font-size=\"18\" font-weight=\"bold\""
+                "text-anchor=\"middle\" fill=\"{title_color}\" font-size=\"{}\"",
+                fnum(TITLE_SIZE)
             ),
             t,
         );
@@ -181,8 +190,9 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
             svg.path(
                 &slice_path(cx, cy, RADIUS, inner_r, a1, a2, large),
                 &format!(
-                    "fill=\"{c}\"{opacity_attr} stroke=\"{pie_stroke}\" stroke-width=\"1\"",
-                    c = pie_color(i)
+                    "fill=\"{c}\"{opacity_attr} stroke=\"{pie_stroke}\" stroke-width=\"{w}\"",
+                    c = pie_color(i),
+                    w = fnum(SLICE_STROKE_W)
                 ),
             );
         }
@@ -203,18 +213,29 @@ pub(crate) fn render(p: &PieDiagram, theme: &Theme) -> String {
         angle = end;
     }
 
+    // Upstream draws a dedicated `pieOuterCircle` (black, 2px, fill none) so the
+    // circumference reads as a clean ring on top of the slice edges.
+    svg.circle(
+        cx,
+        cy,
+        RADIUS,
+        &format!(
+            "fill=\"none\" stroke=\"{pie_stroke}\" stroke-width=\"{w}\"",
+            w = fnum(SLICE_STROKE_W)
+        ),
+    );
+
     // Legend
     for (row, &(i, e)) in shown.iter().enumerate() {
         let y = legend_top + row as f64 * LEGEND_ROW;
+        // Upstream strokes the legend swatch with its own fill color, so it has
+        // no visible border (unlike the black-outlined slices).
         svg.rect(
             legend_x,
             y,
             SWATCH,
             SWATCH,
-            &format!(
-                "fill=\"{c}\" stroke=\"{pie_stroke}\" stroke-width=\"1\"",
-                c = pie_color(i)
-            ),
+            &format!("fill=\"{c}\"", c = pie_color(i)),
         );
         let label = legend_text(e, total, p.show_data);
         let label = truncate(&label, LEGEND_LABEL_MAX);
@@ -395,8 +416,8 @@ mod tests {
         p.donut_hole = Some(0.5);
         let svg = render(&p, &Theme::default());
         // Annular sectors use two arcs per slice (no `M<cx> <cy>L` wedge apex).
-        assert!(svg.contains("A150 150"), "outer arc present");
-        assert!(svg.contains("A75 75"), "inner (hole) arc present");
+        assert!(svg.contains("A185 185"), "outer arc present");
+        assert!(svg.contains("A92.5 92.5"), "inner (hole) arc present");
     }
 
     #[test]
@@ -422,12 +443,35 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_unchanged() {
-        // No config → byte-identical to the pre-config renderer (donutHole 0,
-        // textPosition 0.75, right legend).
+    fn default_config_is_full_wedge() {
+        // No config → full wedges from the centre (donutHole 0, textPosition
+        // 0.75, right legend). Centre = (PAD + RADIUS, PAD + TITLE_GAP + RADIUS).
         let svg = render(&pie(vec![("A", 1.0), ("B", 1.0)]), &Theme::default());
-        assert!(svg.contains("M174 204L"), "full wedge apex at the centre");
-        assert!(!svg.contains("A75 75"), "no donut hole by default");
+        assert!(svg.contains("M225 265L"), "full wedge apex at the centre");
+        assert!(!svg.contains("A92.5 92.5"), "no donut hole by default");
+    }
+
+    #[test]
+    fn slices_and_circumference_are_black_outlined() {
+        // Upstream outlines slice edges and the circumference in black at 2px.
+        let svg = render(&pie(vec![("A", 60.0), ("B", 40.0)]), &Theme::default());
+        assert!(
+            svg.contains("stroke=\"black\" stroke-width=\"2\""),
+            "black 2px slice stroke"
+        );
+        // Dedicated outer circle for the circumference (fill none).
+        assert!(
+            svg.contains("<circle") && svg.contains("fill=\"none\" stroke=\"black\""),
+            "black outer circle present"
+        );
+    }
+
+    #[test]
+    fn title_is_large_regular_weight() {
+        // Upstream renders the title at 25px in regular weight, not small/bold.
+        let svg = render(&pie(vec![("A", 1.0), ("B", 1.0)]), &Theme::default());
+        assert!(svg.contains("font-size=\"25\""), "25px title");
+        assert!(!svg.contains("font-weight=\"bold\""), "title not bold");
     }
 
     #[test]

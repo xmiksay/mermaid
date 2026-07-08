@@ -15,3 +15,11 @@ Parser: `src/parse/pie.rs` · Renderer: `src/svg/pie.rs`.
   draw annular sectors instead of full wedges, and `legendPosition`
   (`right`/`left`/`top`/`bottom`, default `right`) relays out the legend and
   canvas. Defaults keep the render byte-identical to the pre-config output.
+- Slice edges and the circumference are outlined in black at 2px
+  (`pieStrokeColor`, default `black`; width matches upstream `pieStrokeWidth`),
+  with a dedicated `fill="none"` outer circle drawn over the slices so the rim
+  reads as a clean ring. The title renders at 25px in regular weight
+  (`pieTitleTextSize`), and the pie radius (`185` on a `40`-margin box) fills
+  most of the canvas — matching the JS-rendered proportions rather than
+  floating in whitespace. Legend swatches carry no border (upstream strokes
+  them with their own fill color).
