@@ -72,7 +72,8 @@ pub struct Theme {
     /// [`cscale_palette`][Theme::cscale_palette]. `git{N}` `themeVariables`
     /// recolor individual slots.
     pub git_palette: Cow<'static, [Str]>,
-    /// Pie slice/legend stroke (`pieStrokeColor`). `None` falls back to `#fff`.
+    /// Pie slice/outer-circle stroke (`pieStrokeColor`). `None` falls back to
+    /// `black`.
     pub pie_stroke: Option<Str>,
     /// Pie slice fill-opacity (`pieOpacity`). `None` emits no opacity attribute
     /// (fully opaque), keeping the default render byte-identical.
@@ -289,9 +290,10 @@ impl Theme {
         &self.git_palette[i % self.git_palette.len()]
     }
 
-    /// Pie slice/legend stroke (`pieStrokeColor`), defaulting to white.
+    /// Pie slice/outer-circle stroke (`pieStrokeColor`), defaulting to black —
+    /// upstream outlines the circumference and slice edges in black.
     pub fn pie_stroke(&self) -> &str {
-        self.pie_stroke.as_deref().unwrap_or("#fff")
+        self.pie_stroke.as_deref().unwrap_or("black")
     }
 
     /// Sequence actor/participant name text color (`actorTextColor`).
@@ -415,6 +417,6 @@ mod tests {
         assert_eq!(t.title(), t.fg);
         assert_eq!(t.commit_label(), t.fg_muted);
         assert_eq!(t.tag_label(), t.fg);
-        assert_eq!(t.pie_stroke(), "#fff");
+        assert_eq!(t.pie_stroke(), "black");
     }
 }
