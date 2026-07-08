@@ -107,7 +107,7 @@ impl Theme {
             actor_fill: Cow::Borrowed("#ECECFF"),
             actor_stroke: Cow::Borrowed("#9370DB"),
             actor_text_color: None,
-            lifeline: Cow::Borrowed("#999"),
+            lifeline: Cow::Borrowed("#9370DB"),
             arrow_stroke: Cow::Borrowed("#333"),
             signal_text_color: None,
             note_fill: Cow::Borrowed("#FFF5AD"),

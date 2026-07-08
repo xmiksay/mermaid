@@ -46,6 +46,7 @@ const BLOCK_BOTTOM_GAP: f64 = 12.0;
 const BLOCK_LABEL_W: f64 = 60.0;
 const BLOCK_TAB_H: f64 = 18.0; // reserved Y-space below the alt/loop tab so first message text doesn't overlap
 const ACTIVATION_W: f64 = 10.0;
+const SEQ_BADGE_R: f64 = 9.0; // radius of the autonumber circle badge on the arrow origin
 const BOX_LABEL_H: f64 = 22.0; // reserved Y-space above the actor row for `box` labels
 const BOX_PAD: f64 = 12.0;
 const CREATE_GAP: f64 = 15.0; // gap above an inline `create`d actor box
@@ -165,7 +166,7 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
             top,
             x,
             bottom,
-            &format!("stroke=\"{lifeline}\" stroke-width=\"1\" stroke-dasharray=\"4 4\""),
+            &format!("stroke=\"{lifeline}\" stroke-width=\"1\""),
         );
     }
 
@@ -205,12 +206,12 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
                 let x1 = x_of.get(&msg.from);
                 let x2 = x_of.get(&msg.to);
                 if let (Some(&x1), Some(&x2)) = (x1, x2) {
-                    let label = if let Some(n) = number {
-                        format!("{}. {}", fmt_seq_number(*n), msg.text)
-                    } else {
-                        msg.text.clone()
-                    };
-                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &label, theme);
+                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &msg.text, theme);
+                    if let Some(n) = number {
+                        // Autonumber draws a filled circle badge on the arrow
+                        // origin (upstream) rather than a `"1. "` text prefix.
+                        draw_seq_number(&mut svg, x1, ev.y, *n, theme);
+                    }
                 }
             }
             EventKind::Note(note) => {

@@ -77,6 +77,25 @@ pub(super) fn draw_message(
     }
 }
 
+/// Draw the autonumber badge: a filled circle sitting on the arrow origin with
+/// the message's sequence number in white, matching upstream's `.sequenceNumber`
+/// (replaces the pre-#268 `"1. "` text prefix).
+pub(super) fn draw_seq_number(svg: &mut SvgBuilder, x: f64, y: f64, n: f64, theme: &Theme) {
+    let fill = &theme.actor_stroke;
+    svg.circle(
+        x,
+        y,
+        SEQ_BADGE_R,
+        &format!("fill=\"{fill}\" stroke=\"none\""),
+    );
+    svg.text(
+        x,
+        y + 4.0,
+        "text-anchor=\"middle\" fill=\"#fff\" font-size=\"11\"",
+        &fmt_seq_number(n),
+    );
+}
+
 /// Box geometry for a note: its rectangle plus the text wrapped to fit inside.
 pub(super) struct NoteGeom {
     pub rect_x: f64,
@@ -357,7 +376,7 @@ mod tests {
                 &Theme::default(),
             );
             assert!(svg.contains(&format!("marker-end=\"url(#{marker})\"")));
-            // Lifelines carry `4 4`; only the message-line dash is `6 4`.
+            // Lifelines are solid; only a dashed message line carries `6 4`.
             assert!(!svg.contains("stroke-dasharray=\"6 4\""), "case: {src}");
         }
     }
