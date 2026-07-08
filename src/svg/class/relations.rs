@@ -139,14 +139,18 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
          <path d=\"M0 0 L11 6 L0 12 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
     );
+    // refX sits at the node-side tip (x=16) so the diamond body extends
+    // outward along the edge, not backward into the node box (which would hide
+    // it behind the node fill). orient="auto-start-reverse" keeps that tip
+    // pointing into its node at whichever end the marker lands.
     let diamond_filled = format!(
-        "<marker id=\"cls-diamond-filled\" viewBox=\"0 0 16 8\" refX=\"0\" refY=\"4\" \
+        "<marker id=\"cls-diamond-filled\" viewBox=\"0 0 16 8\" refX=\"16\" refY=\"4\" \
          markerWidth=\"16\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
          <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"{flow_edge_stroke}\" stroke=\"{flow_edge_stroke}\"/>\
          </marker>"
     );
     let diamond_open = format!(
-        "<marker id=\"cls-diamond-open\" viewBox=\"0 0 16 8\" refX=\"0\" refY=\"4\" \
+        "<marker id=\"cls-diamond-open\" viewBox=\"0 0 16 8\" refX=\"16\" refY=\"4\" \
          markerWidth=\"16\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
          <path d=\"M0 4 L8 0 L16 4 L8 8 Z\" fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/>\
          </marker>"
@@ -264,5 +268,36 @@ mod tests {
         assert!(svg.contains("marker-end=\"url(#cls-diamond-filled)\""));
         assert!(!svg.contains("marker-start"));
         assert!(!svg.contains("url(#cls-arrow)"));
+    }
+
+    #[test]
+    fn reversed_aggregation_puts_hollow_diamond_at_from_end() {
+        // `A o-- B`: hollow diamond belongs at A (the `from`/whole) via marker-start.
+        let d = build("classDiagram\nA o-- B\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-start=\"url(#cls-diamond-open)\""));
+        assert!(!svg.contains("marker-end"));
+        assert!(!svg.contains("url(#cls-arrow)"));
+    }
+
+    #[test]
+    fn forward_aggregation_puts_hollow_diamond_at_to_end() {
+        // `A --o B`: hollow diamond belongs at B (the `to`/whole) via marker-end.
+        let d = build("classDiagram\nA --o B\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-end=\"url(#cls-diamond-open)\""));
+        assert!(!svg.contains("marker-start"));
+        assert!(!svg.contains("url(#cls-arrow)"));
+    }
+
+    #[test]
+    fn diamond_markers_anchor_at_node_side_tip() {
+        // The diamond's refX must sit at its node-side tip (x=16, matching the
+        // 16-wide viewBox) so the body extends outward along the edge instead of
+        // backward into the node box, where the node fill would hide it.
+        let d = build("classDiagram\nCar *-- Wheel\nLibrary o-- Book\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("<marker id=\"cls-diamond-filled\" viewBox=\"0 0 16 8\" refX=\"16\""));
+        assert!(svg.contains("<marker id=\"cls-diamond-open\" viewBox=\"0 0 16 8\" refX=\"16\""));
     }
 }
