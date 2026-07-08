@@ -78,10 +78,11 @@ pub(super) fn draw_message(
 }
 
 /// Draw the autonumber badge: a filled circle sitting on the arrow origin with
-/// the message's sequence number in white, matching upstream's `.sequenceNumber`
-/// (replaces the pre-#268 `"1. "` text prefix).
+/// the message's sequence number in white, matching upstream's `#sequencenumber`
+/// (near-black `signalColor` fill, white text) — replaces the pre-#268 `"1. "`
+/// text prefix and the purple `actor_stroke` fill of #268 (#329).
 pub(super) fn draw_seq_number(svg: &mut SvgBuilder, x: f64, y: f64, n: f64, theme: &Theme) {
-    let fill = &theme.actor_stroke;
+    let fill = &theme.arrow_stroke;
     svg.circle(
         x,
         y,

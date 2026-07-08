@@ -477,10 +477,12 @@ fn draw_block_frame(
         &tab,
         &format!("fill=\"{frame_label_fill}\" stroke=\"{frame_stroke}\" stroke-width=\"1\""),
     );
+    // Operator (`alt`/`loop`/…) in the tab: upstream's `.labelText` is regular
+    // weight, not bold (#329).
     svg.text(
         frame_x + 6.0,
         y_top + 13.0,
-        &format!("fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""),
+        &format!("fill=\"{fg}\" font-size=\"11\""),
         title,
     );
     if !label.is_empty() {
@@ -516,6 +518,14 @@ mod tests {
         assert!(svg.contains(">alt<"));
         assert!(svg.contains("[yes]"));
         assert!(svg.contains("[no]"));
+        // Operator label is regular weight (upstream `.labelText`), not bold
+        // (#329).
+        assert!(!svg.contains("font-weight=\"bold\">alt<"));
+        // The pentagon tab fills with the lavender label-box color, not gray
+        // (#329).
+        let t = Theme::default();
+        assert!(svg.contains(&format!("fill=\"{}\"", t.frame_label_fill)));
+        assert_eq!(t.frame_label_fill, "#ECECFF");
     }
 
     #[test]
@@ -544,6 +554,17 @@ mod tests {
         // Message text keeps its own label with no numeric prefix.
         assert!(svg.contains(">x<") && svg.contains(">y<"));
         assert!(!svg.contains(">1. x<"), "no legacy text prefix");
+        // Badge fill is the near-black signal color, not the purple actor
+        // stroke of #268 (#329).
+        let t = Theme::default();
+        assert!(
+            svg.contains(&format!("fill=\"{}\" stroke=\"none\"", t.arrow_stroke)),
+            "badge fills with the near-black arrow stroke"
+        );
+        assert!(
+            !svg.contains(&format!("fill=\"{}\" stroke=\"none\"", t.actor_stroke)),
+            "badge no longer fills purple"
+        );
     }
 
     #[test]

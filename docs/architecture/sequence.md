@@ -9,8 +9,9 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   tab labels** and a **dotted, theme-colored border** (`draw_block_frame`, #268:
   `stroke-dasharray="2 2"` in `theme.actor_stroke`, tab drawn as a beveled
   `<path>`, guard/condition text centered in black; `else`/`and` dividers reuse
-  the same dotted stroke); `break` reuses the frame with a `break` title; `rect
-  <color>` draws a
+  the same dotted stroke); the operator title (`alt`/`loop`/…) in the tab is
+  **regular weight** (upstream's `.labelText`), not bold (#329); `break` reuses
+  the frame with a `break` title; `rect <color>` draws a
   colored background band behind its items via a separate `draw_rect_bands`
   pass (paired `RectOpen`/`RectClose` events, LIFO stack, default fill
   `rgba(0,0,0,0.05)` when no color given). Block frames and rect bands are
@@ -19,7 +20,9 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   participant ids referenced by the events between each open/close pair
   (`collect_ids`/`extents`, falling back to `all_extents` when the block
   encloses no message). The frame-label tab fill is theme-driven
-  (`theme.frame_label_fill`) instead of a hardcoded `#EEE`.
+  (`theme.frame_label_fill`), which defaults to the theme's actor background
+  (`#ECECFF` lavender for `default`, matching upstream's `labelBoxBkgColor =
+  actorBkg`) rather than the old gray `#EEE` (#329).
 - Sequence `autonumber` is **positional**: it parses to
   `SequenceItem::AutoNumber(Option<AutoNumberConfig>)` interleaved in `items`.
   `autonumber [start [step]]` → `Some{start,step}` (defaults 1/1) turns numbering
@@ -29,7 +32,9 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   step }` plus an `f64` counter through `layout_items`, tagging each numbered
   message with its number. A numbered message draws a **filled circle badge** on
   the arrow origin (`draw_seq_number` in `src/svg/sequence/messages.rs`, radius
-  `SEQ_BADGE_R`, `theme.actor_stroke` fill, white number, #268) instead of a
+  `SEQ_BADGE_R`, **near-black `theme.arrow_stroke` fill** matching upstream's
+  `#sequencenumber` `signalColor` — the #268 badge used the purple
+  `actor_stroke` (#329) — white number) instead of a
   `"1. "` text prefix; `fmt_seq_number` drops the decimal point for integral
   values, so `2.0` shows as `2`. A non-positive step falls back to `1.0`.
   `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
@@ -89,8 +94,13 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   `participant`/`actor` kind, and a trailing `as <alias>` still binds the
   display name.
 - Sequence `actor X` (vs `participant X`) renders as a **stick figure** (circle
-  head + body/arms/legs, name below) instead of the rounded rect — `draw_actor`
-  in `src/svg/sequence/participants.rs` branches on `Participant.kind`.
+  head + body/arms/legs, name below) instead of the rounded rect —
+  `draw_actor`/`draw_actor_figure` in `src/svg/sequence/glyphs.rs` branch on
+  `Participant.kind`. The figure is drawn at **full upstream size**
+  (`drawActorTypeActor` proportions — head r=13, 19px torso, splayed arms/legs;
+  the #268 figure was ~half scale, #329); `actor_figure_height` gives an actor
+  column a taller header row than a compact participant box so the figure isn't
+  squeezed, and the shared `actor_h` (max over columns) grows to fit.
 - Sequence `note` boxes are theme-driven (`theme.note_fill`/`note_stroke`, no
   longer a hardcoded `#FFF5AD`) and **word-wrap** to their box width (#123):
   `note_geometry` (`src/svg/sequence/messages.rs`) computes the box (an `over`

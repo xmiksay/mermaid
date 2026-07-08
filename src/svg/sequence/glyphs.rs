@@ -245,33 +245,68 @@ fn draw_actor_box(
     }
 }
 
+// Stick-figure geometry, measured down from the actor row top. Full-size
+// proportions mirroring upstream `drawActorTypeActor` (head Ø 26, 19px torso,
+// splayed arms/legs) — #268 drew this at roughly half scale (#329).
+const FIG_HEAD_R: f64 = 13.0;
+const FIG_TORSO: f64 = 19.0;
+const FIG_ARM_HALF: f64 = 16.0;
+const FIG_LEG_DX: f64 = 16.0;
+const FIG_LEG_DY: f64 = 13.0;
+/// Distance from the row top to the figure's feet (head Ø + torso + leg span).
+const FIG_BOTTOM: f64 = FIG_HEAD_R * 2.0 + FIG_TORSO + FIG_LEG_DY;
+/// Gap between the figure's feet and the first name baseline.
+const FIG_NAME_GAP: f64 = 13.0;
+
+/// Height an `actor` column needs: the full-size stick figure plus its name
+/// block below the feet. Drives the header row height so the figure isn't
+/// squeezed into the compact participant-box height (#329).
+pub(super) fn actor_figure_height(label: &str) -> f64 {
+    let n = label_lines(label).len().max(1) as f64;
+    FIG_BOTTOM + FIG_NAME_GAP + (n - 1.0) * ACTOR_LINE_H + 6.0
+}
+
 /// Draw an `actor` as a stick figure (head + body + arms + legs) with the name
 /// underneath — mirrors upstream `drawActorTypeActor`.
 fn draw_actor_figure(svg: &mut SvgBuilder, cx: f64, top: f64, h: f64, label: &str, theme: &Theme) {
     let fg = theme.actor_text();
     let stroke = &theme.actor_stroke;
     let fill = &theme.actor_fill;
-    let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
-    let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
+    let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"2\"");
+    let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"2\"");
 
-    let head_r = 7.0;
-    let head_cy = top + head_r + 1.0;
-    let body_top = head_cy + head_r;
-    let body_bot = body_top + 13.0;
-    let arm_y = body_top + 5.0;
-    let arm_half = 10.0;
-    let leg_dx = 8.0;
-    let leg_dy = 10.0;
+    let head_cy = top + FIG_HEAD_R;
+    let body_top = head_cy + FIG_HEAD_R;
+    let body_bot = body_top + FIG_TORSO;
+    let arm_y = body_top + FIG_TORSO * 0.4;
 
-    svg.circle(cx, head_cy, head_r, &attrs);
+    svg.circle(cx, head_cy, FIG_HEAD_R, &attrs);
     svg.line(cx, body_top, cx, body_bot, &line_attrs);
-    svg.line(cx - arm_half, arm_y, cx + arm_half, arm_y, &line_attrs);
-    svg.line(cx, body_bot, cx - leg_dx, body_bot + leg_dy, &line_attrs);
-    svg.line(cx, body_bot, cx + leg_dx, body_bot + leg_dy, &line_attrs);
+    svg.line(
+        cx - FIG_ARM_HALF,
+        arm_y,
+        cx + FIG_ARM_HALF,
+        arm_y,
+        &line_attrs,
+    );
+    svg.line(
+        cx,
+        body_bot,
+        cx - FIG_LEG_DX,
+        body_bot + FIG_LEG_DY,
+        &line_attrs,
+    );
+    svg.line(
+        cx,
+        body_bot,
+        cx + FIG_LEG_DX,
+        body_bot + FIG_LEG_DY,
+        &line_attrs,
+    );
 
-    // Name sits below the figure, within the actor's allotted height.
+    // Name sits below the figure's feet, within the actor's allotted height.
     let lines = label_lines(label);
-    let mut y = (body_bot + leg_dy + 14.0).min(top + h - 2.0);
+    let mut y = (top + FIG_BOTTOM + FIG_NAME_GAP).min(top + h - 2.0);
     for line in &lines {
         svg.text(
             cx,
@@ -366,6 +401,16 @@ mod tests {
         // Stick figure emits a <circle> head; a plain participant box does not.
         assert!(svg.contains("<circle"), "actor should draw a circle head");
         assert!(svg.contains(">A</text>"), "actor name below figure");
+        // The head is drawn at full upstream size (r=13), not the #268 r=7 that
+        // read as undersized (#329).
+        assert!(
+            svg.contains("r=\"13\""),
+            "actor head uses the full-size radius"
+        );
+        assert!(
+            !svg.contains("r=\"7\""),
+            "no longer the undersized #268 head"
+        );
     }
 
     #[test]

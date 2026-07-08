@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::parse::{Message, SequenceDiagram, SequenceItem, SequenceNote};
+use crate::parse::{Message, ParticipantKind, SequenceDiagram, SequenceItem, SequenceNote};
 
 use super::builder::SvgBuilder;
 use super::theme::Theme;
@@ -80,7 +80,16 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let sizes: Vec<(f64, f64)> = d
         .participants
         .iter()
-        .map(|p| actor_size(&p.display, theme.font_size))
+        .map(|p| {
+            let (w, h) = actor_size(&p.display, theme.font_size);
+            // A stick-figure `actor` needs a taller header row than a compact
+            // participant box so its full-size figure isn't squeezed (#329).
+            if matches!(p.kind, ParticipantKind::Actor) {
+                (w, h.max(actor_figure_height(&p.display)))
+            } else {
+                (w, h)
+            }
+        })
         .collect();
     let actor_h = sizes.iter().map(|s| s.1).fold(ACTOR_H, f64::max);
 
