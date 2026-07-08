@@ -59,14 +59,27 @@ Parser: `src/parse/zenuml/` · Renderer: `src/svg/sequence/zenuml.rs`
 is set. It reuses the shared layout pass (`layout_items`), activation bands
 (`draw_activations`), and message drawing, but swaps in ZenUML chrome:
 
-- **Hierarchical numbering** — `number_calls` walks the event list keeping an
-  activation-depth counter stack: each forward call (solid arrow) increments the
-  counter at its level and its `Activate` pushes a fresh child level, yielding
-  `1`, `1.1`, `1.1.1`, `1.2`…. Dashed returns are not numbered.
-- **Top-only participants** — `draw_participant` frames each stereotype/actor
-  glyph in a bordered box drawn once at the top; there is no bottom actor row.
-- **Fragment chrome** — `draw_block_frames(…, zenuml=true)` draws a shaded header
-  band with the operator + condition (instead of a corner tab) and shades the
-  `else`/`catch` region.
+- **Hierarchical numbering** (`number_calls`) — walks the event list keeping an
+  activation-depth counter stack. Every message increments the counter at the
+  current level; an `Activate` pushes a fresh child level; a fragment
+  (`BlockOpen`) is itself a numbered step that opens its own level. **Dashed
+  returns are numbered too** (#315): a call's own reply (`x = A.m()` assignment
+  return) is emitted after the receiver's `Deactivate`, so it is recognised as
+  the dashed message right after `Deactivate(id)` whose `from` is `id` and
+  numbered as the last child of the call's frame; explicit `return`s sit inside
+  the body and number at their own level. This yields `1`, `1.1`, `1.1.1`,
+  `1.1.1.1 found`, `1.1.2.1 token`, `1.1.2.2 denied`, `1.2`. The number is drawn
+  as a gray inline `<span>` so the label text keeps its own color; explicit `->`
+  calls classify as `SolidArrow` (filled head) like `->>`, so the first message
+  gets an arrowhead too.
+- **Top-only participants** — `draw_participant` draws a white, gray-bordered box
+  once at the top (no bottom actor row). Stereotype/actor kinds get a glyph in a
+  left icon column (`draw_participant_icon`, sharing `draw_glyph_shape` with the
+  header layout) with the name centered in the space beside it, so the icon no
+  longer overlaps the name.
+- **Fragment chrome** — `draw_block_frames(…, zenuml=true)` draws a `◇ Operator`
+  header row (no gray bar) with a divider beneath it and the guard `[ … ]` on its
+  own row; the `else`/`catch` compartment gets a divider + `[ … ]` guard and is
+  **not** shaded.
 - **Title frame** — the whole diagram is wrapped in a frame whose top-left tab
   carries the title, rather than a centered heading. Lifelines are solid.

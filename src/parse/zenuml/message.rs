@@ -102,8 +102,11 @@ impl Parser {
     /// Resolve a call's `from`/`to`/`text`/`arrow`. Returns `None` for an empty
     /// statement that names no participant.
     fn classify_call(&mut self, rhs: &str, ctx: Option<&str>) -> Option<Call> {
-        // Explicit arrow form: `A ->> B: msg` or `A -> B.method()`.
-        for (sep, arrow) in [("->>", ArrowKind::SolidArrow), ("->", ArrowKind::Solid)] {
+        // Explicit arrow form: `A ->> B: msg` or `A -> B.method()`. Both ZenUML
+        // arrows are synchronous calls and carry a filled arrowhead (unlike a
+        // classic-sequence `->`, which is a bare line) — so the first
+        // `User -> Page.login(...)` message is drawn with a head like the rest.
+        for sep in ["->>", "->"] {
             if let Some((left, right)) = rhs.split_once(sep) {
                 let from = left.trim().to_string();
                 let right = right.trim();
@@ -118,7 +121,7 @@ impl Parser {
                     from,
                     to,
                     text,
-                    arrow,
+                    arrow: ArrowKind::SolidArrow,
                 });
             }
         }

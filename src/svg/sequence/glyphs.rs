@@ -36,11 +36,25 @@ pub(super) fn draw_actor(
 
 /// The four UML robustness / persistence stereotype glyphs drawn by ZenUML for
 /// `@Boundary`/`@Control`/`@Entity`/`@Database` participants.
-enum Glyph {
+pub(super) enum Glyph {
     Boundary,
     Control,
     Entity,
     Database,
+}
+
+impl Glyph {
+    /// The stereotype glyph for a participant kind, or `None` for a plain
+    /// participant / stick-figure actor (which draw their own way).
+    pub(super) fn from_kind(kind: ParticipantKind) -> Option<Self> {
+        match kind {
+            ParticipantKind::Boundary => Some(Glyph::Boundary),
+            ParticipantKind::Control => Some(Glyph::Control),
+            ParticipantKind::Entity => Some(Glyph::Entity),
+            ParticipantKind::Database => Some(Glyph::Database),
+            _ => None,
+        }
+    }
 }
 
 /// Draw a stereotype glyph centered on `cx` with the name below it, mirroring
@@ -54,14 +68,29 @@ fn draw_stereotype(
     theme: &Theme,
     glyph: Glyph,
 ) {
+    let r = 10.0;
+    let cy = top + r + 4.0;
+    draw_glyph_shape(svg, cx, cy, r, &glyph, theme);
+    draw_figure_name(svg, cx, top, h, label, theme);
+}
+
+/// Draw a stereotype glyph shape centered on `(cx, cy)` with radius `r`. Shared
+/// by the top-header layout (name below, [`draw_stereotype`]) and ZenUML's box
+/// layout (name to the right, [`draw_participant_icon`]).
+pub(super) fn draw_glyph_shape(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    glyph: &Glyph,
+    theme: &Theme,
+) {
     let stroke = &theme.actor_stroke;
     let fill = &theme.actor_fill;
     let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
     let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
     let path_attrs = format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
 
-    let r = 10.0;
-    let cy = top + r + 4.0;
     match glyph {
         Glyph::Boundary => {
             // Circle with a vertical bar to its left joined by a short stem.
@@ -88,7 +117,7 @@ fn draw_stereotype(
             let rx = r;
             let ry = r * 0.4;
             let cyl_h = r * 1.6;
-            let tcy = top + ry + 4.0;
+            let tcy = cy - 0.8 * r;
             let bcy = tcy + cyl_h;
             svg.rect(
                 cx - rx,
@@ -129,8 +158,41 @@ fn draw_stereotype(
             );
         }
     }
+}
 
-    draw_figure_name(svg, cx, top, h, label, theme);
+/// Draw the stereotype/actor icon for a ZenUML participant box, centered on
+/// `(cx, cy)` — the icon sits to the *left* of the name (issue #315), unlike the
+/// top-header layout where it sits above.
+pub(super) fn draw_participant_icon(
+    svg: &mut SvgBuilder,
+    cx: f64,
+    cy: f64,
+    kind: ParticipantKind,
+    theme: &Theme,
+) {
+    match Glyph::from_kind(kind) {
+        Some(glyph) => draw_glyph_shape(svg, cx, cy, 8.0, &glyph, theme),
+        None if matches!(kind, ParticipantKind::Actor) => draw_actor_icon(svg, cx, cy, theme),
+        None => {}
+    }
+}
+
+/// A compact stick figure centered on `(cx, cy)` for a ZenUML participant box.
+fn draw_actor_icon(svg: &mut SvgBuilder, cx: f64, cy: f64, theme: &Theme) {
+    let stroke = &theme.actor_stroke;
+    let fill = &theme.actor_fill;
+    let attrs = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"");
+    let line_attrs = format!("stroke=\"{stroke}\" stroke-width=\"1.5\"");
+    let head_r = 5.0;
+    let head_cy = cy - 9.0;
+    let body_top = head_cy + head_r;
+    let body_bot = body_top + 9.0;
+    let arm_y = body_top + 3.0;
+    svg.circle(cx, head_cy, head_r, &attrs);
+    svg.line(cx, body_top, cx, body_bot, &line_attrs);
+    svg.line(cx - 7.0, arm_y, cx + 7.0, arm_y, &line_attrs);
+    svg.line(cx, body_bot, cx - 5.0, body_bot + 7.0, &line_attrs);
+    svg.line(cx, body_bot, cx + 5.0, body_bot + 7.0, &line_attrs);
 }
 
 /// Draw a participant's name lines below its glyph, clamped inside the actor's
