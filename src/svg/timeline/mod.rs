@@ -1,6 +1,8 @@
-//! Timeline renderer. Periods are spaced evenly along an axis with their events
-//! stacked beside them and sections drawn as colored bands. The axis is
-//! horizontal by default; `direction TB`/`TD`/`BT` renders it vertically.
+//! Timeline renderer. Matches upstream Mermaid's block-and-arrow design: a
+//! saturated section band tops each group, filled period boxes sit above a thick
+//! arrow axis, filled event boxes hang below, and a dashed connector runs from
+//! each period through the axis down to its events. The axis is horizontal by
+//! default; `direction TB`/`TD`/`BT` renders it vertically.
 
 use crate::parse::TimelineDiagram;
 
@@ -9,23 +11,62 @@ use super::theme::Theme;
 
 const PAD: f64 = 30.0;
 const TITLE_GAP: f64 = 32.0;
-const SECTION_BAND: f64 = 26.0;
-const PERIOD_GAP: f64 = 140.0;
-const AXIS_Y_OFFSET: f64 = 60.0;
-const EVENT_BOX_H: f64 = 36.0;
-const EVENT_GAP: f64 = 8.0;
-const EVENT_BOX_W: f64 = 120.0;
-/// Approx. chars that fit on one line inside an event box at font-size 12.
+const SECTION_H: f64 = 40.0;
+const SECTION_GAP: f64 = 10.0;
+const PERIOD_H: f64 = 44.0;
+const PERIOD_GAP: f64 = 150.0;
+/// Horizontal inset of a box inside its period column (both sides).
+const BOX_INSET: f64 = 12.0;
+/// Gap between the period boxes and the axis, and between the axis and events.
+const AXIS_GAP: f64 = 32.0;
+const EVENT_BOX_H: f64 = 40.0;
+const EVENT_GAP: f64 = 10.0;
+/// Approx. chars that fit on one line inside a box at font-size 12.
 const EVENT_WRAP: usize = 18;
-/// Vertical layout: gap left of the axis (mirrors `AXIS_Y_OFFSET`) and the width
-/// reserved for the period label sitting to the axis's right, before events.
-const AXIS_LEFT_GAP: f64 = 20.0;
-const PERIOD_LABEL_W: f64 = 70.0;
+const BOX_RX: &str = "6";
+
+mod vertical;
 
 /// `direction TB`/`TD`/`BT` render the timeline vertically (time top→bottom);
 /// `LR`/`RL`/unset keep the default horizontal layout.
 fn is_vertical(direction: &Option<String>) -> bool {
     matches!(direction.as_deref(), Some("TB" | "TD" | "BT"))
+}
+
+/// Categorical color for a period. Upstream colors by section; a sectionless
+/// timeline advances per time-period (`isWithoutSections`) unless
+/// `timeline.disableMulticolor` pins it to one flat color.
+fn period_color(
+    theme: &Theme,
+    has_named_section: bool,
+    disable_multicolor: bool,
+    si: usize,
+    idx: usize,
+) -> &str {
+    let ci = if has_named_section {
+        si
+    } else if disable_multicolor {
+        0
+    } else {
+        idx
+    };
+    theme.cscale_color(ci)
+}
+
+/// Legible text color for a filled box: white on a dark fill, dark ink otherwise
+/// (upstream picks a contrasting label color per section color).
+fn text_color_for(fill: &str) -> &'static str {
+    if let Some(hex) = fill.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255) as f64;
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255) as f64;
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255) as f64;
+            if 0.299 * r + 0.587 * g + 0.114 * b < 140.0 {
+                return "#fff";
+            }
+        }
+    }
+    "#333"
 }
 
 /// `(max events on any one period, uniform event-box height)`. The tallest
@@ -76,26 +117,69 @@ fn wrap_event(text: &str) -> Vec<String> {
     lines
 }
 
+/// Draw a filled rounded box with a centered label in a contrasting ink.
+#[allow(clippy::too_many_arguments)]
+fn box_label(
+    svg: &mut SvgBuilder,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    color: &str,
+    class: &str,
+    label: &str,
+    font_size: u32,
+    bold: bool,
+) {
+    svg.rect(
+        x,
+        y,
+        w,
+        h,
+        &format!("class=\"{class}\" fill=\"{color}\" stroke=\"{color}\" stroke-width=\"1\" rx=\"{BOX_RX}\""),
+    );
+    let weight = if bold { " font-weight=\"bold\"" } else { "" };
+    svg.text(
+        x + w / 2.0,
+        y + h / 2.0 + 4.0,
+        &format!(
+            "text-anchor=\"middle\" fill=\"{ink}\" font-size=\"{font_size}\"{weight}",
+            ink = text_color_for(color)
+        ),
+        label,
+    );
+}
+
 pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     if is_vertical(&d.direction) {
-        return render_vertical(d, theme);
+        return vertical::render(d, theme);
     }
     let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
 
     let total_periods: usize = d.sections.iter().map(|s| s.periods.len()).sum();
     let (max_events, event_box_h) = event_layout(d, theme);
 
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
     let has_named_section = d.sections.iter().any(|s| s.name.is_some());
-    let band_h = if has_named_section { SECTION_BAND } else { 0.0 };
+    let band_h = if has_named_section {
+        SECTION_H + SECTION_GAP
+    } else {
+        0.0
+    };
 
     let chart_w = (total_periods.max(1) as f64) * PERIOD_GAP;
     let width = PAD * 2.0 + chart_w;
-    let events_h = max_events as f64 * (event_box_h + EVENT_GAP) + EVENT_GAP;
-    let height = PAD * 2.0 + title_h + band_h + AXIS_Y_OFFSET + events_h + 30.0;
+    let events_h = max_events as f64 * (event_box_h + EVENT_GAP);
+
+    let band_y = PAD + title_h;
+    let period_y = band_y + band_h;
+    let axis_y = period_y + PERIOD_H + AXIS_GAP;
+    let events_y0 = axis_y + AXIS_GAP;
+    let height = events_y0 + events_h + PAD;
+    let chart_left = PAD;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
+    svg.def_arrow_marker("tl-arrow", fg, 8, 9);
 
     if let Some(t) = &d.title {
         svg.text(
@@ -106,227 +190,93 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
         );
     }
 
-    let band_y = PAD + title_h;
-    let axis_y = band_y + band_h + AXIS_Y_OFFSET;
-    let chart_left = PAD;
-
-    // Section bands.
+    // Section bands: one saturated header per named section spanning its columns.
     let mut x = chart_left;
     for (si, sec) in d.sections.iter().enumerate() {
         let w = sec.periods.len() as f64 * PERIOD_GAP;
-        if w > 0.0 && sec.name.is_some() {
-            let color = theme.cscale_color(si);
-            svg.rect(
-                x,
-                band_y,
-                w,
-                SECTION_BAND - 4.0,
-                &format!(
-                    "fill=\"{color}\" fill-opacity=\"0.25\" stroke=\"{color}\" stroke-width=\"1\""
-                ),
-            );
+        if w > 0.0 {
             if let Some(name) = &sec.name {
-                svg.text(
-                    x + w / 2.0,
-                    band_y + SECTION_BAND / 2.0 + 2.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
+                let color = theme.cscale_color(si);
+                box_label(
+                    &mut svg,
+                    x + 3.0,
+                    band_y,
+                    w - 6.0,
+                    SECTION_H,
+                    color,
+                    "tl-section",
                     name,
+                    14,
+                    true,
                 );
             }
         }
         x += w;
     }
 
-    // Axis line.
+    // Periods above the axis, events below, a dashed connector through both.
+    let mut idx = 0usize;
+    for (si, sec) in d.sections.iter().enumerate() {
+        for period in &sec.periods {
+            let color = period_color(theme, has_named_section, d.disable_multicolor, si, idx);
+            let col_x = chart_left + idx as f64 * PERIOD_GAP;
+            let cx = col_x + PERIOD_GAP / 2.0;
+            let box_x = col_x + BOX_INSET;
+            let box_w = PERIOD_GAP - 2.0 * BOX_INSET;
+
+            let events_bottom = if period.events.is_empty() {
+                axis_y
+            } else {
+                events_y0 + period.events.len() as f64 * (event_box_h + EVENT_GAP) - EVENT_GAP
+            };
+            svg.line(
+                cx,
+                period_y + PERIOD_H,
+                cx,
+                events_bottom,
+                &format!("stroke=\"{color}\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\""),
+            );
+
+            box_label(
+                &mut svg,
+                box_x,
+                period_y,
+                box_w,
+                PERIOD_H,
+                color,
+                "tl-period",
+                &period.label,
+                13,
+                true,
+            );
+
+            for (ei, ev) in period.events.iter().enumerate() {
+                let ey = events_y0 + ei as f64 * (event_box_h + EVENT_GAP);
+                box_label(
+                    &mut svg,
+                    box_x,
+                    ey,
+                    box_w,
+                    event_box_h,
+                    color,
+                    "tl-event",
+                    &wrap_event(ev).join("\n"),
+                    12,
+                    false,
+                );
+            }
+            idx += 1;
+        }
+    }
+
+    // Thick arrow axis, drawn on top of the dashed connectors it crosses.
     svg.line(
         chart_left,
         axis_y,
         chart_left + chart_w,
         axis_y,
-        &format!("stroke=\"{fg_muted}\" stroke-width=\"2\""),
+        &format!("stroke=\"{fg}\" stroke-width=\"2.5\" marker-end=\"url(#tl-arrow)\""),
     );
-
-    // Periods: tick, label, events. Upstream colors by section, but a
-    // sectionless timeline advances the color per time-period instead
-    // (unless `timeline.disableMulticolor` is set, keeping it one flat color).
-    let mut idx = 0usize;
-    for (si, sec) in d.sections.iter().enumerate() {
-        for period in &sec.periods {
-            let color_idx = if has_named_section {
-                si
-            } else if d.disable_multicolor {
-                0
-            } else {
-                idx
-            };
-            let color = theme.cscale_color(color_idx);
-            let cx = chart_left + idx as f64 * PERIOD_GAP + PERIOD_GAP / 2.0;
-            svg.circle(
-                cx,
-                axis_y,
-                6.0,
-                &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\""),
-            );
-            svg.text(
-                cx,
-                axis_y + 22.0,
-                &format!(
-                    "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""
-                ),
-                &period.label,
-            );
-
-            for (ei, ev) in period.events.iter().enumerate() {
-                let ey = axis_y + 36.0 + ei as f64 * (event_box_h + EVENT_GAP);
-                let ex = cx - EVENT_BOX_W / 2.0;
-                svg.rect(
-                    ex,
-                    ey,
-                    EVENT_BOX_W,
-                    event_box_h,
-                    &format!("fill=\"{color}\" fill-opacity=\"0.15\" stroke=\"{color}\" stroke-width=\"1\" rx=\"4\""),
-                );
-                svg.text(
-                    cx,
-                    ey + event_box_h / 2.0 + 4.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-                    &wrap_event(ev).join("\n"),
-                );
-            }
-            idx += 1;
-        }
-    }
-
-    svg.finish()
-}
-
-/// Vertical timeline (`direction TB`/`TD`/`BT`): the axis runs down the left,
-/// periods stack top→bottom with their labels to the right of the axis, and each
-/// period's events flow rightward in a row. Sections become colored bands down
-/// the left margin. This is the horizontal layout rotated a quarter turn.
-fn render_vertical(d: &TimelineDiagram, theme: &Theme) -> String {
-    let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
-
-    let total_periods: usize = d.sections.iter().map(|s| s.periods.len()).sum();
-    let (max_events, event_box_h) = event_layout(d, theme);
-
-    let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
-    let has_named_section = d.sections.iter().any(|s| s.name.is_some());
-    let band_w = if has_named_section { SECTION_BAND } else { 0.0 };
-
-    let axis_x = PAD + band_w + AXIS_LEFT_GAP;
-    let events_x0 = axis_x + PERIOD_LABEL_W;
-    let events_w = max_events as f64 * (EVENT_BOX_W + EVENT_GAP) + EVENT_GAP;
-
-    let chart_h = (total_periods.max(1) as f64) * PERIOD_GAP;
-    let width = events_x0 + events_w + PAD;
-    let height = PAD * 2.0 + title_h + chart_h;
-
-    let mut svg = SvgBuilder::new(width, height).theme(theme);
-
-    if let Some(t) = &d.title {
-        svg.text(
-            width / 2.0,
-            PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
-            t,
-        );
-    }
-
-    let chart_top = PAD + title_h;
-
-    // Section bands (vertical strips down the left margin).
-    let mut y = chart_top;
-    for (si, sec) in d.sections.iter().enumerate() {
-        let h = sec.periods.len() as f64 * PERIOD_GAP;
-        if h > 0.0 && sec.name.is_some() {
-            let color = theme.cscale_color(si);
-            svg.rect(
-                PAD,
-                y,
-                SECTION_BAND - 4.0,
-                h,
-                &format!(
-                    "fill=\"{color}\" fill-opacity=\"0.25\" stroke=\"{color}\" stroke-width=\"1\""
-                ),
-            );
-            if let Some(name) = &sec.name {
-                let bx = PAD + (SECTION_BAND - 4.0) / 2.0;
-                let by = y + h / 2.0;
-                svg.text(
-                    bx,
-                    by,
-                    &format!(
-                        "text-anchor=\"middle\" transform=\"rotate(-90 {bx} {by})\" \
-                         fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\"",
-                        bx = super::builder::fnum(bx),
-                        by = super::builder::fnum(by),
-                    ),
-                    name,
-                );
-            }
-        }
-        y += h;
-    }
-
-    // Axis line (vertical).
-    svg.line(
-        axis_x,
-        chart_top,
-        axis_x,
-        chart_top + chart_h,
-        &format!("stroke=\"{fg_muted}\" stroke-width=\"2\""),
-    );
-
-    // Periods: marker on the axis, label to its right, events flowing rightward.
-    let mut idx = 0usize;
-    for (si, sec) in d.sections.iter().enumerate() {
-        for period in &sec.periods {
-            let color_idx = if has_named_section {
-                si
-            } else if d.disable_multicolor {
-                0
-            } else {
-                idx
-            };
-            let color = theme.cscale_color(color_idx);
-            let cy = chart_top + idx as f64 * PERIOD_GAP + PERIOD_GAP / 2.0;
-            svg.circle(
-                axis_x,
-                cy,
-                6.0,
-                &format!("fill=\"{color}\" stroke=\"#fff\" stroke-width=\"2\""),
-            );
-            svg.text(
-                axis_x + 14.0,
-                cy + 4.0,
-                &format!(
-                    "text-anchor=\"start\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""
-                ),
-                &period.label,
-            );
-
-            for (ei, ev) in period.events.iter().enumerate() {
-                let ex = events_x0 + ei as f64 * (EVENT_BOX_W + EVENT_GAP);
-                let ey = cy - event_box_h / 2.0;
-                svg.rect(
-                    ex,
-                    ey,
-                    EVENT_BOX_W,
-                    event_box_h,
-                    &format!("fill=\"{color}\" fill-opacity=\"0.15\" stroke=\"{color}\" stroke-width=\"1\" rx=\"4\""),
-                );
-                svg.text(
-                    ex + EVENT_BOX_W / 2.0,
-                    ey + event_box_h / 2.0 + 4.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-                    &wrap_event(ev).join("\n"),
-                );
-            }
-            idx += 1;
-        }
-    }
 
     svg.finish()
 }
@@ -354,6 +304,30 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">2002<"));
         assert!(svg.contains(">LinkedIn<"));
+    }
+
+    #[test]
+    fn block_and_arrow_model() {
+        // Filled period/event boxes + a thick arrow axis, not dots on a line.
+        let d = TimelineDiagram {
+            title: None,
+            sections: vec![TimelineSection {
+                name: Some("Era".into()),
+                periods: vec![TimelinePeriod {
+                    label: "2002".into(),
+                    events: vec!["LinkedIn".into()],
+                }],
+            }],
+            direction: None,
+            disable_multicolor: false,
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(!svg.contains("<circle"), "no dot markers");
+        assert!(svg.contains("class=\"tl-section\""));
+        assert!(svg.contains("class=\"tl-period\""));
+        assert!(svg.contains("class=\"tl-event\""));
+        assert!(svg.contains("marker-end=\"url(#tl-arrow)\""), "arrow axis");
+        assert!(svg.contains("stroke-dasharray"), "dashed connector");
     }
 
     #[test]
@@ -415,11 +389,15 @@ mod tests {
         assert!(!svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
     }
 
-    /// `(cx, cy)` of each period marker (`r="6"` circle) in source order.
+    /// `(cx, cy)` of each period box (`class="tl-period"` rect) in source order.
     fn period_markers(svg: &str) -> Vec<(f64, f64)> {
-        svg.split("<circle ")
-            .filter(|c| c.contains("r=\"6\""))
-            .filter_map(|c| Some((attr(c, "cx=\"")?, attr(c, "cy=\"")?)))
+        svg.split("<rect ")
+            .filter(|c| c.contains("class=\"tl-period\""))
+            .filter_map(|c| {
+                let (x, y) = (attr(c, "x=\"")?, attr(c, "y=\"")?);
+                let (w, h) = (attr(c, "width=\"")?, attr(c, "height=\"")?);
+                Some((x + w / 2.0, y + h / 2.0))
+            })
             .collect()
     }
 
@@ -452,26 +430,26 @@ mod tests {
 
     #[test]
     fn vertical_direction_stacks_periods_top_down() {
-        // `direction TD` runs the axis vertically: period markers share an x and
+        // `direction TD` runs the axis vertically: period boxes share an x and
         // advance in y (#227).
         let svg = render(&two_periods(Some("TD".into())), &Theme::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">2002<") && svg.contains(">LinkedIn<"));
         let m = period_markers(&svg);
         assert_eq!(m.len(), 2);
-        assert!((m[0].0 - m[1].0).abs() < 0.01, "markers share the axis x");
+        assert!((m[0].0 - m[1].0).abs() < 0.01, "boxes share the axis x");
         assert!(m[0].1 < m[1].1, "periods advance downward");
     }
 
     #[test]
     fn horizontal_direction_keeps_periods_left_to_right() {
-        // The default/`LR` layout runs the axis horizontally: markers share a y
+        // The default/`LR` layout runs the axis horizontally: boxes share a y
         // and advance in x — the opposite axis from vertical.
         for dir in [None, Some("LR".into())] {
             let svg = render(&two_periods(dir), &Theme::default());
             let m = period_markers(&svg);
             assert_eq!(m.len(), 2);
-            assert!((m[0].1 - m[1].1).abs() < 0.01, "markers share the axis y");
+            assert!((m[0].1 - m[1].1).abs() < 0.01, "boxes share the axis y");
             assert!(m[0].0 < m[1].0, "periods advance rightward");
         }
     }
@@ -483,5 +461,12 @@ mod tests {
             wrap_event("Decentralized Social Networking"),
             vec!["Decentralized".to_string(), "Social Networking".to_string()]
         );
+    }
+
+    #[test]
+    fn text_color_contrasts_with_fill() {
+        assert_eq!(text_color_for("#B9B9FF"), "#333");
+        assert_eq!(text_color_for("#444"), "#333"); // 3-digit hex is left as ink
+        assert_eq!(text_color_for("#444444"), "#fff");
     }
 }
