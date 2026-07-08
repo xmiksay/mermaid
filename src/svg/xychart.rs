@@ -96,6 +96,11 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
     if (vmax - vmin).abs() < 1e-9 {
         vmax = vmin + 1.0;
     }
+    // Round the value domain to "nice" bounds and derive round tick values so
+    // the axis reads 4000, 4500, … rather than the raw 1/5-range divisions.
+    let (nice_min, nice_max, value_ticks) = nice_ticks(vmin, vmax);
+    vmin = nice_min;
+    vmax = nice_max;
 
     let n = d
         .series
@@ -166,9 +171,8 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         }
     };
 
-    // Value ticks (5 divisions) with grid lines and labels.
-    for i in 0..=5 {
-        let v = vmin + (vmax - vmin) * (i as f64 / 5.0);
+    // Value ticks (nice round values) with grid lines and labels.
+    for &v in &value_ticks {
         let p = value_pos(v);
         if horiz {
             svg.line(
@@ -424,10 +428,94 @@ fn draw_point_label(svg: &mut SvgBuilder, x: f64, y: f64, horiz: bool, fg: &str,
     );
 }
 
+/// Round a value domain to "nice" bounds and enumerate round tick values,
+/// mirroring d3's `ticks()`/`nice()`: pick a step of 1/2/5 × 10^k so ~10 ticks
+/// fit the span, then extend the domain out to the nearest step multiples.
+/// Returns `(nice_min, nice_max, ticks)`.
+fn nice_ticks(vmin: f64, vmax: f64) -> (f64, f64, Vec<f64>) {
+    const TARGET: f64 = 10.0;
+    let step = tick_step(vmax - vmin, TARGET);
+    let lo = (vmin / step).floor() * step;
+    let hi = (vmax / step).ceil() * step;
+    let count = ((hi - lo) / step).round().max(1.0) as usize;
+    let ticks = (0..=count).map(|i| lo + i as f64 * step).collect();
+    (lo, hi, ticks)
+}
+
+/// The "nice" step size (1/2/5 × 10^k) that fits roughly `count` ticks across
+/// `span`, matching d3's `tickStep`.
+fn tick_step(span: f64, count: f64) -> f64 {
+    let step0 = span.abs() / count.max(1.0);
+    let mag = 10f64.powf(step0.log10().floor());
+    let error = step0 / mag;
+    // d3's thresholds: √50, √10, √2.
+    let factor = if error >= 50f64.sqrt() {
+        10.0
+    } else if error >= 10f64.sqrt() {
+        5.0
+    } else if error >= 2f64.sqrt() {
+        2.0
+    } else {
+        1.0
+    };
+    factor * mag
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parse::{XyAxis, XyAxisKind, XySeries, XySeriesKind};
+
+    #[test]
+    fn nice_ticks_produce_round_steps() {
+        // The 4000–11000 sample range: d3-style nice steps of 500.
+        let (lo, hi, ticks) = nice_ticks(4000.0, 11000.0);
+        assert_eq!(lo, 4000.0);
+        assert_eq!(hi, 11000.0);
+        assert_eq!(
+            ticks,
+            vec![
+                4000.0, 4500.0, 5000.0, 5500.0, 6000.0, 6500.0, 7000.0, 7500.0, 8000.0, 8500.0,
+                9000.0, 9500.0, 10000.0, 10500.0, 11000.0
+            ]
+        );
+
+        // A domain that needs extending: 3..97 → nice 0..100 step 10.
+        let (lo, hi, ticks) = nice_ticks(3.0, 97.0);
+        assert_eq!((lo, hi), (0.0, 100.0));
+        assert_eq!(ticks.first(), Some(&0.0));
+        assert_eq!(ticks.last(), Some(&100.0));
+        assert!(ticks.windows(2).all(|w| (w[1] - w[0] - 10.0).abs() < 1e-9));
+
+        // A small span picks a fractional step.
+        let (_, _, ticks) = nice_ticks(0.0, 1.0);
+        assert!(ticks.windows(2).all(|w| (w[1] - w[0] - 0.1).abs() < 1e-9));
+    }
+
+    #[test]
+    fn renders_nice_value_ticks_in_svg() {
+        let d = XyChartDiagram {
+            y_axis: Some(XyAxis {
+                title: None,
+                kind: XyAxisKind::Range {
+                    min: 4000.0,
+                    max: 11000.0,
+                },
+            }),
+            series: vec![XySeries {
+                kind: XySeriesKind::Bar,
+                title: None,
+                values: vec![5000.0, 9500.0],
+                labels: Vec::new(),
+            }],
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Round tick labels, not the old 1/5-range divisions (e.g. 5400).
+        assert!(svg.contains(">4500<"));
+        assert!(svg.contains(">10500<"));
+        assert!(!svg.contains(">5400<"));
+    }
 
     #[test]
     fn produces_svg() {

@@ -14,6 +14,12 @@ Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart.rs`.
   (quote-aware) into `XySeries.labels` (aligned with `values`, `None` when
   absent) and drawn beside each point. Category/value lists split **quote-aware**
   (`split_unquoted`) so a `"a, b"` cell survives the comma.
+- xychart value-axis ticks are **"nice" round values**, not raw 1/5-range
+  divisions: `nice_ticks`/`tick_step` pick a step of 1/2/5 × 10^k so ~10 ticks
+  fit the span and extend the value domain out to the nearest step multiples
+  (d3's `ticks()`/`nice()`), so a 4000–11000 range reads 4000, 4500, … 11000.
+  The niced bounds also become `vmin`/`vmax`, so bars/points map through the
+  rounded domain.
 - xychart series accept an optional **quoted title** — `bar "Revenue" [..]` /
   `line "Trend" [..]` parses into `XySeries.title` and is now drawn in a
   **legend** row above the plot (`draw_legend`, upstream `showLegend` default on;
