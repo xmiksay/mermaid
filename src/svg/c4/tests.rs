@@ -438,6 +438,140 @@ fn boundary_type_overrides_kind_label() {
     assert!(!svg.contains("[Deployment Node]"));
 }
 
+fn system(alias: &str, label: &str, external: bool) -> C4Element {
+    C4Element {
+        kind: C4ElementKind::System,
+        alias: alias.into(),
+        label: label.into(),
+        descr: None,
+        technology: None,
+        sprite: None,
+        tags: None,
+        link: None,
+        external,
+        boundary_alias: None,
+        boundary_label: None,
+        boundary_kind: None,
+        boundary_type: None,
+        members: vec![],
+    }
+}
+
+fn rel(from: &str, to: &str, label: &str) -> C4Relation {
+    C4Relation {
+        from: from.into(),
+        to: to.into(),
+        label: label.into(),
+        technology: None,
+        sprite: None,
+        tags: None,
+        link: None,
+        direction: C4RelDirection::Default,
+        bidirectional: false,
+    }
+}
+
+/// The `samples/c4.mmd` System Context diagram (#258).
+fn context_sample() -> C4Diagram {
+    C4Diagram {
+        kind: C4Kind::Context,
+        title: Some("System Context diagram".into()),
+        elements: vec![
+            person("customerA", "Banking Customer"),
+            person("customerB", "Bank Employee"),
+            system("SystemAA", "Internet Banking", false),
+            system("SystemB", "Email", true),
+            system("SystemC", "Mainframe", true),
+        ],
+        relations: vec![
+            rel("customerA", "SystemAA", "Uses"),
+            rel("customerB", "SystemAA", "Supports"),
+            rel("SystemAA", "SystemB", "Sends emails"),
+            rel("SystemAA", "SystemC", "Reads/writes"),
+        ],
+        ..Default::default()
+    }
+}
+
+/// #258: persons are ranked above the systems they use, and the system they
+/// feed sits above the systems it in turn drives.
+#[test]
+fn context_tiers_persons_above_systems() {
+    let d = context_sample();
+    let (pos, _leaves, _routes) = layered_layout(&d, PAD, PAD + TITLE_GAP).expect("layered layout");
+    let y = |alias: &str| pos.get(alias).expect("placed").1;
+    assert!(
+        y("customerA") < y("SystemAA"),
+        "customerA must tier above the system"
+    );
+    assert!(
+        y("customerB") < y("SystemAA"),
+        "customerB must tier above the system"
+    );
+    assert!(
+        y("SystemAA") < y("SystemB"),
+        "downstream system must sit below"
+    );
+    assert!(
+        y("SystemAA") < y("SystemC"),
+        "downstream system must sit below"
+    );
+}
+
+/// #258 acceptance: no relation route crosses a node box that isn't one of its
+/// two endpoints (the Customer→Internet Banking edge used to pass through the
+/// Bank Employee box).
+#[test]
+fn context_edges_avoid_nonendpoint_boxes() {
+    let d = context_sample();
+    let (pos, _leaves, routes) = layered_layout(&d, PAD, PAD + TITLE_GAP).expect("layered layout");
+    for r in &d.relations {
+        let route = routes
+            .get(&(r.from.clone(), r.to.clone()))
+            .expect("relation routed");
+        for (alias, &rect) in &pos {
+            if *alias == r.from || *alias == r.to {
+                continue;
+            }
+            for seg in route.windows(2) {
+                assert!(
+                    !seg_intersects_rect(seg[0], seg[1], rect),
+                    "route {}->{} crosses box {alias}",
+                    r.from,
+                    r.to
+                );
+            }
+        }
+    }
+}
+
+/// True when the segment `a`–`b` touches the interior or border of `rect`.
+fn seg_intersects_rect(a: (f64, f64), b: (f64, f64), rect: (f64, f64, f64, f64)) -> bool {
+    let (rx, ry, rw, rh) = rect;
+    let inside = |p: (f64, f64)| p.0 >= rx && p.0 <= rx + rw && p.1 >= ry && p.1 <= ry + rh;
+    if inside(a) || inside(b) {
+        return true;
+    }
+    let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)];
+    for i in 0..4 {
+        if segs_cross(a, b, corners[i], corners[(i + 1) % 4]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn segs_cross(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), p4: (f64, f64)) -> bool {
+    let d = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| {
+        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    };
+    let d1 = d(p3, p4, p1);
+    let d2 = d(p3, p4, p2);
+    let d3 = d(p1, p2, p3);
+    let d4 = d(p1, p2, p4);
+    ((d1 > 0.0) != (d2 > 0.0)) && ((d3 > 0.0) != (d4 > 0.0))
+}
+
 #[test]
 fn layout_config_controls_shapes_per_row() {
     // With shape_in_row = 1 the two shapes stack vertically; default (4)
