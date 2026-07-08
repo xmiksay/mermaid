@@ -3,6 +3,11 @@
 Part of the [mermaid-svg architecture reference](../architecture.md).
 Parser: `src/parse/mindmap.rs` · Renderer: `src/svg/mindmap.rs`.
 
+**Upstream-compat gotcha:** a node whose label is the bare word `Mindmap`
+parses here but upstream 11.x's lexer treats it as the diagram keyword and
+errors (`got 'MINDMAP'`). The shipped `samples/mindmap.mmd` avoids the reserved
+word (`Mind maps`) so it stays dual-renderable.
+
 - mindmap `:::class1 class2` and `::icon(fa fa-book)` are **attachment lines**,
   not child nodes (`src/parse/mindmap.rs`): both attach to the most-recent node
   (`stack.last_mut()` / `root`), `:::` filling `MindmapNode.classes` and `::icon`
