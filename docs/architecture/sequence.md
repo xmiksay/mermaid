@@ -5,8 +5,12 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
 
 - Sequence parser has **nested items** (`Vec<SequenceItem>`) — `Alt`/`Par`/
   `Critical` blocks have branches; `Loop`/`Opt`/`Break` have label + items;
-  `Rect` has a color + items. Renderer draws labeled frames with tab labels
-  (`break` reuses the frame with a `break` title); `rect <color>` draws a
+  `Rect` has a color + items. Renderer draws labeled frames with **pentagon/flag
+  tab labels** and a **dotted, theme-colored border** (`draw_block_frame`, #268:
+  `stroke-dasharray="2 2"` in `theme.actor_stroke`, tab drawn as a beveled
+  `<path>`, guard/condition text centered in black; `else`/`and` dividers reuse
+  the same dotted stroke); `break` reuses the frame with a `break` title; `rect
+  <color>` draws a
   colored background band behind its items via a separate `draw_rect_bands`
   pass (paired `RectOpen`/`RectClose` events, LIFO stack, default fill
   `rgba(0,0,0,0.05)` when no color given). Block frames and rect bands are
@@ -22,10 +26,16 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   on and resets the counter to `start`; `autonumber off` → `None` turns it off
   for subsequent messages. `start`/`step` are **`f64`** (upstream v11.15+ accepts
   decimals — `autonumber 1.5 0.5`); the renderer threads a `&mut Numbering { on,
-  step }` plus an `f64` counter through `layout_items`, emitting
-  `"{n}. {text}"` for numbered messages (`fmt_seq_number` drops the decimal point
-  for integral values, so `2.0` shows as `2`). A non-positive step falls back to
-  `1.0`. `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
+  step }` plus an `f64` counter through `layout_items`, tagging each numbered
+  message with its number. A numbered message draws a **filled circle badge** on
+  the arrow origin (`draw_seq_number` in `src/svg/sequence/messages.rs`, radius
+  `SEQ_BADGE_R`, `theme.actor_stroke` fill, white number, #268) instead of a
+  `"1. "` text prefix; `fmt_seq_number` drops the decimal point for integral
+  values, so `2.0` shows as `2`. A non-positive step falls back to `1.0`.
+  `SequenceDiagram.autonumber` stays a bool flag ("was ever on").
+- Sequence **lifelines** are **solid** (no dash) in the `theme.lifeline` color
+  (default `#9370DB`, a purple-gray matching the actor border) rather than dashed
+  gray (#268).
 - Sequence **half arrows** (v11.12.3+) use upstream `sequenceDiagram.jison`'s
   spellings (#223): the barb is a *doubled* char — `\\` (upper) or `//` (lower)
   — or a single barb behind a `|` shaft (`-|\`, `-|/`). Dashed forms add a dash

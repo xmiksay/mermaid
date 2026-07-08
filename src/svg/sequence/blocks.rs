@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use crate::parse::{AltBranch, SequenceBlock, SequenceItem, SequenceRect};
 
+use crate::svg::builder::fnum;
+
 use super::*;
 
 pub(super) fn layout_items(
@@ -333,18 +335,21 @@ pub(super) fn draw_block_frames(
             EventKind::BlockBranch { label } => {
                 if let Some(&(_, _, _, min_x, max_x)) = stack.last() {
                     let y_branch = ev.y;
+                    let divider = &theme.actor_stroke;
                     svg.line(
                         min_x - 16.0,
                         y_branch,
                         max_x + 16.0,
                         y_branch,
-                        "stroke=\"#888\" stroke-width=\"1\" stroke-dasharray=\"4 3\"",
+                        &format!(
+                            "stroke=\"{divider}\" stroke-width=\"1\" stroke-dasharray=\"2 2\""
+                        ),
                     );
                     if !label.is_empty() {
                         svg.text(
-                            min_x + 4.0,
+                            (min_x + max_x) / 2.0,
                             y_branch - 4.0,
-                            &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
+                            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
                             &format!("[{label}]"),
                         );
                     }
@@ -375,15 +380,19 @@ fn draw_block_frame(
 ) {
     let fg = &theme.fg;
     let frame_label_fill = &theme.frame_label_fill;
+    let frame_stroke = &theme.actor_stroke;
     let frame_x = min_x - 16.0;
     let frame_w = (max_x + 16.0) - frame_x;
     let frame_h = y_bot - y_top;
+    // Dotted, theme-colored border (upstream's frame chrome).
     svg.rect(
         frame_x,
         y_top,
         frame_w,
         frame_h,
-        "fill=\"none\" stroke=\"#666\" stroke-width=\"1\"",
+        &format!(
+            "fill=\"none\" stroke=\"{frame_stroke}\" stroke-width=\"1\" stroke-dasharray=\"2 2\""
+        ),
     );
     let title = match kind {
         BlockKind::Alt => "alt",
@@ -393,13 +402,22 @@ fn draw_block_frame(
         BlockKind::Opt => "opt",
         BlockKind::Break => "break",
     };
-    // Label tab in upper-left
-    svg.rect(
-        frame_x,
-        y_top - 0.5,
-        BLOCK_LABEL_W,
-        18.0,
-        &format!("fill=\"{frame_label_fill}\" stroke=\"#666\" stroke-width=\"1\""),
+    // Pentagon/flag label tab in the upper-left: a rectangle with the
+    // bottom-right corner beveled (upstream's `.labelBox`).
+    let tab_h = 18.0;
+    let bevel = 7.0;
+    let tab = format!(
+        "M{x} {y}h{w}v{v}l-{b} {b}h-{hw}z",
+        x = fnum(frame_x),
+        y = fnum(y_top),
+        w = fnum(BLOCK_LABEL_W),
+        v = fnum(tab_h - bevel),
+        b = fnum(bevel),
+        hw = fnum(BLOCK_LABEL_W - bevel),
+    );
+    svg.path(
+        &tab,
+        &format!("fill=\"{frame_label_fill}\" stroke=\"{frame_stroke}\" stroke-width=\"1\""),
     );
     svg.text(
         frame_x + 6.0,
@@ -408,10 +426,12 @@ fn draw_block_frame(
         title,
     );
     if !label.is_empty() {
+        // Guard/condition text centered in the frame, black (upstream), not the
+        // gray italic that used to sit beside the tab.
         svg.text(
-            frame_x + BLOCK_LABEL_W + 8.0,
+            (min_x + max_x) / 2.0,
             y_top + 13.0,
-            &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
             &format!("[{label}]"),
         );
     }
@@ -451,13 +471,21 @@ mod tests {
     }
 
     #[test]
-    fn autonumber_prefixes_messages() {
+    fn autonumber_draws_circle_badges() {
+        // Numbered messages carry a filled circle badge on the arrow origin, not
+        // a `"1. "` text prefix (#268).
         let svg = render(
             &build("sequenceDiagram\nautonumber\nA->>B: x\nA->>B: y\n"),
             &Theme::default(),
         );
-        assert!(svg.contains(">1. x<"));
-        assert!(svg.contains(">2. y<"));
+        assert!(svg.contains("<circle"), "badge is a filled circle");
+        assert!(
+            svg.contains(">1<") && svg.contains(">2<"),
+            "badge numbers drawn"
+        );
+        // Message text keeps its own label with no numeric prefix.
+        assert!(svg.contains(">x<") && svg.contains(">y<"));
+        assert!(!svg.contains(">1. x<"), "no legacy text prefix");
     }
 
     #[test]
@@ -468,11 +496,11 @@ mod tests {
             ),
             &Theme::default(),
         );
-        assert!(svg.contains(">10. a<"));
-        assert!(svg.contains(">15. b<"));
-        // After `autonumber off`, subsequent messages carry no prefix.
+        assert!(svg.contains(">10<"));
+        assert!(svg.contains(">15<"));
+        // After `autonumber off`, subsequent messages carry no badge.
         assert!(svg.contains(">c<"));
-        assert!(!svg.contains(">20. c<"));
+        assert!(!svg.contains(">20<"));
     }
 
     #[test]
@@ -483,9 +511,9 @@ mod tests {
             &build("sequenceDiagram\nautonumber 1.5 0.5\nA->>B: a\nA->>B: b\nA->>B: c\n"),
             &Theme::default(),
         );
-        assert!(svg.contains(">1.5. a<"));
-        assert!(svg.contains(">2. b<"));
-        assert!(svg.contains(">2.5. c<"));
+        assert!(svg.contains(">1.5<"));
+        assert!(svg.contains(">2<"));
+        assert!(svg.contains(">2.5<"));
     }
 
     #[test]
@@ -543,6 +571,26 @@ mod tests {
         );
         assert!(!svg.contains("fill=\"#EEE\""));
         assert!(svg.contains(Theme::dark().frame_label_fill.as_ref()));
+    }
+
+    #[test]
+    fn alt_frame_is_dotted_themed_with_centered_guards() {
+        // Frame chrome: dotted theme-colored border + centered guard text, not
+        // the old solid-gray border with left-italic labels (#268).
+        let svg = render(
+            &build("sequenceDiagram\nA->>B: q\nalt cached\nA->>B: y\nelse miss\nA->>B: n\nend\n"),
+            &Theme::default(),
+        );
+        assert!(
+            !svg.contains("stroke=\"#666\""),
+            "no solid gray frame border"
+        );
+        // Dotted border/divider in the actor-stroke color (lifelines are solid).
+        assert!(svg.contains("stroke-dasharray=\"2 2\""));
+        assert!(svg.contains(&format!("stroke=\"{}\"", Theme::default().actor_stroke)));
+        // Guard text is centered (text-anchor middle), no longer italic.
+        assert!(svg.contains("[cached]") && svg.contains("[miss]"));
+        assert!(!svg.contains("font-style=\"italic\""));
     }
 
     #[test]
