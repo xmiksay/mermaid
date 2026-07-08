@@ -50,7 +50,11 @@ Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph.rs`.
   drop-then-run, `ELBOW_R = 10`) rather than S-curves; a merge arrow takes the
   incoming (source) branch color, a branch start the child color. Branch labels
   are **colored rounded pills** (`git_color` fill, `rx=10`, contrast text via
-  `label_text_color`); tags are **luggage-tag shapes** (`draw_tag`, pointed left
+  `label_text_color`) drawn in the **saturated** default `git0..7` lane colors:
+  `GIT_DEFAULT` in `src/svg/theme/palette.rs` bakes in upstream's 25% lightness
+  darken of the raw base colors, so main renders a saturated blue rather than
+  the washed-out pale lavender of issue #309. Tags are **luggage-tag shapes**
+  (`draw_tag`, pointed left
   edge + punch hole, upstream's `#fff5ad`/`#aaaa33` yellow). Auto commit ids are
   upstream-style `<seq>-<hash>` (`seq_hash`, a deterministic FNV digest of the
   commit's sequence number), not `c1`/`c2`.

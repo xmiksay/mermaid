@@ -13,7 +13,8 @@
 //! The default-theme values here are the exact colors upstream's `khroma`
 //! pipeline computes from `primaryColor #ECECFF` / `secondaryColor #ffffde`
 //! (hue-rotated + lightness-adjusted, the `cScale` set additionally darkened
-//! 10%). The dark/forest/neutral themes keep a single hand-tuned palette shared
+//! 10% and the `git` set darkened 25%). The dark/forest/neutral themes keep a
+//! single hand-tuned palette shared
 //! across all three scales — deriving via the upstream formulas would drive
 //! their already-dark or achromatic primaries to black/monochrome.
 
@@ -52,16 +53,19 @@ pub(super) const PIE_DEFAULT: [Str; 12] = [
     Cow::Borrowed("#FF5353"),
 ];
 
-/// `git0..7` lane scale for the default theme.
+/// `git0..7` lane scale for the default theme. Upstream's `theme-default.js`
+/// darkens each raw base color (`#ECECFF`, `#FFFFDE`, …) by 25% lightness in
+/// light mode before use; without that step the whole graph renders washed
+/// out (issue #309). These are the darkened lane colors.
 pub(super) const GIT_DEFAULT: [Str; 8] = [
-    Cow::Borrowed("#ECECFF"),
-    Cow::Borrowed("#FFFFDE"),
-    Cow::Borrowed("#F9FFEC"),
-    Cow::Borrowed("#ECF5FF"),
-    Cow::Borrowed("#ECFFFF"),
-    Cow::Borrowed("#ECFFF5"),
-    Cow::Borrowed("#FFECFF"),
-    Cow::Borrowed("#FFECEC"),
+    Cow::Borrowed("#6D6DFF"),
+    Cow::Borrowed("#FFFF5E"),
+    Cow::Borrowed("#D1FF6D"),
+    Cow::Borrowed("#6DB2FF"),
+    Cow::Borrowed("#6DFFFF"),
+    Cow::Borrowed("#6DFFB2"),
+    Cow::Borrowed("#FF6DFF"),
+    Cow::Borrowed("#FF6D6D"),
 ];
 
 /// Shared dark-theme palette (all three scales). Light pastels on the dark

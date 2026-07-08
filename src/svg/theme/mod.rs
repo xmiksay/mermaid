@@ -402,11 +402,13 @@ mod tests {
         // Pale-lavender / pale-yellow primaries, not the old saturated palette.
         assert_eq!(t.cscale_color(0), "#B9B9FF");
         assert_eq!(t.pie_color(0), "#ECECFF");
-        assert_eq!(t.git_color(0), "#ECECFF");
+        // git0..7 are the raw base colors darkened 25% (issue #309), so main
+        // renders a saturated blue rather than pale lavender.
+        assert_eq!(t.git_color(0), "#6D6DFF");
         // The three upstream scales genuinely differ past the shared primaries.
         assert_eq!(t.cscale_color(2), "#E8FFB9");
         assert_eq!(t.pie_color(2), "#B5FF20");
-        assert_eq!(t.git_color(2), "#F9FFEC");
+        assert_eq!(t.git_color(2), "#D1FF6D");
     }
 
     #[test]
