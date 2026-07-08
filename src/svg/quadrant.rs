@@ -83,9 +83,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
             svg.text(
                 x + half_w / 2.0,
                 y + 18.0,
-                &format!(
-                    "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""
-                ),
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\""),
                 l,
             );
         }
@@ -245,6 +243,10 @@ mod tests {
         assert!(svg.contains(">Chart<"));
         assert!(svg.contains(">A<"));
         assert!(svg.contains(">Q1<"));
+        // Quadrant names use upstream regular weight, not bold (#332); the
+        // title keeps its bold weight, matching upstream.
+        assert!(!svg.contains("font-weight=\"bold\">Q1<"));
+        assert!(svg.contains("font-weight=\"bold\">Chart</text>"));
     }
 
     #[test]

@@ -305,7 +305,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             svg.text(
                 PAD,
                 (section_top + y) / 2.0 + 4.0,
-                &format!("fill=\"{fg}\" font-size=\"{SECTION_FONT_SIZE}\" font-weight=\"bold\""),
+                &format!("fill=\"{fg}\" font-size=\"{SECTION_FONT_SIZE}\""),
                 &section.name,
             );
         }
@@ -621,6 +621,9 @@ mod tests {
         assert!(svg.contains("fill=\"#6666ff\" fill-opacity=\"0.098\""));
         assert!(svg.contains(">Design<"));
         assert!(svg.contains(">Build<"));
+        // Section labels use upstream regular weight, not bold (#332).
+        assert!(!svg.contains("font-weight=\"bold\">Design<"));
+        assert!(!svg.contains("font-weight=\"bold\">Build<"));
     }
 
     #[test]

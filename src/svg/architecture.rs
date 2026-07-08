@@ -220,7 +220,7 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         svg.text(
             text_x,
             y + 14.0,
-            &format!("fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""),
+            &format!("fill=\"{fg}\" font-size=\"12\""),
             label,
         );
     }
@@ -644,6 +644,8 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">DB<"));
         assert!(svg.contains(">API<"));
+        // Group labels use upstream regular weight, not bold (#332).
+        assert!(!svg.contains("font-weight=\"bold\">API<"));
     }
 
     #[test]

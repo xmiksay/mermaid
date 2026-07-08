@@ -49,7 +49,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         svg.text(
             width / 2.0,
             PAD + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\""),
             t,
         );
     }
@@ -515,6 +515,18 @@ mod tests {
         assert!(svg.contains(">4500<"));
         assert!(svg.contains(">10500<"));
         assert!(!svg.contains(">5400<"));
+    }
+
+    #[test]
+    fn title_uses_regular_weight() {
+        // Upstream renders the chart title at regular weight, not bold (#332).
+        let d = XyChartDiagram {
+            title: Some("Sales".into()),
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("font-size=\"18\">Sales</text>"));
+        assert!(!svg.contains("font-weight=\"bold\">Sales<"));
     }
 
     #[test]
