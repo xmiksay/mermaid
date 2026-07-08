@@ -3,6 +3,19 @@
 Part of the [mermaid-svg architecture reference](../architecture.md).
 Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_date.rs)`.
 
+- **Row layout matches upstream** (#245): one row *per task*, task names drawn
+  **in the chart** — centered inside the bar when `text_width` says the name
+  fits (`AXIS_LABEL_CHAR_W` at `TASK_FONT_SIZE`), otherwise just right of the
+  bar. There is no left task-name column; only **section names** live in the
+  left gutter, whose width (`section_gutter`) scales to the widest section
+  label (min `LABEL_GUTTER_MIN`, `0` when unnamed) so it stays narrow. Each
+  section draws a **full-width background band** behind its rows, cycling four
+  styles (`SECTION_BANDS`, upstream `section0..3`: pale lavender / blank /
+  pale-yellow / blank — the `(fill, fill-opacity)` pairs bake in upstream's
+  `.section { opacity: 0.2 }`). Section titles are vertically centered over
+  their band. Milestones render within their band; `vert` markers span the full
+  chart height and are excluded from row allocation (see the tag note below).
+
 - Gantt dates are **exact civil day-counts from the Unix epoch**
   (`src/svg/gantt_date.rs`: `days_from_civil`/`civil_from_days`/`weekday`, the
   Hinnant algorithms) — no more `365.25`-day drift. `parse_date` honors the
