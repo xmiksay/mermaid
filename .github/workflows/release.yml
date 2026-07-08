@@ -55,6 +55,11 @@ jobs:
     name: Publish to crates.io
     needs: coverage
     runs-on: ubuntu-latest
+    # crates.io requires Trusted Publishing (OIDC) for this crate; API tokens
+    # are rejected with 403. The auth action mints a short-lived token.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -70,7 +75,11 @@ jobs:
             exit 1
           fi
 
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Publish
         run: cargo publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

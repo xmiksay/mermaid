@@ -74,8 +74,8 @@ make package            # cargo package --allow-dirty
 `CARGO_BUILD_JOBS` is pinned to 4 in the Makefile (override per invocation).
 
 Release: bump `Cargo.toml` and push a matching `v<version>` tag — the Release
-workflow verifies with coverage and auto-publishes to crates.io
-(`CARGO_REGISTRY_TOKEN` secret).
+workflow verifies with coverage and auto-publishes to crates.io via
+Trusted Publishing (OIDC; token publishes are rejected by crates.io).
 
 Integration tests write one sample SVG per diagram kind to
 `target/test-samples/<stem>.svg` (one stem per `SAMPLES` entry in
