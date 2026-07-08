@@ -70,7 +70,28 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let body_h = n_rows as f64 * ROW_H;
     let label_gutter = section_gutter(d);
     let time_col_w = TIME_COL_MIN_W;
-    let width = label_gutter + time_col_w + PAD * 2.0;
+    let body_x = PAD + label_gutter;
+    let body_w = time_col_w;
+
+    // Axis ticks are needed both to size the canvas (the final tick label
+    // overhangs the chart's right edge) and to draw the axis below.
+    let ticks = axis_ticks(d, start_day, total_days, body_w);
+
+    // Upstream grows the canvas so the rightmost bar, its outside-placed label
+    // and the final axis tick label all fit — the chart body alone is not
+    // enough for a short bar labelled to its right near the chart end (#311).
+    // Keep at least the old minimum width so unaffected charts don't shift.
+    let content_right = content_right_extent(
+        d,
+        &resolved,
+        start_day,
+        total_days,
+        body_x,
+        body_w,
+        min_bar_dur,
+        &ticks,
+    );
+    let width = (content_right + PAD).max(label_gutter + time_col_w + PAD * 2.0);
     let height = HEADER_H + AXIS_H + body_h + PAD * 2.0;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
@@ -84,9 +105,6 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             t,
         );
     }
-
-    let body_x = PAD + label_gutter;
-    let body_w = time_col_w;
     // Upstream's default layout draws the axis at the bottom; `topAxis` moves it
     // to the top. `body_top` is where the task rows begin, `axis_y` the top of
     // the axis band (below the rows in the default layout).
@@ -110,7 +128,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         axis_line_y,
         "stroke=\"#999\" stroke-width=\"1\"",
     );
-    for (dx, label) in axis_ticks(d, start_day, total_days, body_w) {
+    for (dx, label) in &ticks {
         let x = body_x + dx;
         svg.line(
             x,
@@ -123,7 +141,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             x + 2.0,
             axis_y + 14.0,
             &format!("fill=\"{fg}\" font-size=\"11\""),
-            &label,
+            label,
         );
     }
 
@@ -312,6 +330,54 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
+}
+
+/// Rightmost pixel reached by content that can overhang the chart body: a bar's
+/// (or milestone's) label placed to the *right* of a short bar near the chart
+/// end, a `vert` marker's centered label, and the final axis tick label (drawn
+/// just past the last tick). Mirrors the label placement in `render` so the
+/// caller can grow the canvas to fit them (#311). Never returns less than the
+/// body's right edge.
+#[allow(clippy::too_many_arguments)]
+fn content_right_extent(
+    d: &GanttDiagram,
+    resolved: &[Resolved],
+    start_day: f64,
+    total_days: f64,
+    body_x: f64,
+    body_w: f64,
+    min_bar_dur: f64,
+    ticks: &[(f64, String)],
+) -> f64 {
+    let mut max_right = body_x + body_w;
+    let mut flat_idx = 0;
+    for section in &d.sections {
+        for task in &section.tasks {
+            let r = &resolved[flat_idx];
+            flat_idx += 1;
+            let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
+            let label_w = text_width(&task.name, AXIS_LABEL_CHAR_W, TASK_FONT_SIZE);
+            if task.vert {
+                // Centered label below the marker overhangs by half its width.
+                max_right = max_right.max(x + label_w / 2.0);
+            } else if task.milestone {
+                let rad = (BAR_H - 4.0) / 2.0;
+                max_right = max_right.max(x + rad + 4.0 + label_w);
+            } else {
+                let w = ((r.duration.max(min_bar_dur) / total_days) * body_w).max(2.0);
+                // Label sits right of the bar only when it does not fit inside.
+                if label_w + 8.0 > w {
+                    max_right = max_right.max(x + w + 4.0 + label_w);
+                }
+            }
+        }
+    }
+    // The final axis tick label is drawn at `tick x + 2.0`.
+    if let Some((dx, label)) = ticks.last() {
+        let x = body_x + dx;
+        max_right = max_right.max(x + 2.0 + text_width(label, AXIS_LABEL_CHAR_W, AXIS_FONT_SIZE));
+    }
+    max_right
 }
 
 /// Width of the left gutter reserved for section names: enough for the widest
@@ -911,6 +977,51 @@ mod tests {
         assert!(bottom.contains(&fnum(HEADER_H + body_h)));
         assert!(top.contains(&fnum(HEADER_H + AXIS_H - 1.0)));
         assert_ne!(bottom, top);
+    }
+
+    #[test]
+    fn rightmost_outside_label_fits_in_viewbox() {
+        // #311: the sample's `Integration` bar is short and near the chart end,
+        // so its label is drawn to the right of the bar. The viewBox width must
+        // grow to contain that overhanging label (and the last tick label).
+        let d = build(
+            "gantt\ntitle Release plan\ndateFormat YYYY-MM-DD\nexcludes weekends\nsection Design\nSpec : a1, 2026-01-01, 5d\nReview : after a1, 2d\nsection Build\nBackend : crit, b1, 2026-01-08, 1w\nFrontend : active, 2026-01-08, 1w\nInteger : after b1 a1, 3d\n",
+        );
+        let resolved = resolve_tasks(&d);
+        let (start, total, sub_day) = chart_span(&resolved);
+        let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
+        let label_gutter = section_gutter(&d);
+        let body_x = PAD + label_gutter;
+        let body_w = TIME_COL_MIN_W;
+        let ticks = axis_ticks(&d, start, total, body_w);
+        let content_right = content_right_extent(
+            &d,
+            &resolved,
+            start,
+            total,
+            body_x,
+            body_w,
+            min_bar_dur,
+            &ticks,
+        );
+
+        let svg = render(&d, &Theme::default());
+        let width: f64 = svg
+            .split("viewBox=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(2)
+            .unwrap()
+            .parse()
+            .unwrap();
+        // The overhanging label extends past the plain chart body; the canvas
+        // grew to fit it with padding to spare.
+        assert!(content_right > body_x + body_w);
+        assert!(width >= content_right + PAD - 1e-6);
     }
 
     #[test]
