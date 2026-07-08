@@ -15,6 +15,11 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   `.section { opacity: 0.2 }`). Section titles are vertically centered over
   their band. Milestones render within their band; `vert` markers span the full
   chart height and are excluded from row allocation (see the tag note below).
+  The chart body is a fixed-width column (`TIME_COL_MIN_W`), but the **canvas
+  grows past it** (`content_right_extent`, #311) so a short bar's label placed to
+  the *right* of the bar near the chart end, a `vert` marker's centered label,
+  and the final axis tick label are never clipped by the viewBox — upstream sizes
+  the SVG to fit the rightmost task plus its outside label the same way.
 
 - Gantt dates are **exact civil day-counts from the Unix epoch**
   (`src/svg/gantt_date.rs`: `days_from_civil`/`civil_from_days`/`weekday`, the
