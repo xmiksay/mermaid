@@ -9,13 +9,15 @@ use super::theme::Theme;
 
 const PAD: f64 = 30.0;
 const TITLE_GAP: f64 = 32.0;
-const RADIUS: f64 = 170.0;
+const RADIUS: f64 = 190.0;
 /// Room reserved around the rings for the axis labels (each side).
 const LABEL_PAD: f64 = 40.0;
 /// Width of the legend column to the right of the chart.
 const LEGEND_W: f64 = 160.0;
 /// Upstream `radar.curveTension` default for the closed cardinal spline.
 const DEFAULT_TENSION: f64 = 0.17;
+/// Half-length of the dark tick capping each spoke at the outer ring.
+const TICK_LEN: f64 = 4.0;
 
 pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
@@ -30,7 +32,8 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
     let m_right = d.margin_right.unwrap_or(PAD);
 
     // Overall SVG size — `config.radar.width/height` override the derived
-    // defaults (which reproduce the historical 640×480 / +title layout).
+    // defaults (680×520 / +title, sized so the disc fills the canvas like
+    // upstream).
     let default_chart_d = RADIUS * 2.0 + LABEL_PAD * 2.0;
     let default_width = m_left + m_right + default_chart_d + LEGEND_W;
     let default_height = m_top + m_bottom + title_h + default_chart_d;
@@ -88,33 +91,22 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
     let angle =
         |i: usize| -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / n as f64;
 
-    // Gridlines: `ticks` rings, drawn as concentric circles (default) or as
-    // polygon rings following the axis vertices.
+    // Graticule: a filled light-gray disc behind `ticks` fainter rings —
+    // matching upstream's solid disc + subtle ring outlines. Rings are drawn as
+    // concentric circles (default) or polygon rings following the axis vertices.
     let ticks = d.ticks.unwrap_or(5).max(1);
+    let disc_attrs = format!("fill=\"{fg_muted}\" fill-opacity=\"0.12\" stroke=\"none\"");
+    draw_ring(&mut svg, d.graticule, cx, cy, radius, n, &disc_attrs);
     for ring in 1..=ticks {
         let r = radius * (ring as f64 / ticks as f64);
-        let grid_attrs = format!("fill=\"none\" stroke=\"{fg_muted}\" stroke-width=\"1\"");
-        match d.graticule {
-            RadarGraticule::Circle => svg.circle(cx, cy, r, &grid_attrs),
-            RadarGraticule::Polygon => {
-                let mut path = String::new();
-                for i in 0..n {
-                    let a = angle(i);
-                    let x = cx + r * a.cos();
-                    let y = cy + r * a.sin();
-                    if i == 0 {
-                        let _ = write!(path, "M{} {}", fnum(x), fnum(y));
-                    } else {
-                        let _ = write!(path, "L{} {}", fnum(x), fnum(y));
-                    }
-                }
-                path.push('Z');
-                svg.path(&path, &grid_attrs);
-            }
-        }
+        let grid_attrs = format!(
+            "fill=\"none\" stroke=\"{fg_muted}\" stroke-opacity=\"0.35\" stroke-width=\"1\""
+        );
+        draw_ring(&mut svg, d.graticule, cx, cy, r, n, &grid_attrs);
     }
 
-    // Spokes + labels.
+    // Spokes + labels; each spoke is capped with a short dark tick perpendicular
+    // to it at the outer ring, as upstream draws.
     for (i, ax) in d.axes.iter().enumerate() {
         let a = angle(i);
         let ex = cx + radius * a.cos();
@@ -125,6 +117,15 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
             ex,
             ey,
             &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
+        );
+        // Tick perpendicular to the spoke (`(-sin a, cos a)`) at its outer end.
+        let (tx, ty) = (-a.sin(), a.cos());
+        svg.line(
+            ex - TICK_LEN * tx,
+            ey - TICK_LEN * ty,
+            ex + TICK_LEN * tx,
+            ey + TICK_LEN * ty,
+            &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
         );
         let lx = cx + (radius + 14.0) * a.cos();
         let ly = cy + (radius + 14.0) * a.sin() + 4.0;
@@ -182,6 +183,38 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
+}
+
+/// Draw one graticule outline at radius `r` — a circle (default) or an `n`-gon
+/// following the axis vertices — with the given presentation attributes.
+fn draw_ring(
+    svg: &mut SvgBuilder,
+    graticule: RadarGraticule,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    n: usize,
+    attrs: &str,
+) {
+    match graticule {
+        RadarGraticule::Circle => svg.circle(cx, cy, r, attrs),
+        RadarGraticule::Polygon => {
+            let mut path = String::new();
+            for i in 0..n {
+                let a =
+                    -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / n as f64;
+                let x = cx + r * a.cos();
+                let y = cy + r * a.sin();
+                if i == 0 {
+                    let _ = write!(path, "M{} {}", fnum(x), fnum(y));
+                } else {
+                    let _ = write!(path, "L{} {}", fnum(x), fnum(y));
+                }
+            }
+            path.push('Z');
+            svg.path(&path, attrs);
+        }
+    }
 }
 
 /// Closed polyline through `pts` (`M … L … Z`), used for the polygon graticule.
@@ -295,6 +328,31 @@ mod tests {
         let svg = render(&d, &Theme::default());
         // Default graticule draws concentric circles, not polygon rings.
         assert!(svg.contains("<circle"));
+    }
+
+    #[test]
+    fn graticule_has_filled_disc_subtle_rings_and_spoke_ticks() {
+        let svg = render(&sample(), &Theme::default());
+        // Filled light-gray disc behind the rings.
+        assert!(svg.contains("fill-opacity=\"0.12\""));
+        // Rings are faint outlines, not solid strokes.
+        assert!(svg.contains("stroke-opacity=\"0.35\""));
+        // Dark ticks cap each spoke (the only 1.5-wide strokes in the output).
+        assert!(svg.contains("stroke-width=\"1.5\""));
+    }
+
+    #[test]
+    fn polygon_graticule_disc_is_a_filled_path() {
+        let svg = render(
+            &RadarDiagram {
+                graticule: RadarGraticule::Polygon,
+                ..sample()
+            },
+            &Theme::default(),
+        );
+        // No circle rings for the polygon graticule; the disc is a filled path.
+        assert!(!svg.contains("<circle"));
+        assert!(svg.contains("fill-opacity=\"0.12\""));
     }
 
     #[test]
