@@ -37,6 +37,10 @@ Parser: `src/parse/class/` · Renderer: `src/svg/class/`.
   emits the single decorated marker as `marker-start` (reversed) or `marker-end`
   (forward); `orient="auto-start-reverse"` points it into its node at either
   end. Composition/aggregation draw *only* the diamond — no far-end arrowhead.
+  Every decorated marker anchors its `refX` at the node-side tip (triangle
+  `refX=11`, the 16-wide diamonds `refX=16`) so the body extends *outward* along
+  the edge; anchoring at the far tip (`refX=0`) would push the diamond backward
+  into the node box, where the node fill hides it entirely.
 - Class lollipop-interface `()` (`bar ()-- foo` / `foo --() bar`) is stripped
   off the token-adjacent side in `src/parse/class/relation.rs`
   (`split_trailing_lollipop`/`split_leading_lollipop`, before the multiplicity),
