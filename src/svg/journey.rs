@@ -2,9 +2,12 @@
 //!
 //! Faithful to upstream Mermaid's composition (not a line chart): a colored
 //! **section band** groups the tasks beneath it; each task is a rounded
-//! **task box** carrying a score-driven **face glyph** above it (smiley for
-//! score ≥ 4, neutral for 3, sad for ≤ 2) and small **actor dots** straddling
-//! its top edge. A vertical **actor legend** sits in the top-left gutter.
+//! **task box** with small **actor dots** straddling its top edge. Below the
+//! task row a horizontal **time axis** (arrow-tipped) carries a score-driven
+//! **face glyph** per task, hung on a dashed **stem**: the face's vertical
+//! position encodes the score (score 5 nearest the axis, score 1 lowest), so
+//! the smile/frown *and* the height both read the score. A vertical **actor
+//! legend** (alphabetical, matching upstream) sits in the top-left gutter.
 
 use crate::parse::JourneyDiagram;
 
@@ -21,6 +24,19 @@ const TASK_GAP: f64 = 20.0;
 const SECTION_BAND_H: f64 = 24.0;
 const FACE_R: f64 = 14.0;
 const LEGEND_ROW: f64 = 24.0;
+/// Gap from the task-box bottom down to the horizontal time axis.
+const AXIS_GAP: f64 = 18.0;
+/// Distance from the axis to the *edge* of the highest-scoring (score 5) face.
+const FACE_TOP_GAP: f64 = 22.0;
+/// Vertical travel of the face center between score 5 (top) and score 1.
+const SCORE_SPAN: f64 = 84.0;
+
+/// Face-center y for a task score, hung below the axis. Score is clamped to the
+/// 1..=5 journey range; 5 rides nearest the axis, 1 sinks to the bottom.
+fn face_cy_for(score: i32, axis_y: f64) -> f64 {
+    let frac = (5 - score.clamp(1, 5)) as f64 / 4.0;
+    axis_y + FACE_TOP_GAP + FACE_R + frac * SCORE_SPAN
+}
 
 pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
@@ -32,9 +48,18 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
 
     let content_top = MARGIN + title_h;
     let band_y = content_top;
-    let face_cy = band_y + SECTION_BAND_H + 12.0 + FACE_R;
-    let task_y = face_cy + FACE_R + 14.0;
+    let task_y = band_y + SECTION_BAND_H + 12.0;
     let task_bottom = task_y + TASK_H;
+    let axis_y = task_bottom + AXIS_GAP;
+    // The lowest-scoring task hangs its face furthest down, setting the bottom.
+    let lowest_score = d
+        .sections
+        .iter()
+        .flat_map(|s| s.tasks.iter())
+        .map(|t| t.score.clamp(1, 5))
+        .min()
+        .unwrap_or(5);
+    let faces_bottom = face_cy_for(lowest_score, axis_y) + FACE_R;
 
     let tasks_span = if total_tasks == 0 {
         0.0
@@ -43,9 +68,12 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     };
     let width = LEFT_MARGIN + tasks_span + MARGIN;
     let legend_bottom = content_top + actors.len() as f64 * LEGEND_ROW;
-    let height = task_bottom.max(legend_bottom) + MARGIN;
+    let height = faces_bottom.max(legend_bottom) + MARGIN;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
+    if total_tasks > 0 {
+        svg.def_arrow_marker("journey-axis", fg_muted, 8, 8);
+    }
 
     if let Some(t) = &d.title {
         svg.text(
@@ -74,7 +102,22 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
         );
     }
 
-    // Section bands, task boxes, faces and actor dots.
+    // Horizontal time axis (arrow-tipped) running under the whole task row.
+    if total_tasks > 0 {
+        svg.line(
+            LEFT_MARGIN,
+            axis_y,
+            LEFT_MARGIN + tasks_span + 12.0,
+            axis_y,
+            &format!(
+                "stroke=\"{fg_muted}\" stroke-width=\"1.5\" \
+                 marker-end=\"url(#journey-axis)\""
+            ),
+        );
+    }
+
+    // Section bands, task boxes, actor dots, and the score-driven faces hung
+    // on dashed stems below the axis.
     let mut cursor = LEFT_MARGIN;
     for (si, sec) in d.sections.iter().enumerate() {
         if sec.tasks.is_empty() {
@@ -104,6 +147,16 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
                 &t.name,
             );
 
+            // Dashed stem: axis → face, with a dot where it meets the axis.
+            let face_cy = face_cy_for(t.score, axis_y);
+            svg.line(
+                center,
+                axis_y,
+                center,
+                face_cy - FACE_R,
+                &format!("stroke=\"{fg_muted}\" stroke-width=\"1\" stroke-dasharray=\"3 3\""),
+            );
+            svg.circle(center, axis_y, 2.5, &format!("fill=\"{color}\""));
             draw_face(&mut svg, center, face_cy, t.score, theme);
 
             // Actor dots straddle the top edge of the task box.
@@ -197,7 +250,8 @@ fn draw_face(svg: &mut SvgBuilder, cx: f64, cy: f64, score: i32, theme: &Theme) 
     );
 }
 
-/// Unique actor names in first-seen order; assigns each a stable legend color.
+/// Unique actor names, sorted alphabetically to match upstream's legend order;
+/// each name's index assigns its stable legend color (shared with its dots).
 fn collect_actors(d: &JourneyDiagram) -> Vec<String> {
     let mut seen: Vec<String> = Vec::new();
     for sec in &d.sections {
@@ -209,6 +263,7 @@ fn collect_actors(d: &JourneyDiagram) -> Vec<String> {
             }
         }
     }
+    seen.sort();
     seen
 }
 
@@ -258,6 +313,27 @@ mod tests {
     }
 
     #[test]
+    fn draws_time_axis_and_dashed_stems() {
+        let svg = render(&sample(), &Theme::default());
+        // Arrow-tipped horizontal axis.
+        assert!(svg.contains("marker-end=\"url(#journey-axis)\""));
+        assert!(svg.contains("<marker id=\"journey-axis\""));
+        // Faces hang on dashed stems.
+        assert!(svg.contains("stroke-dasharray=\"3 3\""));
+    }
+
+    #[test]
+    fn face_height_encodes_score() {
+        // Score 5 rides nearest the axis; score 1 sinks lower (larger y).
+        let axis = 100.0;
+        assert!(face_cy_for(5, axis) < face_cy_for(3, axis));
+        assert!(face_cy_for(3, axis) < face_cy_for(1, axis));
+        // Out-of-range scores clamp to the 1..=5 band.
+        assert_eq!(face_cy_for(9, axis), face_cy_for(5, axis));
+        assert_eq!(face_cy_for(-2, axis), face_cy_for(1, axis));
+    }
+
+    #[test]
     fn score_drives_mouth_shape() {
         // Smile (score 5) and frown (score 1) both use quadratic mouths; a
         // neutral score uses a straight line instead.
@@ -278,11 +354,12 @@ mod tests {
     }
 
     #[test]
-    fn legend_lists_unique_actors() {
+    fn legend_lists_unique_actors_alphabetically() {
         let svg = render(&sample(), &Theme::default());
         assert!(svg.contains(">Me<"));
         assert!(svg.contains(">Cat<"));
+        // Upstream orders the legend alphabetically, not by first appearance.
         let actors = collect_actors(&sample());
-        assert_eq!(actors, vec!["Me".to_string(), "Cat".to_string()]);
+        assert_eq!(actors, vec!["Cat".to_string(), "Me".to_string()]);
     }
 }
