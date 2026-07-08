@@ -44,8 +44,11 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   tag winning. `colors_for(status, crit)` picks the fill from the status and a
   red border for `crit` (crit-only also takes the red fill). A `milestone`
   renders as a diamond (rotated square `<path>`) centered on the start date; a
-  `vert` renders a dashed vertical marker line spanning the whole chart at the
-  start date (label beside the line) — both ignore the duration. Adding a tag to
+  `vert` renders a solid full-height vertical marker line (2px, `fg`) spanning
+  the chart at the start date, with a bold label centered below the axis. Unlike
+  bars/milestones a `vert` marker is **excluded from row allocation** — it gets
+  no left-column name and consumes no row height — matching upstream. Both
+  milestone and vert ignore the duration. Adding a tag to
   the tag-match loop is what keeps it from being mis-consumed as the task **id**.
 - Gantt task end is a `TaskEnd` enum (not a bare `duration_days`): `Duration`
   (units `ms`/`s`/`m`/`h`/`d`/`w`/`M`/`y`, decimals allowed — `parse_duration`
