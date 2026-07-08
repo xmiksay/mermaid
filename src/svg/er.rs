@@ -13,13 +13,13 @@ use super::style::resolve_style;
 use super::theme::Theme;
 
 const CHAR_W: f64 = 7.5;
-const LINE_H: f64 = 20.0;
-const PAD_X: f64 = 14.0;
+const ROW_H: f64 = 30.0; // attribute row height (bordered table cell)
+const PAD_X: f64 = 14.0; // header horizontal padding
+const CELL_PAD: f64 = 12.0; // attribute-cell horizontal text padding
 const HEADER_H: f64 = 28.0;
 const MIN_W: f64 = 130.0;
 const CANVAS_PAD: f64 = 24.0;
 const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
-const COL_GAP: f64 = 18.0; // gap between type/name/key columns
 
 // Crow's-foot marker geometry, measured along the edge from the entity boundary.
 const FOOT_TIP: f64 = CARD_GAP + 4.0; // splayed end of the crow's foot (18.0)
@@ -28,7 +28,16 @@ const CARD_CIRCLE_R: f64 = 5.0; // radius of the optional-"zero" circle
                                 // circle reads as clearly separate from the foot (upstream "o{" layout) instead
                                 // of merging into it as a "Ø" blob.
 const ZERO_MORE_CIRCLE_D: f64 = FOOT_TIP + CARD_CIRCLE_R + 4.0; // 27.0
-const KEY_CHAR_W: f64 = 8.0; // PK/FK are bold — wider per char
+
+/// Attribute-table columns, in draw order. Type and name always show; key and
+/// comment appear only when some attribute populates them.
+#[derive(Clone, Copy)]
+enum Col {
+    Type,
+    Name,
+    Key,
+    Comment,
+}
 
 pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
     if d.entities.is_empty() {
@@ -118,40 +127,65 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 }
 
 fn entity_size(e: &Entity, font_size: f64) -> (f64, f64) {
-    let (tw, nw, kw, cw) = col_widths(e, font_size);
-    // Sum only the columns that carry content, one COL_GAP between each pair.
-    let mut content = tw + COL_GAP + nw;
-    if kw > 0.0 {
-        content += COL_GAP + kw;
+    let title_w = text_width(&e.label, CHAR_W, font_size) + PAD_X * 2.0;
+    if e.attributes.is_empty() {
+        return (title_w.max(MIN_W), HEADER_H);
     }
-    if cw > 0.0 {
-        content += COL_GAP + cw;
-    }
-    let title_w = text_width(&e.label, CHAR_W, font_size);
-    let w = (content.max(title_w) + PAD_X * 2.0).max(MIN_W);
-    let h = HEADER_H
-        + e.attributes.len() as f64 * LINE_H
-        + if e.attributes.is_empty() { 0.0 } else { 8.0 };
+    // The table is exactly as wide as its columns; the header may force it wider.
+    let content: f64 = entity_columns(e, font_size).iter().map(|(_, w)| w).sum();
+    let w = content.max(title_w).max(MIN_W);
+    let h = HEADER_H + e.attributes.len() as f64 * ROW_H;
     (w, h)
 }
 
-fn col_widths(e: &Entity, font_size: f64) -> (f64, f64, f64, f64) {
-    let widest = |texts: &mut dyn Iterator<Item = &str>, char_w: f64| {
+/// Present attribute columns, each sized to its widest cell plus padding.
+fn entity_columns(e: &Entity, font_size: f64) -> Vec<(Col, f64)> {
+    let widest = |texts: &mut dyn Iterator<Item = &str>| {
         texts
-            .map(|t| text_width(t, char_w, font_size))
+            .map(|t| text_width(t, CHAR_W, font_size))
             .fold(0.0_f64, f64::max)
     };
-    let tw = widest(&mut e.attributes.iter().map(|a| a.type_.as_str()), CHAR_W);
-    let nw = widest(&mut e.attributes.iter().map(|a| a.name.as_str()), CHAR_W);
-    let kw = widest(
-        &mut e.attributes.iter().filter_map(|a| a.key.as_deref()),
-        KEY_CHAR_W,
-    );
-    let cw = widest(
-        &mut e.attributes.iter().filter_map(|a| a.comment.as_deref()),
-        CHAR_W,
-    );
-    (tw, nw, kw, cw)
+    let cell = |w: f64| w + CELL_PAD * 2.0;
+    let mut cols = Vec::with_capacity(4);
+    cols.push((
+        Col::Type,
+        cell(widest(&mut e.attributes.iter().map(|a| a.type_.as_str()))),
+    ));
+    cols.push((
+        Col::Name,
+        cell(widest(&mut e.attributes.iter().map(|a| a.name.as_str()))),
+    ));
+    if e.attributes.iter().any(|a| a.key.is_some()) {
+        cols.push((
+            Col::Key,
+            cell(widest(
+                &mut e.attributes.iter().filter_map(|a| a.key.as_deref()),
+            )),
+        ));
+    }
+    if e.attributes.iter().any(|a| a.comment.is_some()) {
+        cols.push((
+            Col::Comment,
+            cell(widest(
+                &mut e.attributes.iter().filter_map(|a| a.comment.as_deref()),
+            )),
+        ));
+    }
+    cols
+}
+
+/// Column widths after stretching the last column to fill any slack the header
+/// forced, so the bordered cells span the full entity width.
+fn resolved_columns(e: &Entity, font_size: f64, width: f64) -> Vec<(Col, f64)> {
+    let mut cols = entity_columns(e, font_size);
+    let content: f64 = cols.iter().map(|(_, w)| w).sum();
+    if let Some(last) = cols.last_mut() {
+        let extra = width - content;
+        if extra > 0.0 {
+            last.1 += extra;
+        }
+    }
+    cols
 }
 
 fn draw_entity(
@@ -163,71 +197,67 @@ fn draw_entity(
     theme: &Theme,
 ) {
     let rs = resolve_style(class_defs, &e.classes, &e.style);
-    let flow_node_stroke = &theme.flow_node_stroke;
     let fg = rs.label_fill(&theme.fg).to_string();
+    let stroke = rs.stroke_or(&theme.flow_node_stroke).to_string();
     let x = cx - w / 2.0;
     let y = cy - h / 2.0;
-    let mut box_attrs = rs.shape_attrs(&theme.flow_node_fill, flow_node_stroke, "1.5");
-    box_attrs.push_str(" rx=\"2\"");
-    svg.rect(x, y, w, h, &box_attrs);
+
+    // Header: the entity name over the primary fill. With no attributes the box
+    // is the header alone, so unstyled/attribute-less entities stay unchanged.
+    let header_h = if e.attributes.is_empty() { h } else { HEADER_H };
+    let mut header_attrs = rs.shape_attrs(&theme.flow_node_fill, &stroke, "1.5");
+    header_attrs.push_str(" rx=\"2\"");
+    svg.rect(x, y, w, header_h, &header_attrs);
     svg.text(
         cx,
-        y + 19.0,
+        y + header_h / 2.0 + 5.0,
         &format!(
             "text-anchor=\"middle\" fill=\"{fg}\" font-weight=\"bold\"{}",
             rs.text_attrs()
         ),
         &e.label,
     );
-    let stroke_col = rs.stroke_or(flow_node_stroke).to_string();
-    let flow_node_stroke = stroke_col.as_str();
-    if !e.attributes.is_empty() {
-        svg.line(
-            x,
-            y + HEADER_H,
-            x + w,
-            y + HEADER_H,
-            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
-        );
-        // Columns run left-to-right: type, name, key, comment — each present
-        // only when some attribute populates it (upstream shows a comment col).
-        let (tw, nw, kw, _cw) = col_widths(e, theme.font_size);
-        let type_x = x + PAD_X;
-        let name_x = type_x + tw + COL_GAP;
-        let key_x = name_x + nw + COL_GAP;
-        let comment_x = key_x + if kw > 0.0 { kw + COL_GAP } else { 0.0 };
-        let mut row_y = y + HEADER_H + 6.0;
-        for a in &e.attributes {
-            row_y += LINE_H - 4.0;
-            svg.text(
-                type_x,
+
+    if e.attributes.is_empty() {
+        return;
+    }
+
+    // Attributes as a true table: one bordered cell per column, row fills
+    // alternating between the background and the primary color (upstream's
+    // white/lavender striping). Key markers render plain, like any other cell.
+    let cols = resolved_columns(e, theme.font_size, w);
+    for (i, a) in e.attributes.iter().enumerate() {
+        let row_y = y + HEADER_H + i as f64 * ROW_H;
+        let row_fill: &str = if i % 2 == 0 {
+            &theme.bg
+        } else {
+            &theme.flow_node_fill
+        };
+        let text_y = row_y + ROW_H / 2.0 + 4.5;
+        let mut cell_x = x;
+        for (col, cw) in &cols {
+            svg.rect(
+                cell_x,
                 row_y,
-                &format!("fill=\"{fg}\" font-size=\"13\""),
-                &a.type_,
+                *cw,
+                ROW_H,
+                &format!("fill=\"{row_fill}\" stroke=\"{stroke}\" stroke-width=\"1\""),
             );
-            svg.text(
-                name_x,
-                row_y,
-                &format!("fill=\"{fg}\" font-size=\"13\""),
-                &a.name,
-            );
-            if let Some(k) = &a.key {
+            let content = match col {
+                Col::Type => Some(a.type_.as_str()),
+                Col::Name => Some(a.name.as_str()),
+                Col::Key => a.key.as_deref(),
+                Col::Comment => a.comment.as_deref(),
+            };
+            if let Some(t) = content {
                 svg.text(
-                    key_x,
-                    row_y,
-                    "fill=\"#c33\" font-size=\"11\" font-weight=\"bold\"",
-                    k,
+                    cell_x + CELL_PAD,
+                    text_y,
+                    &format!("fill=\"{fg}\" font-size=\"13\""),
+                    t,
                 );
             }
-            if let Some(c) = &a.comment {
-                svg.text(
-                    comment_x,
-                    row_y,
-                    &format!("fill=\"{fg}\" font-size=\"12\""),
-                    c,
-                );
-            }
-            row_y += 4.0;
+            cell_x += cw;
         }
     }
 }
@@ -457,6 +487,34 @@ mod tests {
         assert!(svg.contains(">name<"));
         assert!(svg.contains(">email<"));
         assert!(svg.contains(">PK<"));
+    }
+
+    #[test]
+    fn attributes_render_as_bordered_striped_table() {
+        // Issue #255: attribute rows are a real table — per-cell bordered rects
+        // with alternating row fills, not a flat lavender panel.
+        let d = build("erDiagram\nCUSTOMER {\nstring name\nstring email PK\nstring phone\n}\n");
+        let theme = Theme::default();
+        let svg = render(&d, &theme);
+        // Cell borders use the theme stroke.
+        assert!(svg.contains(&format!(
+            "stroke=\"{}\" stroke-width=\"1\"",
+            theme.flow_node_stroke
+        )));
+        // Row striping alternates background (odd) and primary (even) fills.
+        assert!(svg.contains(&format!("fill=\"{}\" stroke=", theme.bg)));
+        assert!(svg.contains(&format!("fill=\"{}\" stroke=", theme.flow_node_fill)));
+    }
+
+    #[test]
+    fn key_marker_is_plain_not_red_bold() {
+        // Issue #255: PK/FK were rendered red and bold — an invention. They now
+        // render plain, like every other attribute cell.
+        let d = build("erDiagram\nCUSTOMER {\nstring email PK\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains(">PK<"));
+        assert!(!svg.contains("#c33"));
+        assert!(!svg.contains("font-weight=\"bold\" fill=\"#c33\""));
     }
 
     #[test]

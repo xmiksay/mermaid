@@ -7,6 +7,14 @@ Parser: `src/parse/er.rs` · Renderer: `src/svg/er.rs`.
   attribute (`string name "the customer name"`) and rendered as a fourth
   attribute column (type · name · key · comment). `EntityAttribute.key` holds
   all comma-separated key constraints joined as `PK, FK`.
+- ER attribute rows render as a true bordered table (`draw_entity`), matching
+  upstream: one `<rect>` per cell with the entity's stroke as the border, row
+  fills alternating between `theme.bg` and `theme.flow_node_fill` (upstream's
+  white/lavender striping), `ROW_H`-tall rows, and per-entity column widths
+  sized to the widest cell in each column (`entity_columns`), with the last
+  column stretched to absorb any width the header forces (`resolved_columns`).
+  Key markers (PK/FK) render plain, like any other cell — not the old red/bold
+  (issue #255).
 - ER relations accept both the glyph cardinality form (`||--o{`) and the
   **verbal/numeric** form `LEFT <card> to|optionally to <card> RIGHT : label`
   (`src/parse/er.rs`, `find_reltype` + `split_card_end`/`split_card_start`):
