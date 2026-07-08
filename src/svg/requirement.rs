@@ -230,17 +230,20 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         } else {
             ""
         };
-        // `contains` uses upstream's crossed-circle containment head; the rest
-        // use a plain arrowhead.
-        let marker = if rel.kind == ReqRelationKind::Contains {
-            "req-contains"
+        // `contains` draws upstream's crossed-circle containment head at the
+        // *container* (`from`) end — a `marker-start` — so the glyph sits on the
+        // container's box edge regardless of which syntactic direction
+        // (`-> contains` or `<- contains`) the parser recorded. Every other
+        // relation puts a plain arrowhead at the `to` end (`marker-end`).
+        let marker_attr = if rel.kind == ReqRelationKind::Contains {
+            "marker-start=\"url(#req-contains)\"".to_string()
         } else {
-            "req-arrow"
+            "marker-end=\"url(#req-arrow)\"".to_string()
         };
         svg.path(
             &curve_basis_path(&clipped),
             &format!(
-                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} marker-end=\"url(#{marker})\""
+                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} {marker_attr}"
             ),
         );
 
@@ -414,40 +417,64 @@ mod tests {
             !svg.contains("stroke-dasharray"),
             "contains should be solid"
         );
-        assert!(svg.contains("marker-end=\"url(#req-contains)\""));
+        // `contains` puts the crossed circle at the container (`from`) end,
+        // so it renders as a `marker-start`, not a `marker-end`.
+        assert!(svg.contains("marker-start=\"url(#req-contains)\""));
     }
 
+    fn two_reqs(a: &str, b: &str) -> Vec<Requirement> {
+        [a, b]
+            .into_iter()
+            .map(|name| Requirement {
+                kind: RequirementKind::Requirement,
+                name: name.into(),
+                id: None,
+                text: None,
+                risk: None,
+                verifymethod: None,
+            })
+            .collect()
+    }
+
+    // The container is always `from`; the crossed circle must sit at that end,
+    // i.e. as a `marker-start`, so it renders on the container's box edge.
+    // `from` is the container regardless of which syntactic direction the
+    // parser recorded, so both orderings produce the same `marker-start`.
     #[test]
-    fn contains_uses_containment_marker() {
+    fn contains_glyph_sits_at_container_end() {
+        // `container - contains -> contained` (forward form).
         let d = RequirementDiagram {
-            requirements: vec![
-                Requirement {
-                    kind: RequirementKind::Requirement,
-                    name: "a".into(),
-                    id: None,
-                    text: None,
-                    risk: None,
-                    verifymethod: None,
-                },
-                Requirement {
-                    kind: RequirementKind::Requirement,
-                    name: "b".into(),
-                    id: None,
-                    text: None,
-                    risk: None,
-                    verifymethod: None,
-                },
-            ],
+            requirements: two_reqs("container", "contained"),
             elements: vec![],
             relations: vec![ReqRelation {
-                from: "a".into(),
-                to: "b".into(),
+                from: "container".into(),
+                to: "contained".into(),
                 kind: ReqRelationKind::Contains,
             }],
             ..Default::default()
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.contains("id=\"req-contains\""));
-        assert!(svg.contains("marker-end=\"url(#req-contains)\""));
+        assert!(svg.contains("marker-start=\"url(#req-contains)\""));
+        assert!(!svg.contains("marker-end=\"url(#req-contains)\""));
+    }
+
+    #[test]
+    fn contains_glyph_at_container_end_for_reverse_form() {
+        // End-to-end: `contained <- contains - container` (reverse syntax,
+        // matching the issue's `func_req <- contains - test_entity`) parses to
+        // container→contained, so the glyph is still a `marker-start`.
+        let src = "requirementDiagram\n\
+                   requirement contained {\n    id: 1\n}\n\
+                   element container {\n    type: sim\n}\n\
+                   contained <- contains - container\n";
+        let crate::parse::Diagram::Requirement(d) = crate::parse::parse(src).unwrap() else {
+            panic!("expected a requirement diagram");
+        };
+        assert_eq!(d.relations[0].from, "container");
+        assert_eq!(d.relations[0].to, "contained");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("marker-start=\"url(#req-contains)\""));
+        assert!(!svg.contains("marker-end=\"url(#req-contains)\""));
     }
 }
