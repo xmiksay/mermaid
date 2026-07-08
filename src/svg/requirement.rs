@@ -20,11 +20,42 @@ const ROW_H: f64 = 20.0;
 struct Box {
     name: String,
     title_kind: String,
-    rows: Vec<(String, String)>,
+    rows: Vec<String>,
     x: f64,
     y: f64,
     w: f64,
     h: f64,
+}
+
+/// Upstream (Mermaid 11.x) title-cased type name shown inside the `<<…>>`
+/// header (see [`angle_wrap`]).
+fn requirement_title(kind: RequirementKind) -> &'static str {
+    match kind {
+        RequirementKind::Requirement => "Requirement",
+        RequirementKind::Functional => "Functional Requirement",
+        RequirementKind::Interface => "Interface Requirement",
+        RequirementKind::Performance => "Performance Requirement",
+        RequirementKind::Physical => "Physical Requirement",
+        RequirementKind::DesignConstraint => "Design Constraint",
+    }
+}
+
+/// Wrap a stereotype in upstream's `<<…>>` guillemet form. Angle brackets are
+/// emitted as `#lt;`/`#gt;` entity codes so the inline-HTML parser doesn't
+/// mistake `<Requirement>` for a tag and strip it; they decode back to `<`/`>`
+/// after tag scanning.
+fn angle_wrap(inner: &str) -> String {
+    format!("#lt;#lt;{inner}#gt;#gt;")
+}
+
+/// Title-case the leading letter of an enum-valued field (`high` → `High`,
+/// `test` → `Test`) to match upstream's display values.
+fn title_value(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
@@ -35,31 +66,23 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     let mut boxes: Vec<Box> = Vec::new();
 
     for r in &d.requirements {
-        let kind_str = match r.kind {
-            RequirementKind::Requirement => "requirement",
-            RequirementKind::Functional => "functional",
-            RequirementKind::Interface => "interface",
-            RequirementKind::Performance => "performance",
-            RequirementKind::Physical => "physical",
-            RequirementKind::DesignConstraint => "designConstraint",
-        };
         let mut rows = Vec::new();
         if let Some(id) = &r.id {
-            rows.push(("id".into(), id.clone()));
+            rows.push(format!("ID: {id}"));
         }
         if let Some(t) = &r.text {
-            rows.push(("text".into(), t.clone()));
+            rows.push(format!("Text: {t}"));
         }
         if let Some(t) = &r.risk {
-            rows.push(("risk".into(), t.clone()));
+            rows.push(format!("Risk: {}", title_value(t)));
         }
         if let Some(t) = &r.verifymethod {
-            rows.push(("verify".into(), t.clone()));
+            rows.push(format!("Verification: {}", title_value(t)));
         }
         let h = BOX_H_HEAD + rows.len() as f64 * ROW_H;
         boxes.push(Box {
             name: r.name.clone(),
-            title_kind: format!("«{kind_str}»"),
+            title_kind: angle_wrap(requirement_title(r.kind)),
             rows,
             x: 0.0,
             y: 0.0,
@@ -70,15 +93,15 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     for e in &d.elements {
         let mut rows = Vec::new();
         if let Some(t) = &e.type_ {
-            rows.push(("type".into(), t.clone()));
+            rows.push(format!("Type: {t}"));
         }
         if let Some(t) = &e.docref {
-            rows.push(("docref".into(), t.clone()));
+            rows.push(format!("Doc Ref: {t}"));
         }
         let h = BOX_H_HEAD + rows.len() as f64 * ROW_H;
         boxes.push(Box {
             name: e.name.clone(),
-            title_kind: "«element»".into(),
+            title_kind: angle_wrap("Element"),
             rows,
             x: 0.0,
             y: 0.0,
@@ -212,15 +235,16 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         }
         clipped.push(last);
 
-        let label = match rel.kind {
-            ReqRelationKind::Contains => "«contains»",
-            ReqRelationKind::Copies => "«copies»",
-            ReqRelationKind::Derives => "«derives»",
-            ReqRelationKind::Satisfies => "«satisfies»",
-            ReqRelationKind::Verifies => "«verifies»",
-            ReqRelationKind::Refines => "«refines»",
-            ReqRelationKind::Traces => "«traces»",
+        let kind_word = match rel.kind {
+            ReqRelationKind::Contains => "contains",
+            ReqRelationKind::Copies => "copies",
+            ReqRelationKind::Derives => "derives",
+            ReqRelationKind::Satisfies => "satisfies",
+            ReqRelationKind::Verifies => "verifies",
+            ReqRelationKind::Refines => "refines",
+            ReqRelationKind::Traces => "traces",
         };
+        let label = angle_wrap(kind_word);
         // Upstream draws only `contains` solid (crossed-circle head); every
         // other relation kind (copies/derives/satisfies/verifies/refines/
         // traces) is dashed with a thin arrowhead.
@@ -248,22 +272,24 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         );
 
         let (mx, my) = polyline_midpoint(&clipped);
-        let lw = (super::metrics::text_width(label, 5.5, theme.font_size) + 14.0).max(60.0);
+        // Width from the displayed glyphs (`<<kind>>`), not the entity-coded
+        // form that carries the `#lt;`/`#gt;` sentinels.
+        let label_w = super::metrics::text_width(&format!("<<{kind_word}>>"), 5.5, theme.font_size);
+        let lw = (label_w + 14.0).max(60.0);
+        // Upstream draws the relation label on a plain background patch (edge
+        // label color, no border/pill) that just masks the line beneath it.
         svg.rect(
             mx - lw / 2.0,
             my - 9.0,
             lw,
             16.0,
-            &format!(
-                "fill=\"{}\" stroke=\"{stroke}\" stroke-width=\"0.5\" rx=\"3\"",
-                &theme.flow_label_bg
-            ),
+            &format!("fill=\"{}\"", &theme.flow_label_bg),
         );
         svg.text(
             mx,
             my + 3.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            label,
+            &label,
         );
     }
 
@@ -299,19 +325,13 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             b.y + BOX_H_HEAD,
             &format!("stroke=\"{box_stroke}\" stroke-width=\"1\""),
         );
-        for (i, (k, v)) in b.rows.iter().enumerate() {
+        for (i, line) in b.rows.iter().enumerate() {
             let ry = b.y + BOX_H_HEAD + i as f64 * ROW_H + 14.0;
             svg.text(
                 b.x + 8.0,
                 ry,
-                &format!("fill=\"{text_fill}\" font-size=\"11\" font-weight=\"bold\""),
-                k,
-            );
-            svg.text(
-                b.x + 70.0,
-                ry,
                 &format!("fill=\"{text_fill}\" font-size=\"11\""),
-                &truncate(v, 22),
+                &truncate(line, 34),
             );
         }
     }
@@ -363,6 +383,45 @@ mod tests {
         assert!(svg.contains(">req1<"));
         assert!(svg.contains(">e1<"));
         assert!(svg.contains("req-arrow"));
+    }
+
+    #[test]
+    fn header_and_body_match_upstream_format() {
+        let d = RequirementDiagram {
+            requirements: vec![Requirement {
+                kind: RequirementKind::Functional,
+                name: "func_req".into(),
+                id: Some("2".into()),
+                text: Some("must do thing".into()),
+                risk: Some("high".into()),
+                verifymethod: Some("test".into()),
+            }],
+            elements: vec![ReqElement {
+                name: "user_doc".into(),
+                type_: Some("document".into()),
+                docref: Some("user-guide.md".into()),
+            }],
+            relations: vec![ReqRelation {
+                from: "user_doc".into(),
+                to: "func_req".into(),
+                kind: ReqRelationKind::Satisfies,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Title-cased `<<Type>>` headers, not lowercase guillemets.
+        assert!(svg.contains(">&lt;&lt;Functional Requirement&gt;&gt;<"));
+        assert!(svg.contains(">&lt;&lt;Element&gt;&gt;<"));
+        assert!(!svg.contains('«'));
+        // Prose `Label: value` body with title-cased enum values.
+        assert!(svg.contains(">ID: 2<"));
+        assert!(svg.contains(">Text: must do thing<"));
+        assert!(svg.contains(">Risk: High<"));
+        assert!(svg.contains(">Verification: Test<"));
+        assert!(svg.contains(">Type: document<"));
+        assert!(svg.contains(">Doc Ref: user-guide.md<"));
+        // Relation label uses `<<…>>`, not a guillemet pill.
+        assert!(svg.contains(">&lt;&lt;satisfies&gt;&gt;<"));
     }
 
     fn render_single_relation(kind: ReqRelationKind) -> String {
