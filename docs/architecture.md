@@ -30,6 +30,7 @@ src/
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder, def_arrow_marker)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
+│   ├── color.rs     readable_text_color: contrast-aware label color for filled shapes
 │   ├── label.rs     decode_label: `#…;` entity codes (markdown emphasis → markup.rs)
 │   ├── markup.rs    inline-HTML labels → styled tspans (b/i/u/span/a); strip_tags
 │   ├── metrics.rs   shared text_width/font_scale (per-glyph widths track font_size)

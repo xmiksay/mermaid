@@ -13,3 +13,7 @@ Parser: `src/parse/kanban.rs` · Renderer: `src/svg/kanban.rs`.
   `config.kanban.ticketBaseUrl` is set (captured in `preamble.rs` →
   `DiagramMeta.ticket_base_url`, copied onto `KanbanDiagram` in
   `parse_with_meta`; `#TICKET#` in the URL is replaced by the id).
+- Each column header is filled with `theme.cscale_color(i)` (a pale `cScale`
+  pastel), so its label uses the contrast-aware `readable_text_color`
+  (`src/svg/color.rs`) — dark on light fills, white on dark — instead of a
+  fixed white that vanished on the pastels (issue #314).

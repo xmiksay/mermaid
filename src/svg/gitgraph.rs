@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use crate::parse::{CommitKind, GitDirection, GitEvent, GitGraphDiagram};
 
 use super::builder::{fnum, SvgBuilder};
+use super::color::readable_text_color;
 use super::metrics;
 use super::theme::Theme;
 
@@ -360,7 +361,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                 h,
                 &format!("fill=\"{fill}\" rx=\"10\" ry=\"10\""),
             );
-            let tc = label_text_color(fill);
+            let tc = readable_text_color(fill);
             svg.text(
                 cx,
                 cy + 4.0,
@@ -446,23 +447,6 @@ fn seq_hash(seq: usize) -> String {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{:07x}", h & 0x0fff_ffff)
-}
-
-/// Readable text color for a pill filled with `hex` — dark on light fills,
-/// white on dark ones (the default git palette is pastel, so most read dark).
-fn label_text_color(hex: &str) -> &'static str {
-    let h = hex.trim_start_matches('#');
-    if h.len() >= 6 {
-        if let (Ok(r), Ok(g), Ok(b)) = (
-            u8::from_str_radix(&h[0..2], 16),
-            u8::from_str_radix(&h[2..4], 16),
-            u8::from_str_radix(&h[4..6], 16),
-        ) {
-            let lum = 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
-            return if lum > 140.0 { "#333333" } else { "#ffffff" };
-        }
-    }
-    "#333333"
 }
 
 /// Rounded right-angle join from parent `(px,py)` to child `(nx,ny)`. In the

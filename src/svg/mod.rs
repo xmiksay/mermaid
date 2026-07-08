@@ -17,6 +17,7 @@ mod block;
 mod builder;
 mod c4;
 mod class;
+mod color;
 mod decorate;
 mod er;
 mod flowchart;
