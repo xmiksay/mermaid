@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use crate::parse::SankeyDiagram;
 
 use super::builder::{fnum, SvgBuilder};
+use super::sankey_layout;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
@@ -79,12 +80,6 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         _ => COL_GAP,
     };
 
-    // Group nodes by column.
-    let mut by_col: BTreeMap<u32, Vec<String>> = BTreeMap::new();
-    for n in &order {
-        by_col.entry(col[n]).or_default().push(n.clone());
-    }
-
     // Throughput per node.
     let mut out_sum: BTreeMap<String, f64> = BTreeMap::new();
     let mut in_sum: BTreeMap<String, f64> = BTreeMap::new();
@@ -97,6 +92,16 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         let o = *out_sum.get(n).unwrap_or(&0.0);
         i.max(o)
     };
+
+    // Group nodes by column, ordered top-to-bottom the way d3-sankey would
+    // (first appearance, then barycenter relaxation minimising crossings)
+    // rather than raw first-appearance order.
+    let values: Vec<f64> = order.iter().map(|n| through(n)).collect();
+    let ordered = sankey_layout::order_columns(&order, &col, &d.links, &values, chart_h, row_gap);
+    let mut by_col: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    for (c, nodes) in ordered.iter().enumerate() {
+        by_col.insert(c as u32, nodes.iter().map(|&i| order[i].clone()).collect());
+    }
 
     // Compute height scale: max column total throughput maps to CHART_H.
     let mut col_totals: BTreeMap<u32, f64> = BTreeMap::new();

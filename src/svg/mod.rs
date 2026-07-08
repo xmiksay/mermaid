@@ -37,6 +37,7 @@ mod quadrant;
 mod radar;
 mod requirement;
 mod sankey;
+mod sankey_layout;
 mod sequence;
 mod state;
 mod style;
