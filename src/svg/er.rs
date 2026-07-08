@@ -22,12 +22,15 @@ const CANVAS_PAD: f64 = 24.0;
 const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
 
 // Crow's-foot marker geometry, measured along the edge from the entity boundary.
-const FOOT_TIP: f64 = CARD_GAP + 4.0; // splayed end of the crow's foot (18.0)
+// The prongs are wide at the entity border and converge to a single point one
+// marker length out along the edge (upstream's crow's foot spreads outward at
+// the entity, not at the connector).
+const FOOT_DEPTH: f64 = CARD_GAP + 4.0; // convergence point of the crow's foot (18.0)
 const CARD_CIRCLE_R: f64 = 5.0; // radius of the optional-"zero" circle
-                                // Center of the zero-or-more circle: one marker length past the foot tip so the
-                                // circle reads as clearly separate from the foot (upstream "o{" layout) instead
-                                // of merging into it as a "Ø" blob.
-const ZERO_MORE_CIRCLE_D: f64 = FOOT_TIP + CARD_CIRCLE_R + 4.0; // 27.0
+                                // Center of the zero-or-more circle: tangent to the foot's convergence point
+                                // so the circle reads as a complete, separate glyph (upstream "o{" layout)
+                                // instead of merging into the foot as a "Ø" blob.
+const ZERO_MORE_CIRCLE_D: f64 = FOOT_DEPTH + CARD_CIRCLE_R; // 23.0
 
 /// Attribute-table columns, in draw order. Type and name always show; key and
 /// comment appear only when some attribute populates them.
@@ -408,15 +411,15 @@ fn draw_crowfoot(
     py: f64,
     stroke: &str,
 ) {
-    // Three lines fanning out from the anchor toward the far side.
+    // Three prongs converging at a single point one marker length out, splaying
+    // across the entity border — wide at the entity, narrow at the connector.
     let spread = 6.0;
     let (ax, ay) = anchor;
-    let tip_x = ax + ux * FOOT_TIP;
-    let tip_y = ay + uy * FOOT_TIP;
-    // Three radial lines
-    svg.line(ax, ay, tip_x, tip_y, stroke);
-    svg.line(ax, ay, tip_x + px * spread, tip_y + py * spread, stroke);
-    svg.line(ax, ay, tip_x - px * spread, tip_y - py * spread, stroke);
+    let point_x = ax + ux * FOOT_DEPTH;
+    let point_y = ay + uy * FOOT_DEPTH;
+    svg.line(point_x, point_y, ax, ay, stroke);
+    svg.line(point_x, point_y, ax + px * spread, ay + py * spread, stroke);
+    svg.line(point_x, point_y, ax - px * spread, ay - py * spread, stroke);
 }
 
 #[cfg(test)]
@@ -450,10 +453,11 @@ mod tests {
     }
 
     #[test]
-    fn zero_or_more_circle_is_separate_from_foot() {
-        // Issue #256: the optional "zero" circle used to sit inside the crow's
-        // foot and read as a merged "Ø" blob. Draw the marker along +y from the
-        // origin and check the circle clears the foot tip.
+    fn zero_or_more_foot_is_wide_at_entity() {
+        // Issue #313: the crow's foot must be wide at the entity border and
+        // converge to a point out along the edge — not the inverse. Draw the
+        // marker along +y from the origin (the entity boundary) and check the
+        // prongs splay at the anchor and meet at a single far point.
         let mut svg = SvgBuilder::new(60.0, 60.0);
         draw_cardinality(
             &mut svg,
@@ -463,20 +467,52 @@ mod tests {
             &Theme::default(),
         );
         let out = svg.finish();
-        // The middle crow's-foot prong runs from the anchor to the foot tip.
-        let foot_tip_y = attr_after(&out, "<line", "y2");
+        // Every prong shares the same convergence point (x1,y1) out along +y…
+        let conv_x = attr_after(&out, "<line", "x1");
+        let conv_y = attr_after(&out, "<line", "y1");
+        assert!(conv_x.abs() < 1e-6, "prongs converge off-axis: x={conv_x}");
+        assert!(
+            conv_y > CARD_GAP,
+            "convergence point sits at the entity, not out along the edge: {conv_y}",
+        );
+        // …while their far ends (x2) splay across the entity border at y≈0.
+        let splay_x = attr_after(&out, "<line", "x2");
+        let border_y = attr_after(&out, "<line", "y2");
+        assert!(
+            border_y.abs() < 1e-6,
+            "foot base is not at the entity border: y={border_y}",
+        );
+        let _ = splay_x;
+    }
+
+    #[test]
+    fn zero_or_more_circle_is_tangent_to_foot() {
+        // Issue #256/#313: the optional "zero" circle sits just past the foot's
+        // convergence point — a complete, separate glyph, not merged into the
+        // foot as a "Ø" blob.
+        let mut svg = SvgBuilder::new(60.0, 60.0);
+        draw_cardinality(
+            &mut svg,
+            (0.0, 0.0),
+            (0.0, 100.0),
+            Cardinality::ZeroOrMore,
+            &Theme::default(),
+        );
+        let out = svg.finish();
+        // Convergence point (shared x1,y1 of the prongs) is the foot's far tip.
+        let conv_y = attr_after(&out, "<line", "y1");
         let circle_cy = attr_after(&out, "<circle", "cy");
         let circle_r = attr_after(&out, "<circle", "r");
-        // Circle sits beyond the foot tip and does not overlap it.
+        // Circle's near edge is tangent to the convergence point (no overlap).
+        let near_edge = circle_cy - circle_r;
         assert!(
-            circle_cy - circle_r > foot_tip_y,
-            "circle (cy={circle_cy}, r={circle_r}) overlaps foot tip {foot_tip_y}",
+            near_edge + 1e-6 >= conv_y,
+            "circle (cy={circle_cy}, r={circle_r}) overlaps foot point {conv_y}",
         );
-        // Offset is about one marker length past the foot tip.
-        let offset = circle_cy - foot_tip_y;
         assert!(
-            (7.0..=12.0).contains(&offset),
-            "circle not offset by ~one marker length: {offset}",
+            (near_edge - conv_y).abs() < 1.0,
+            "circle not tangent to foot point (gap {})",
+            near_edge - conv_y,
         );
     }
 
