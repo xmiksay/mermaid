@@ -17,7 +17,7 @@ Parser: `src/parse/quadrant.rs` · Renderer: `src/svg/quadrant.rs`.
   500 square). The `quadrant{1..4}Fill` themeVariables override each quadrant's
   background tint — `Theme.quadrant_fills` (`[Option<Str>; 4]`, filled by
   `apply_theme_variables`) with `Theme::quadrant_fill(quadrant, palette_index)`
-  falling back to the pie palette when unset.
+  falling back to the generic `cScale` palette when unset.
 - Axis labels follow upstream layout: the two x-axis labels are centered under
   each horizontal half; the two y-axis labels are rotated `-90°` and centered
   along each vertical half inside the left margin. Drawing y labels horizontally

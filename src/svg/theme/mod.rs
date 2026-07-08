@@ -11,7 +11,12 @@
 
 use std::borrow::Cow;
 
+mod palette;
 mod variables;
+
+use palette::{
+    CSCALE_DEFAULT, GIT_DEFAULT, PALETTE_DARK, PALETTE_FOREST, PALETTE_NEUTRAL, PIE_DEFAULT,
+};
 
 /// A borrowed-or-owned color/font string. Built-ins use `Cow::Borrowed`;
 /// `themeVariables` overrides use `Cow::Owned`.
@@ -53,13 +58,20 @@ pub struct Theme {
     pub flow_cluster_fill: Str,
     /// Border stroke of a flowchart/subgraph cluster frame.
     pub flow_cluster_stroke: Str,
-    /// Categorical color palette shared by every diagram kind that cycles
-    /// colors (pie slices, sankey/timeline/journey/radar/packet segments and
-    /// gitGraph lanes). `themeVariables` overrides (`pie{N}`, `git{N}`,
-    /// `cScale{N}`) recolor individual slots via
-    /// [`apply_theme_variables`][Theme::apply_theme_variables], so it is an
-    /// owned-on-write [`Cow`] slice rather than a `&'static` one.
+    /// Generic categorical scale (upstream `cScale0..11`) read by the diagram
+    /// kinds that cycle a color per series/section without a scale of their own:
+    /// journey, timeline, sankey, radar, packet, kanban, quadrant, xychart and
+    /// treemap. `cScale{N}` `themeVariables` recolor individual slots, so this
+    /// is an owned-on-write [`Cow`] slice rather than a `&'static` one.
+    pub cscale_palette: Cow<'static, [Str]>,
+    /// Pie-slice scale (upstream `pie1..12`), distinct from
+    /// [`cscale_palette`][Theme::cscale_palette]. `pie{N}` `themeVariables`
+    /// recolor individual slots.
     pub pie_palette: Cow<'static, [Str]>,
+    /// gitGraph lane scale (upstream `git0..7`), distinct from
+    /// [`cscale_palette`][Theme::cscale_palette]. `git{N}` `themeVariables`
+    /// recolor individual slots.
+    pub git_palette: Cow<'static, [Str]>,
     /// Pie slice/legend stroke (`pieStrokeColor`). `None` falls back to `#fff`.
     pub pie_stroke: Option<Str>,
     /// Pie slice fill-opacity (`pieOpacity`). `None` emits no opacity attribute
@@ -109,7 +121,9 @@ impl Theme {
             flow_label_bg: Cow::Borrowed("#fff"),
             flow_cluster_fill: Cow::Borrowed("#ffffde"),
             flow_cluster_stroke: Cow::Borrowed("#aaaa33"),
-            pie_palette: Cow::Borrowed(&PALETTE_DEFAULT),
+            cscale_palette: Cow::Borrowed(&CSCALE_DEFAULT),
+            pie_palette: Cow::Borrowed(&PIE_DEFAULT),
+            git_palette: Cow::Borrowed(&GIT_DEFAULT),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -159,7 +173,9 @@ impl Theme {
             flow_label_bg: Cow::Borrowed("#1E1E1E"),
             flow_cluster_fill: Cow::Borrowed("#2A2A3C"),
             flow_cluster_stroke: Cow::Borrowed("#9A9ABF"),
+            cscale_palette: Cow::Borrowed(&PALETTE_DARK),
             pie_palette: Cow::Borrowed(&PALETTE_DARK),
+            git_palette: Cow::Borrowed(&PALETTE_DARK),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -194,7 +210,9 @@ impl Theme {
             flow_label_bg: Cow::Borrowed("#F0F8F0"),
             flow_cluster_fill: Cow::Borrowed("#E4F0E4"),
             flow_cluster_stroke: Cow::Borrowed("#4E8A4E"),
+            cscale_palette: Cow::Borrowed(&PALETTE_FOREST),
             pie_palette: Cow::Borrowed(&PALETTE_FOREST),
+            git_palette: Cow::Borrowed(&PALETTE_FOREST),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -229,7 +247,9 @@ impl Theme {
             flow_label_bg: Cow::Borrowed("#fff"),
             flow_cluster_fill: Cow::Borrowed("#F4F4F4"),
             flow_cluster_stroke: Cow::Borrowed("#AAAAAA"),
+            cscale_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
             pie_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
+            git_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -252,8 +272,21 @@ impl Theme {
         }
     }
 
+    /// Pie-slice color at index `i` (upstream `pie{i+1}`), wrapping the scale.
     pub fn pie_color(&self, i: usize) -> &str {
         &self.pie_palette[i % self.pie_palette.len()]
+    }
+
+    /// Generic categorical color at index `i` (upstream `cScale{i}`), wrapping
+    /// the scale. Read by every color-cycling diagram without a scale of its
+    /// own.
+    pub fn cscale_color(&self, i: usize) -> &str {
+        &self.cscale_palette[i % self.cscale_palette.len()]
+    }
+
+    /// gitGraph lane color at index `i` (upstream `git{i}`), wrapping the scale.
+    pub fn git_color(&self, i: usize) -> &str {
+        &self.git_palette[i % self.git_palette.len()]
     }
 
     /// Pie slice/legend stroke (`pieStrokeColor`), defaulting to white.
@@ -287,7 +320,7 @@ impl Theme {
     }
 
     /// Fill for quadrant `quadrant` (1-based). Returns the `quadrant{N}Fill`
-    /// `themeVariables` override if set, else the palette color at
+    /// `themeVariables` override if set, else the categorical color at
     /// `palette_index` (the two differ because the quadrant-to-palette mapping
     /// is not 1:1).
     pub fn quadrant_fill(&self, quadrant: usize, palette_index: usize) -> &str {
@@ -297,7 +330,7 @@ impl Theme {
             .and_then(Option::as_deref)
         {
             Some(c) => c,
-            None => self.pie_color(palette_index),
+            None => self.cscale_color(palette_index),
         }
     }
 
@@ -313,18 +346,33 @@ impl Theme {
         self
     }
 
-    /// Set categorical-palette slot `i` to `c`, growing the palette (cloning it
-    /// out of the `'static` slice on first write) and back-filling any gap with
-    /// the wrapped built-in colors so untouched slots keep their defaults.
-    fn set_palette(&mut self, i: usize, c: Str) {
-        let base: Vec<Str> = self.pie_palette.to_vec();
-        let pal = self.pie_palette.to_mut();
-        while pal.len() <= i {
-            let fill = base[pal.len() % base.len()].clone();
-            pal.push(fill);
-        }
-        pal[i] = c;
+    /// Set `pie{i+1}` slot `i` to `c` (see [`set_slot`]).
+    fn set_pie_palette(&mut self, i: usize, c: Str) {
+        set_slot(&mut self.pie_palette, i, c);
     }
+
+    /// Set `git{i}` slot `i` to `c` (see [`set_slot`]).
+    fn set_git_palette(&mut self, i: usize, c: Str) {
+        set_slot(&mut self.git_palette, i, c);
+    }
+
+    /// Set `cScale{i}` slot `i` to `c` (see [`set_slot`]).
+    fn set_cscale_palette(&mut self, i: usize, c: Str) {
+        set_slot(&mut self.cscale_palette, i, c);
+    }
+}
+
+/// Set palette slot `i` to `c`, growing the palette (cloning it out of the
+/// `'static` slice on first write) and back-filling any gap with the wrapped
+/// built-in colors so untouched slots keep their defaults.
+fn set_slot(pal: &mut Cow<'static, [Str]>, i: usize, c: Str) {
+    let base: Vec<Str> = pal.to_vec();
+    let pal = pal.to_mut();
+    while pal.len() <= i {
+        let fill = base[pal.len() % base.len()].clone();
+        pal.push(fill);
+    }
+    pal[i] = c;
 }
 
 impl Default for Theme {
@@ -332,58 +380,6 @@ impl Default for Theme {
         Self::default_theme()
     }
 }
-
-const PALETTE_DEFAULT: [Str; 10] = [
-    Cow::Borrowed("#5470C6"),
-    Cow::Borrowed("#91CC75"),
-    Cow::Borrowed("#FAC858"),
-    Cow::Borrowed("#EE6666"),
-    Cow::Borrowed("#73C0DE"),
-    Cow::Borrowed("#3BA272"),
-    Cow::Borrowed("#FC8452"),
-    Cow::Borrowed("#9A60B4"),
-    Cow::Borrowed("#EA7CCC"),
-    Cow::Borrowed("#7BCBA5"),
-];
-
-const PALETTE_DARK: [Str; 10] = [
-    Cow::Borrowed("#7CB5FF"),
-    Cow::Borrowed("#A6D88A"),
-    Cow::Borrowed("#FFD980"),
-    Cow::Borrowed("#FF8888"),
-    Cow::Borrowed("#8FD8F2"),
-    Cow::Borrowed("#5BC09A"),
-    Cow::Borrowed("#FF9B6E"),
-    Cow::Borrowed("#B58CE0"),
-    Cow::Borrowed("#FF9CDA"),
-    Cow::Borrowed("#8FE0BA"),
-];
-
-const PALETTE_FOREST: [Str; 10] = [
-    Cow::Borrowed("#4E8A4E"),
-    Cow::Borrowed("#7BAA5A"),
-    Cow::Borrowed("#A8C870"),
-    Cow::Borrowed("#D7E0A0"),
-    Cow::Borrowed("#A8C8A8"),
-    Cow::Borrowed("#3A6B3A"),
-    Cow::Borrowed("#6BA66B"),
-    Cow::Borrowed("#C0D8A0"),
-    Cow::Borrowed("#7AA070"),
-    Cow::Borrowed("#5C8C5C"),
-];
-
-const PALETTE_NEUTRAL: [Str; 10] = [
-    Cow::Borrowed("#444"),
-    Cow::Borrowed("#666"),
-    Cow::Borrowed("#888"),
-    Cow::Borrowed("#AAA"),
-    Cow::Borrowed("#555"),
-    Cow::Borrowed("#777"),
-    Cow::Borrowed("#999"),
-    Cow::Borrowed("#BBB"),
-    Cow::Borrowed("#5E5E5E"),
-    Cow::Borrowed("#7E7E7E"),
-];
 
 #[cfg(test)]
 mod tests {
@@ -396,6 +392,19 @@ mod tests {
         assert_eq!(Theme::default_theme().flow_node_fill, "#ECECFF");
         assert_eq!(Theme::base().flow_node_fill, "#fff4dd");
         assert_eq!(Theme::by_name("base").unwrap().actor_fill, "#fff4dd");
+    }
+
+    #[test]
+    fn default_palettes_are_authentic_mermaid_scales() {
+        let t = Theme::default_theme();
+        // Pale-lavender / pale-yellow primaries, not the old saturated palette.
+        assert_eq!(t.cscale_color(0), "#B9B9FF");
+        assert_eq!(t.pie_color(0), "#ECECFF");
+        assert_eq!(t.git_color(0), "#ECECFF");
+        // The three upstream scales genuinely differ past the shared primaries.
+        assert_eq!(t.cscale_color(2), "#E8FFB9");
+        assert_eq!(t.pie_color(2), "#B5FF20");
+        assert_eq!(t.git_color(2), "#F9FFEC");
     }
 
     #[test]

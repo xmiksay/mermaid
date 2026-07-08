@@ -56,7 +56,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
 
     let color_at = |i: usize| -> String {
         if d.plot_color_palette.is_empty() {
-            theme.pie_color(i).to_string()
+            theme.cscale_color(i).to_string()
         } else {
             d.plot_color_palette[i % d.plot_color_palette.len()].clone()
         }

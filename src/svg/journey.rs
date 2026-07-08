@@ -87,7 +87,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
     // Actor legend in the top-left gutter.
     for (ai, actor) in actors.iter().enumerate() {
         let cy = content_top + 8.0 + ai as f64 * LEGEND_ROW;
-        let color = theme.pie_color(ai);
+        let color = theme.cscale_color(ai);
         svg.circle(
             MARGIN + 8.0,
             cy,
@@ -123,7 +123,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
         if sec.tasks.is_empty() {
             continue;
         }
-        let color = theme.pie_color(si);
+        let color = theme.cscale_color(si);
         let band_x0 = cursor;
 
         for t in &sec.tasks {
@@ -163,7 +163,7 @@ pub(crate) fn render(d: &JourneyDiagram, theme: &Theme) -> String {
             let mut dx = tx + 14.0;
             for a in &t.actors {
                 if let Some(idx) = actors.iter().position(|x| x == a) {
-                    let ac = theme.pie_color(idx);
+                    let ac = theme.cscale_color(idx);
                     svg.circle(
                         dx,
                         task_y,

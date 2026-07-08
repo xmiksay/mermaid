@@ -248,7 +248,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
             } else {
                 (origin_x + lane as f64 * LANE_GAP, PAD + title_h + 14.0)
             };
-            let color = theme.pie_color(lane);
+            let color = theme.git_color(lane);
             svg.text(
                 x,
                 y,
@@ -259,7 +259,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
 
         for (i, _) in branches.iter().enumerate() {
             let lane = lane_of_seq[i];
-            let color = theme.pie_color(lane);
+            let color = theme.git_color(lane);
             if horizontal {
                 let y = origin_y + lane as f64 * LANE_GAP;
                 svg.line(
@@ -304,7 +304,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
                     fnum(nx),
                     fnum(ny),
                 );
-                let color = theme.pie_color(n.lane);
+                let color = theme.git_color(n.lane);
                 svg.path(
                     &path,
                     &format!("fill=\"none\" stroke=\"{color}\" stroke-width=\"1.5\""),
@@ -316,7 +316,7 @@ pub(crate) fn render(d: &GitGraphDiagram, theme: &Theme) -> String {
     // Commit nodes.
     for n in &nodes {
         let (x, y) = pos(n);
-        let color = theme.pie_color(n.lane);
+        let color = theme.git_color(n.lane);
         match n.kind {
             CommitKind::Normal => {
                 svg.circle(

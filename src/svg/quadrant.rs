@@ -182,7 +182,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
             .color
             .clone()
             .or_else(|| class.and_then(|c| c.color.clone()))
-            .unwrap_or_else(|| theme.pie_color(i + 4).to_string());
+            .unwrap_or_else(|| theme.cscale_color(i + 4).to_string());
         let stroke = p
             .stroke_color
             .clone()

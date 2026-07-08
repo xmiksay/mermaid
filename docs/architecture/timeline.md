@@ -13,8 +13,9 @@ Parser: `src/parse/timeline.rs` · Renderer: `src/svg/timeline.rs`.
   layout rotated a quarter turn. `LR`/`RL`/unset keep the horizontal layout (axis
   reversal for `BT`/`RL` is not modelled). A **sectionless**
   timeline advances its color per time-period (upstream `isWithoutSections`)
-  instead of one flat fill: `src/svg/timeline.rs` picks `pie_color(period idx)`
-  when no section is named, `pie_color(section idx)` otherwise.
+  instead of one flat fill: `src/svg/timeline.rs` picks
+  `cscale_color(period idx)` when no section is named,
+  `cscale_color(section idx)` otherwise.
   `config.timeline.disableMulticolor` (frontmatter/`%%{init}%%` →
   `DiagramMeta.timeline_disable_multicolor` → `TimelineDiagram.disable_multicolor`)
   forces the old flat single color back on.

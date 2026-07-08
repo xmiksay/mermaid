@@ -115,7 +115,7 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     for (si, sec) in d.sections.iter().enumerate() {
         let w = sec.periods.len() as f64 * PERIOD_GAP;
         if w > 0.0 && sec.name.is_some() {
-            let color = theme.pie_color(si);
+            let color = theme.cscale_color(si);
             svg.rect(
                 x,
                 band_y,
@@ -159,7 +159,7 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
             } else {
                 idx
             };
-            let color = theme.pie_color(color_idx);
+            let color = theme.cscale_color(color_idx);
             let cx = chart_left + idx as f64 * PERIOD_GAP + PERIOD_GAP / 2.0;
             svg.circle(
                 cx,
@@ -241,7 +241,7 @@ fn render_vertical(d: &TimelineDiagram, theme: &Theme) -> String {
     for (si, sec) in d.sections.iter().enumerate() {
         let h = sec.periods.len() as f64 * PERIOD_GAP;
         if h > 0.0 && sec.name.is_some() {
-            let color = theme.pie_color(si);
+            let color = theme.cscale_color(si);
             svg.rect(
                 PAD,
                 y,
@@ -290,7 +290,7 @@ fn render_vertical(d: &TimelineDiagram, theme: &Theme) -> String {
             } else {
                 idx
             };
-            let color = theme.pie_color(color_idx);
+            let color = theme.cscale_color(color_idx);
             let cy = chart_top + idx as f64 * PERIOD_GAP + PERIOD_GAP / 2.0;
             svg.circle(
                 axis_x,
@@ -403,16 +403,16 @@ mod tests {
         let theme = Theme::default();
         let svg = render(&sectionless(false), &theme);
         // Distinct period colors are present.
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(0))));
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(1))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
     }
 
     #[test]
     fn disable_multicolor_keeps_one_color() {
         let theme = Theme::default();
         let svg = render(&sectionless(true), &theme);
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.pie_color(0))));
-        assert!(!svg.contains(&format!("fill=\"{}\"", theme.pie_color(1))));
+        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
+        assert!(!svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
     }
 
     /// `(cx, cy)` of each period marker (`r="6"` circle) in source order.

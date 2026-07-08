@@ -139,10 +139,10 @@ impl Theme {
         if let Some(v) = get("pieOpacity") {
             self.pie_opacity = Some(own(v));
         }
-        // `pie{N}` is 1-based upstream; slot N-1 in the shared palette.
+        // `pie{N}` is 1-based upstream; slot N-1 in the pie palette.
         for n in 1..=12 {
             if let Some(v) = get(&format!("pie{n}")) {
-                self.set_palette(n - 1, own(v));
+                self.set_pie_palette(n - 1, own(v));
             }
         }
     }
@@ -153,7 +153,7 @@ impl Theme {
         let get = |k: &str| vars.get(k).map(String::as_str);
         for n in 0..8 {
             if let Some(v) = get(&format!("git{n}")) {
-                self.set_palette(n, own(v));
+                self.set_git_palette(n, own(v));
             }
         }
         if let Some(v) = get("commitLabelColor") {
@@ -164,13 +164,13 @@ impl Theme {
         }
     }
 
-    /// The generic `cScale{0..11}` categorical scale, which this crate models
-    /// as the same shared palette every color-cycling diagram reads.
+    /// The generic `cScale{0..11}` categorical scale read by the color-cycling
+    /// diagrams without a scale of their own.
     fn apply_palette_variables(&mut self, vars: &BTreeMap<String, String>) {
         let get = |k: &str| vars.get(k).map(String::as_str);
         for n in 0..12 {
             if let Some(v) = get(&format!("cScale{n}")) {
-                self.set_palette(n, own(v));
+                self.set_cscale_palette(n, own(v));
             }
         }
     }
@@ -214,15 +214,15 @@ mod tests {
     #[test]
     fn quadrant_fill_variables_override_palette() {
         let mut t = Theme::default_theme();
-        // Unset quadrants fall back to their palette index.
-        assert_eq!(t.quadrant_fill(1, 1), t.pie_color(1));
+        // Unset quadrants fall back to the generic categorical scale.
+        assert_eq!(t.quadrant_fill(1, 1), t.cscale_color(1));
         let mut vars = BTreeMap::new();
         vars.insert("quadrant1Fill".to_string(), "#ff0000".to_string());
         vars.insert("quadrant3Fill".to_string(), "#00ff00".to_string());
         t.apply_theme_variables(&vars);
         assert_eq!(t.quadrant_fill(1, 1), "#ff0000");
         assert_eq!(t.quadrant_fill(3, 2), "#00ff00");
-        assert_eq!(t.quadrant_fill(2, 0), t.pie_color(0));
+        assert_eq!(t.quadrant_fill(2, 0), t.cscale_color(0));
     }
 
     #[test]
@@ -252,19 +252,24 @@ mod tests {
         assert_eq!(t.pie_color(0), "#111111");
         assert_eq!(t.pie_color(2), "#333333");
         // Untouched slots keep their defaults.
-        assert_eq!(t.pie_color(1), "#91CC75");
+        assert_eq!(t.pie_color(1), "#FFFFDE");
+        // A `pie{N}` override touches only the pie scale, not the others.
+        assert_eq!(t.cscale_color(0), "#B9B9FF");
+        assert_eq!(t.git_color(0), "#ECECFF");
     }
 
     #[test]
     fn pie_variable_grows_palette_beyond_default_len() {
-        let mut t = Theme::default_theme();
+        // The dark theme's shared palette is only 10 colors, so `pie12`
+        // (slot 11) forces the back-filling growth path.
+        let mut t = Theme::dark();
         let mut vars = BTreeMap::new();
         vars.insert("pie12".to_string(), "#abcdef".to_string());
         t.apply_theme_variables(&vars);
         // Slot 11 is past the built-in 10-color palette; it must exist now.
         assert_eq!(t.pie_color(11), "#abcdef");
         // The back-filled slot 10 wraps the built-in palette (index 0).
-        assert_eq!(t.pie_color(10), "#5470C6");
+        assert_eq!(t.pie_color(10), "#7CB5FF");
     }
 
     #[test]
@@ -275,7 +280,9 @@ mod tests {
         vars.insert("commitLabelColor".to_string(), "#c0ffee".to_string());
         vars.insert("tagLabelColor".to_string(), "#facade".to_string());
         t.apply_theme_variables(&vars);
-        assert_eq!(t.pie_color(0), "#0a0a0a");
+        assert_eq!(t.git_color(0), "#0a0a0a");
+        // The git override leaves the pie/cScale scales untouched.
+        assert_eq!(t.pie_color(0), "#ECECFF");
         assert_eq!(t.commit_label(), "#c0ffee");
         assert_eq!(t.tag_label(), "#facade");
     }
