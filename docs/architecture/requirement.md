@@ -26,4 +26,15 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   always `from` regardless of the written direction.
 - Relation stroke style matches upstream 11.x: `contains` is the only solid
   relation; every other kind (`copies`, `derives`, `satisfies`, `verifies`,
-  `refines`, `traces`) is dashed and ends in the thin `req-arrow` head.
+  `refines`, `traces`) is dashed and ends in the thin `req-arrow` head. The
+  relation label is drawn in upstream's `<<kind>>` form on a plain edge-label
+  background patch (no border/pill), not a lowercase guillemet pill.
+- Node header/body match upstream's format (`svg/requirement.rs`): the header
+  stereotype is title-cased in `<<…>>` form (`<<Requirement>>`,
+  `<<Functional Requirement>>`, …, `<<Element>>`) and the body is prose
+  `Label: value` lines (`ID`/`Text`/`Risk`/`Verification` for requirements,
+  `Type`/`Doc Ref` for elements) with title-cased enum values (`high` → `High`,
+  `test` → `Test`). Angle brackets in the `<<…>>` strings are emitted as the
+  `#lt;`/`#gt;` entity codes so the inline-HTML parser doesn't strip
+  `<Requirement>` as an unknown tag; they decode back to `<`/`>` after tag
+  scanning.
