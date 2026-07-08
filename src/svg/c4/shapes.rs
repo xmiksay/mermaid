@@ -56,14 +56,18 @@ pub(super) fn draw_element(
         | C4ElementKind::ComponentQueue => draw_queue(el, style, x, y, w, h, svg),
         _ => draw_box(el, style, x, y, w, h, svg),
     }
-    if matches!(el.kind, C4ElementKind::Person) {
-        draw_person_icon(svg, x + w - 28.0, y + 6.0, &style.fill);
-    }
     let _ = theme;
 }
 
-fn draw_person_icon(svg: &mut SvgBuilder, x: f64, y: f64, fill: &str) {
-    let stroke = if is_dark_fill(fill) {
+/// Height reserved at the top of a person box for the centered figure, so the
+/// label block clears it.
+const PERSON_GLYPH_H: f64 = 26.0;
+
+/// A large, horizontally centered person figure (head + shoulders) at the top of
+/// the box, drawn in a contrasting fill — matching upstream's centered glyph
+/// rather than a small corner icon (#258).
+fn draw_person_icon(svg: &mut SvgBuilder, cx: f64, top: f64, fill: &str) {
+    let color = if is_dark_fill(fill) {
         "#FFFFFF"
     } else {
         "#0B2B4A"
@@ -71,12 +75,16 @@ fn draw_person_icon(svg: &mut SvgBuilder, x: f64, y: f64, fill: &str) {
     use std::fmt::Write as _;
     let _ = write!(
         svg.body,
-        "<g transform=\"translate({x} {y})\" fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\
-         <circle cx=\"11\" cy=\"6\" r=\"4\" fill=\"{stroke}\"/>\
-         <path d=\"M2 22 C2 14 20 14 20 22\" fill=\"{stroke}\"/>\
+        "<g fill=\"{color}\" stroke=\"none\">\
+         <circle cx=\"{cx}\" cy=\"{head_y}\" r=\"8\"/>\
+         <path d=\"M{lx} {by} C{lx} {ty} {rx} {ty} {rx} {by} Z\"/>\
          </g>",
-        x = fnum(x),
-        y = fnum(y),
+        cx = fnum(cx),
+        head_y = fnum(top + 8.0),
+        lx = fnum(cx - 13.0),
+        rx = fnum(cx + 13.0),
+        ty = fnum(top + 16.0),
+        by = fnum(top + 30.0),
     );
 }
 
@@ -93,21 +101,22 @@ fn draw_box(
     let border = &style.border;
     let text_fill = style.text.as_str();
     let muted = style.muted.as_str();
+    // External elements are solid gray (differentiated by palette, not a dash).
     svg.rect(
         x,
         y,
         w,
         h,
-        &format!(
-            "fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"6\"{dash}",
-            dash = if el.external {
-                " stroke-dasharray=\"5 3\""
-            } else {
-                ""
-            }
-        ),
+        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"6\""),
     );
-    write_label_block(svg, el, x, y, w, h, text_fill, muted);
+    // Persons carry a centered figure at the top; inset the label to clear it.
+    let inset = if matches!(el.kind, C4ElementKind::Person) {
+        draw_person_icon(svg, x + w / 2.0, y + 6.0, fill);
+        PERSON_GLYPH_H
+    } else {
+        0.0
+    };
+    write_label_block(svg, el, x, y + inset, w, h - inset, text_fill, muted);
 }
 
 fn draw_cylinder(
@@ -127,11 +136,6 @@ fn draw_cylinder(
     let ry = 10.0;
     let top_y = y + ry;
     let bot_y = y + h - ry;
-    let dash = if el.external {
-        " stroke-dasharray=\"5 3\""
-    } else {
-        ""
-    };
     svg.path(
         &format!(
             "M {lx} {top_y} L {lx} {bot_y} A {rx} {ry} 0 0 0 {rx_end} {bot_y} L {rx_end} {top_y}",
@@ -142,7 +146,7 @@ fn draw_cylinder(
             ry = fnum(ry),
             rx_end = fnum(x + w),
         ),
-        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\"{dash}"),
+        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
     svg.path(
         &format!(
@@ -153,7 +157,7 @@ fn draw_cylinder(
             ry = fnum(ry),
             rx_end = fnum(x + w),
         ),
-        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\"{dash}"),
+        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
     svg.path(
         &format!(
@@ -164,7 +168,7 @@ fn draw_cylinder(
             ry = fnum(ry),
             rx_end = fnum(x + w),
         ),
-        &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1.5\"{dash}"),
+        &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
     write_label_block(svg, el, x, y + ry, w, h - 2.0 * ry, text_fill, muted);
 }
@@ -183,18 +187,13 @@ fn draw_queue(
     let text_fill = style.text.as_str();
     let muted = style.muted.as_str();
     let rx = h / 2.0;
-    let dash = if el.external {
-        " stroke-dasharray=\"5 3\""
-    } else {
-        ""
-    };
     svg.rect(
         x,
         y,
         w,
         h,
         &format!(
-            "fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"{rx}\" ry=\"{rx}\"{dash}"
+            "fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"{rx}\" ry=\"{rx}\""
         ),
     );
     write_label_block(svg, el, x, y, w, h, text_fill, muted);

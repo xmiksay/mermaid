@@ -16,6 +16,7 @@ pub(super) fn draw_rel(
     r: &C4Relation,
     ov: Option<&C4RelStyle>,
     pos: &HashMap<String, (f64, f64, f64, f64)>,
+    route: Option<&[(f64, f64)]>,
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
@@ -35,10 +36,24 @@ pub(super) fn draw_rel(
     let (sx, sy) = (ax + aw / 2.0, ay + ah / 2.0);
     let (tx, ty) = (bx + bw / 2.0, by + bh / 2.0);
 
-    // Point-to-point line, clipped to each node's rectangle.
-    let p_first = clip_rect((tx, ty), (sx, sy), (aw, ah));
-    let p_last = clip_rect((sx, sy), (tx, ty), (bw, bh));
-    let clipped = vec![p_first, p_last];
+    // Follow the layered route when one is given (endpoints clipped to each
+    // node's rectangle); otherwise fall back to a straight point-to-point line.
+    let clipped: Vec<(f64, f64)> = match route {
+        Some(pts) if pts.len() >= 2 => {
+            let toward_src = pts[1];
+            let toward_dst = pts[pts.len() - 2];
+            let mut v = Vec::with_capacity(pts.len());
+            v.push(clip_rect(toward_src, (sx, sy), (aw, ah)));
+            v.extend_from_slice(&pts[1..pts.len() - 1]);
+            v.push(clip_rect(toward_dst, (tx, ty), (bw, bh)));
+            v
+        }
+        _ => {
+            let p_first = clip_rect((tx, ty), (sx, sy), (aw, ah));
+            let p_last = clip_rect((sx, sy), (tx, ty), (bw, bh));
+            vec![p_first, p_last]
+        }
+    };
 
     let markers = if r.bidirectional {
         "marker-start=\"url(#c4-arrow)\" marker-end=\"url(#c4-arrow)\""
@@ -46,8 +61,13 @@ pub(super) fn draw_rel(
         "marker-end=\"url(#c4-arrow)\""
     };
 
-    // Upstream draws relations as a quadratic Bézier through the routed midpoint.
-    let path = quad_path(&clipped);
+    // A two-point route curves as a quadratic Bézier through its midpoint;
+    // a routed multi-point polyline is drawn as straight segments.
+    let path = if clipped.len() == 2 {
+        quad_path(&clipped)
+    } else {
+        polyline_path(&clipped)
+    };
     svg.path(
         &path,
         &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1\" {markers}"),
@@ -118,6 +138,15 @@ fn quad_path(pts: &[(f64, f64)]) -> String {
         fnum(end.0),
         fnum(end.1),
     )
+}
+
+/// Straight-segment path through every waypoint (`M … L … L …`).
+fn polyline_path(pts: &[(f64, f64)]) -> String {
+    let mut path = format!("M{} {}", fnum(pts[0].0), fnum(pts[0].1));
+    for p in &pts[1..] {
+        path.push_str(&format!(" L{} {}", fnum(p.0), fnum(p.1)));
+    }
+    path
 }
 
 fn truncate(s: &str, n: usize) -> String {

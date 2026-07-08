@@ -1,25 +1,29 @@
 //! C4 diagram renderer.
 //!
-//! Layout: upstream-style row-flow placement. Mermaid's `c4Renderer` does *not*
-//! run a graph layout for C4 — it flows shapes into rows. We mirror that: each
-//! boundary lays its members out left-to-right, wrapping after `SHAPE_IN_ROW`
-//! shapes, and is then sized from that content; sibling boundaries (and any
-//! unbounded elements) are themselves flowed `BOUNDARY_IN_ROW` per row. Boundary
-//! boxes therefore never overlap by construction.
+//! Layout: a flat diagram whose relations form a graph (no boundaries) is laid
+//! out with the shared [`sugiyama`](crate::sugiyama) layered layout, so sources
+//! (persons) tier above the systems they use and edges route through the gaps
+//! between layers instead of straight across sibling boxes (#258). Diagrams that
+//! use boundaries — or have no relations — keep the upstream-style row-flow
+//! placement: each boundary lays its members out left-to-right, wrapping after
+//! `SHAPE_IN_ROW` shapes, and is then sized from that content; sibling
+//! boundaries are flowed `BOUNDARY_IN_ROW` per row, so their boxes never overlap
+//! by construction.
 //!
 //! Boundaries are drawn as an outline around their content: dashed `7.0,7.0` for
 //! most kinds, but solid for `Deployment_Node` (matching upstream's `nodeType`
 //! special-case). Stroke is `#444444`, width 1.
 //!
-//! Relations are `#444444` quadratic Bézier curves between the placed shapes,
-//! clipped to each node's rectangle, with an arrow head on the destination side
-//! (and on the source side for `BiRel`). Labels sit at the segment midpoint with
-//! no background; `[techn]` renders italic below the label.
+//! Relations are `#444444` connectors between the placed shapes, clipped to each
+//! node's rectangle, following the layered route when one is available, with an
+//! arrow head on the destination side (and on the source side for `BiRel`).
+//! Labels sit at the route midpoint on an opaque background so they stay legible
+//! in the clear space between layers; `[techn]` renders italic below the label.
 
 use std::collections::HashMap;
 
 use crate::parse::{
-    C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4Kind, C4RelStyle,
+    C4BoundaryKind, C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4RelStyle,
 };
 
 use super::builder::{fnum, SvgBuilder};
@@ -56,29 +60,44 @@ pub(super) const C4_LINE: &str = "#444444";
 
 pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
     let title_h = if d.title.is_some() { TITLE_GAP } else { 0.0 };
 
     let origin_x = PAD;
     let origin_y = PAD + title_h;
 
-    // Row-flow knobs are overridable via `UpdateLayoutConfig` (see #14).
-    let shape_in_row = d.layout.shape_in_row.unwrap_or(SHAPE_IN_ROW).max(1);
-    let boundary_in_row = d.layout.boundary_in_row.unwrap_or(BOUNDARY_IN_ROW).max(1);
-    let (nodes, _cw, _ch) =
-        flow_layout(&d.elements, shape_in_row, boundary_in_row, theme.font_size);
-
     let mut pos: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     let mut boundaries: Vec<BoundaryBox> = Vec::new();
     let mut leaves: Vec<(C4Element, f64, f64, f64, f64)> = Vec::new();
-    place_absolute(
-        &nodes,
-        origin_x,
-        origin_y,
-        &mut pos,
-        &mut boundaries,
-        &mut leaves,
-    );
+    let mut routes: HashMap<(String, String), Vec<(f64, f64)>> = HashMap::new();
+
+    // A flat, related diagram tiers via the shared layered layout; boundaries
+    // (and relation-free diagrams) keep the row-flow placement.
+    let has_boundary = d.elements.iter().any(|e| e.boundary_kind.is_some());
+    let layered = if has_boundary {
+        None
+    } else {
+        layered_layout(d, origin_x, origin_y)
+    };
+
+    if let Some((lpos, lleaves, lroutes)) = layered {
+        pos = lpos;
+        leaves = lleaves;
+        routes = lroutes;
+    } else {
+        // Row-flow knobs are overridable via `UpdateLayoutConfig` (see #14).
+        let shape_in_row = d.layout.shape_in_row.unwrap_or(SHAPE_IN_ROW).max(1);
+        let boundary_in_row = d.layout.boundary_in_row.unwrap_or(BOUNDARY_IN_ROW).max(1);
+        let (nodes, _cw, _ch) =
+            flow_layout(&d.elements, shape_in_row, boundary_in_row, theme.font_size);
+        place_absolute(
+            &nodes,
+            origin_x,
+            origin_y,
+            &mut pos,
+            &mut boundaries,
+            &mut leaves,
+        );
+    }
 
     let mut max_x = origin_x;
     let mut max_y = origin_y;
@@ -99,21 +118,6 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
             PAD + 22.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
             t,
-        );
-        let sub = match d.kind {
-            C4Kind::Context => "System Context",
-            C4Kind::Container => "Container Diagram",
-            C4Kind::Component => "Component Diagram",
-            C4Kind::Dynamic => "Dynamic Diagram",
-            C4Kind::Deployment => "Deployment Diagram",
-        };
-        svg.text(
-            width / 2.0,
-            PAD + 38.0,
-            &format!(
-                "text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"11\" font-style=\"italic\""
-            ),
-            sub,
         );
     }
 
@@ -146,7 +150,10 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
 
     for r in &d.relations {
         let ov = rel_styles.get(&(r.from.as_str(), r.to.as_str())).copied();
-        draw_rel(r, ov, &pos, &mut svg, theme);
+        let route = routes
+            .get(&(r.from.clone(), r.to.clone()))
+            .map(Vec::as_slice);
+        draw_rel(r, ov, &pos, route, &mut svg, theme);
     }
 
     svg.finish()
@@ -286,6 +293,90 @@ fn place_absolute(
             leaves.push((n.el.clone(), ax, ay, n.w, n.h));
         }
     }
+}
+
+/// Layered layout for a flat, related C4 diagram: rank elements by relation
+/// direction (persons above the systems they use) via the shared sugiyama
+/// layout, so edges route through the inter-layer gaps rather than straight
+/// across sibling boxes. Returns `None` (falling back to row-flow) when the
+/// diagram has no usable relations or the aliases don't form a clean graph.
+type LayeredLayout = (
+    HashMap<String, (f64, f64, f64, f64)>,
+    Vec<(C4Element, f64, f64, f64, f64)>,
+    HashMap<(String, String), Vec<(f64, f64)>>,
+);
+
+fn layered_layout(d: &C4Diagram, origin_x: f64, origin_y: f64) -> Option<LayeredLayout> {
+    use crate::sugiyama::{layout_with, Graph, LayoutConfig};
+
+    let mut id_of: HashMap<&str, u32> = HashMap::new();
+    let mut node_ids = Vec::with_capacity(d.elements.len());
+    let mut node_size = HashMap::new();
+    for (i, el) in d.elements.iter().enumerate() {
+        let id = i as u32;
+        // A duplicate alias would make the graph ambiguous — fall back.
+        if id_of.insert(el.alias.as_str(), id).is_some() {
+            return None;
+        }
+        node_ids.push(id);
+        node_size.insert(id, shape_size(el.kind));
+    }
+
+    let mut edges = Vec::new();
+    for r in &d.relations {
+        if let (Some(&u), Some(&v)) = (id_of.get(r.from.as_str()), id_of.get(r.to.as_str())) {
+            edges.push((u, v));
+        }
+    }
+    if edges.is_empty() {
+        return None;
+    }
+
+    let g = Graph {
+        nodes: node_ids,
+        edges,
+        node_size,
+    };
+    let cfg = LayoutConfig {
+        layer_gap: 90.0,
+        node_gap: 55.0,
+        ..Default::default()
+    };
+    let layout = layout_with(&g, &cfg).ok()?;
+
+    // Sugiyama centers nodes at arbitrary coordinates; shift the bounding box so
+    // its top-left corner lands on the drawing origin.
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    for (i, el) in d.elements.iter().enumerate() {
+        let (cx, cy) = *layout.node_pos.get(&(i as u32))?;
+        let (w, h) = shape_size(el.kind);
+        min_x = min_x.min(cx - w / 2.0);
+        min_y = min_y.min(cy - h / 2.0);
+    }
+    let dx = origin_x - min_x;
+    let dy = origin_y - min_y;
+
+    let mut pos = HashMap::new();
+    let mut leaves = Vec::new();
+    for (i, el) in d.elements.iter().enumerate() {
+        let (cx, cy) = layout.node_pos[&(i as u32)];
+        let (w, h) = shape_size(el.kind);
+        let x = cx - w / 2.0 + dx;
+        let y = cy - h / 2.0 + dy;
+        pos.insert(el.alias.clone(), (x, y, w, h));
+        leaves.push((el.clone(), x, y, w, h));
+    }
+
+    let mut routes = HashMap::new();
+    for ((u, v), pts) in &layout.edge_points {
+        let from = d.elements[*u as usize].alias.clone();
+        let to = d.elements[*v as usize].alias.clone();
+        let shifted = pts.iter().map(|&(px, py)| (px + dx, py + dy)).collect();
+        routes.insert((from, to), shifted);
+    }
+
+    Some((pos, leaves, routes))
 }
 
 fn shape_size(_kind: C4ElementKind) -> (f64, f64) {
