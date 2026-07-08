@@ -62,7 +62,8 @@ pub(crate) fn render(d: &TreemapDiagram, theme: &Theme) -> String {
         w: CHART_W,
         h: CHART_H,
     };
-    layout(&d.root, area, 0, &mut svg, &ctx);
+    let mut next_id = 0usize;
+    layout(&d.root, area, 0, "", &mut svg, &ctx, &mut next_id);
 
     svg.finish()
 }
@@ -79,14 +80,39 @@ fn node_value(n: &TreemapNode) -> f64 {
     }
 }
 
-fn layout(nodes: &[TreemapNode], area: Rect, depth: usize, svg: &mut SvgBuilder, ctx: &Ctx) {
+/// Order sibling indices by value descending, ties keeping source order
+/// (`sort_by` is stable). Upstream sorts every level this way.
+fn order_by_value(nodes: &[TreemapNode]) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..nodes.len()).collect();
+    idx.sort_by(|&a, &b| node_value(&nodes[b]).total_cmp(&node_value(&nodes[a])));
+    idx
+}
+
+fn layout(
+    nodes: &[TreemapNode],
+    area: Rect,
+    depth: usize,
+    branch: &str,
+    svg: &mut SvgBuilder,
+    ctx: &Ctx,
+    next_id: &mut usize,
+) {
     if nodes.is_empty() || area.w <= 2.0 || area.h <= 2.0 {
         return;
     }
-    let values: Vec<f64> = nodes.iter().map(node_value).collect();
+    let order = order_by_value(nodes);
+    let values: Vec<f64> = order.iter().map(|&i| node_value(&nodes[i])).collect();
     let rects = squarify(&values, area);
-    for (i, (n, r)) in nodes.iter().zip(rects.iter()).enumerate() {
-        draw_node(n, *r, i, depth, svg, ctx);
+    for (rank, (&i, r)) in order.iter().zip(rects.iter()).enumerate() {
+        let n = &nodes[i];
+        // Top-level sections seed the branch hue; descendants inherit it so a
+        // whole branch stays one color family.
+        let base = if depth == 0 {
+            ctx.theme.cscale_color(rank).to_string()
+        } else {
+            branch.to_string()
+        };
+        draw_node(n, *r, rank, &base, svg, ctx, next_id);
         if !n.children.is_empty() && r.w > 30.0 && r.h > HEADER_H + 10.0 {
             let inner = Rect {
                 x: r.x + 4.0,
@@ -94,53 +120,187 @@ fn layout(nodes: &[TreemapNode], area: Rect, depth: usize, svg: &mut SvgBuilder,
                 w: r.w - 8.0,
                 h: r.h - HEADER_H - 4.0,
             };
-            layout(&n.children, inner, depth + 1, svg, ctx);
+            layout(&n.children, inner, depth + 1, &base, svg, ctx, next_id);
         }
     }
 }
 
-fn draw_node(n: &TreemapNode, r: Rect, i: usize, depth: usize, svg: &mut SvgBuilder, ctx: &Ctx) {
-    // A `:::class` reference overrides the palette fill/stroke.
+fn draw_node(
+    n: &TreemapNode,
+    r: Rect,
+    rank: usize,
+    base: &str,
+    svg: &mut SvgBuilder,
+    ctx: &Ctx,
+    next_id: &mut usize,
+) {
+    let leaf = n.children.is_empty();
+    // A `:::class` reference overrides the branch fill/stroke.
     let classes: Vec<String> = n.class_name.iter().cloned().collect();
     let rs = resolve_style(ctx.class_defs, &classes, &Style::new());
-    let color = rs
-        .fill
-        .clone()
-        .unwrap_or_else(|| ctx.theme.cscale_color(i + depth).to_string());
+    let fill = rs.fill.clone().unwrap_or_else(|| {
+        if leaf {
+            // Siblings step through darker shades of the branch hue.
+            darken(base, (0.09 * rank as f64).min(0.45))
+        } else {
+            // Section band is a light tint so nested leaves read on top.
+            lighten(base, 0.5)
+        }
+    });
     let stroke = rs.stroke.as_deref().unwrap_or("#fff");
-    let leaf = n.children.is_empty();
     svg.rect(
         r.x,
         r.y,
         r.w,
         r.h,
-        &format!(
-            "fill=\"{color}\" fill-opacity=\"{op}\" stroke=\"{stroke}\" stroke-width=\"1.5\"",
-            op = if leaf { "0.85" } else { "0.25" }
-        ),
+        &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\""),
     );
-    if r.w > 24.0 && r.h > 16.0 {
-        let font_size = if r.w < 60.0 { 10 } else { 12 };
-        let label_fill: &str = if leaf { "#fff" } else { &ctx.theme.fg };
+    if leaf {
+        draw_leaf_label(n, r, svg, ctx, next_id);
+    } else {
+        draw_section_header(n, r, svg, ctx, next_id);
+    }
+}
+
+/// Centered dark name over its value, clipped to the cell.
+fn draw_leaf_label(n: &TreemapNode, r: Rect, svg: &mut SvgBuilder, ctx: &Ctx, next_id: &mut usize) {
+    if r.w <= 24.0 || r.h <= 16.0 {
+        return;
+    }
+    let value_text = if ctx.show_values && r.h > 30.0 {
+        n.value.map(|v| format_value(v, ctx.value_format))
+    } else {
+        None
+    };
+    let cx = r.x + r.w / 2.0;
+    let cy = r.y + r.h / 2.0;
+    let clip = clip_open(r, svg, next_id);
+    let name_y = if value_text.is_some() {
+        cy - 2.0
+    } else {
+        cy + 4.0
+    };
+    svg.text(
+        cx,
+        name_y,
+        &format!(
+            "text-anchor=\"middle\" fill=\"{}\" font-size=\"14\"",
+            ctx.theme.fg
+        ),
+        &n.label,
+    );
+    if let Some(v) = value_text {
         svg.text(
-            r.x + 4.0,
-            r.y + 12.0,
+            cx,
+            cy + 14.0,
             &format!(
-                "fill=\"{}\" font-size=\"{font_size}\" font-weight=\"bold\"",
-                label_fill
+                "text-anchor=\"middle\" fill=\"{}\" font-size=\"11\"",
+                ctx.theme.fg_muted
             ),
-            &n.label,
+            &v,
         );
-        if let Some(v) = n.value {
-            if ctx.show_values && leaf && r.h > 28.0 {
-                svg.text(
-                    r.x + 4.0,
-                    r.y + 24.0,
-                    "fill=\"#fff\" font-size=\"9\"",
-                    &format_value(v, ctx.value_format),
-                );
-            }
+    }
+    clip_close(clip, svg);
+}
+
+/// Section band: name left-aligned, running total right-aligned in italics.
+fn draw_section_header(
+    n: &TreemapNode,
+    r: Rect,
+    svg: &mut SvgBuilder,
+    ctx: &Ctx,
+    next_id: &mut usize,
+) {
+    if r.w <= 30.0 || r.h <= 16.0 {
+        return;
+    }
+    let clip = clip_open(r, svg, next_id);
+    let y = r.y + 15.0;
+    svg.text(
+        r.x + 6.0,
+        y,
+        &format!(
+            "text-anchor=\"start\" fill=\"{}\" font-size=\"13\" font-weight=\"bold\"",
+            ctx.theme.fg
+        ),
+        &n.label,
+    );
+    if ctx.show_values {
+        svg.text(
+            r.x + r.w - 6.0,
+            y,
+            &format!(
+                "text-anchor=\"end\" fill=\"{}\" font-size=\"12\" font-style=\"italic\"",
+                ctx.theme.fg_muted
+            ),
+            &format_value(node_value(n), ctx.value_format),
+        );
+    }
+    clip_close(clip, svg);
+}
+
+/// Register a per-cell clip path and open a `<g>` bound to it. Returns the id.
+fn clip_open(r: Rect, svg: &mut SvgBuilder, next_id: &mut usize) -> usize {
+    let id = *next_id;
+    *next_id += 1;
+    svg.defs_raw(&format!(
+        "<clipPath id=\"tm-clip-{id}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>",
+        fnum(r.x),
+        fnum(r.y),
+        fnum(r.w),
+        fnum(r.h)
+    ));
+    svg.raw(&format!("<g clip-path=\"url(#tm-clip-{id})\">"));
+    id
+}
+
+fn clip_close(_id: usize, svg: &mut SvgBuilder) {
+    svg.raw("</g>");
+}
+
+/// Parse `#rgb`/`#rrggbb` into RGB bytes; `None` for any other syntax.
+fn parse_hex(c: &str) -> Option<(u8, u8, u8)> {
+    let h = c.strip_prefix('#')?;
+    let (r, g, b) = match h.len() {
+        6 => (&h[0..2], &h[2..4], &h[4..6]),
+        3 => {
+            return parse_hex(&format!(
+                "#{a}{a}{b}{b}{c}{c}",
+                a = &h[0..1],
+                b = &h[1..2],
+                c = &h[2..3]
+            ))
         }
+        _ => return None,
+    };
+    Some((
+        u8::from_str_radix(r, 16).ok()?,
+        u8::from_str_radix(g, 16).ok()?,
+        u8::from_str_radix(b, 16).ok()?,
+    ))
+}
+
+/// Mix `c` toward white by `t` in `[0,1]`; passthrough for non-hex colors.
+fn lighten(c: &str, t: f64) -> String {
+    mix(c, 255.0, t)
+}
+
+/// Mix `c` toward black by `t` in `[0,1]`; passthrough for non-hex colors.
+fn darken(c: &str, t: f64) -> String {
+    mix(c, 0.0, t)
+}
+
+fn mix(c: &str, target: f64, t: f64) -> String {
+    match parse_hex(c) {
+        Some((r, g, b)) => {
+            let m = |v: u8| {
+                (v as f64 + (target - v as f64) * t)
+                    .round()
+                    .clamp(0.0, 255.0) as u8
+            };
+            format!("#{:02X}{:02X}{:02X}", m(r), m(g), m(b))
+        }
+        None => c.to_string(),
     }
 }
 
@@ -411,6 +571,77 @@ mod tests {
             !svg.contains(">1,234<"),
             "leaf value should be hidden: {svg}"
         );
+    }
+
+    #[test]
+    fn orders_siblings_by_value_desc() {
+        // Source order Hot(60) then Cold(65); sorted rank puts Cold first.
+        let nodes = vec![leaf("Hot", 60.0), leaf("Cold", 65.0)];
+        assert_eq!(order_by_value(&nodes), vec![1, 0]);
+    }
+
+    #[test]
+    fn shade_helpers_stay_in_family() {
+        assert_eq!(lighten("#B9B9FF", 0.0), "#B9B9FF");
+        assert_eq!(darken("#B9B9FF", 0.0), "#B9B9FF");
+        assert_eq!(lighten("#000000", 1.0), "#FFFFFF");
+        assert_eq!(darken("#FFFFFF", 1.0), "#000000");
+        // Short hex expands; non-hex passes through untouched.
+        assert_eq!(darken("#fff", 1.0), "#000000");
+        assert_eq!(lighten("red", 0.5), "red");
+    }
+
+    #[test]
+    fn leaves_inherit_branch_hue() {
+        let section = |label: &str, kids: Vec<TreemapNode>| TreemapNode {
+            label: label.into(),
+            value: None,
+            children: kids,
+            class_name: None,
+        };
+        let d = TreemapDiagram {
+            title: None,
+            root: vec![
+                section("Cold", vec![leaf("Water", 40.0), leaf("Soda", 25.0)]),
+                section("Hot", vec![leaf("Coffee", 30.0), leaf("Tea", 20.0)]),
+            ],
+            class_defs: HashMap::new(),
+            value_format: None,
+            show_values: None,
+        };
+        let svg = render(&d, &Theme::default());
+        // Cold (65) sorts first → branch hue cScale0; largest leaf uses it neat.
+        assert!(
+            svg.contains("fill=\"#B9B9FF\""),
+            "branch base hue missing: {svg}"
+        );
+        // Hot (50) → cScale1 family.
+        assert!(
+            svg.contains("fill=\"#FFFFAB\""),
+            "second branch hue missing: {svg}"
+        );
+    }
+
+    #[test]
+    fn section_header_shows_total() {
+        let d = TreemapDiagram {
+            title: None,
+            root: vec![TreemapNode {
+                label: "Cold".into(),
+                value: None,
+                children: vec![leaf("Water", 40.0), leaf("Soda", 25.0)],
+                class_name: None,
+            }],
+            class_defs: HashMap::new(),
+            value_format: None,
+            show_values: None,
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(
+            svg.contains("font-style=\"italic\""),
+            "header total not italic: {svg}"
+        );
+        assert!(svg.contains(">65<"), "section total 65 missing: {svg}");
     }
 
     #[test]
