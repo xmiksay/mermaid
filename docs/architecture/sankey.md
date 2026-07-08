@@ -23,3 +23,22 @@ Parser: `src/parse/sankey.rs` · Renderer: `src/svg/sankey.rs`.
   `column_depths`/`column_heights`): `left` = depth from source, `right` =
   distance to sink, `justify` pushes sinks to the last column, `center` nudges
   source-less nodes toward their earliest target (d3-sankey semantics).
+- **Within-column ordering** matches d3-sankey (`src/svg/sankey_layout.rs`,
+  `order_columns`): each column is seeded in **first-appearance order**, then
+  d3's `iterations = 6` barycenter relaxation passes
+  (`relaxRightToLeft`/`relaxLeftToRight` + collision resolution) re-sort each
+  column top-to-bottom by vertical position to minimise link crossings. The
+  port reproduces d3-sankey 0.12.3 exactly (init spreading, the recomputed
+  `py = min(nodePadding, extent/(maxColLen-1))`, both `reorderLinks` at init and
+  `reorderNodeLinks` during relaxation, and the `value * layerDistance` link
+  weight); the relaxation runs in d3's own coordinate space (extent = `height`,
+  padding = `nodePadding`) and the renderer applies the resulting **order** to
+  its own proportional stacking. Rendering nodes in raw first-appearance order
+  (the old behaviour) misordered columns versus JS Mermaid.
+- **Header-skip divergence (deliberate).** A leading `source,target,value` CSV
+  line is treated as a header and skipped (`src/parse/sankey.rs`). Upstream
+  Mermaid instead renders it as literal `source`/`target` nodes. Those phantom
+  nodes form a **disconnected two-node component**, so they don't affect the
+  ordering of the real nodes; our output for the real nodes still matches
+  d3-sankey (e.g. `samples/sankey.mmd` left column: `Coal, Gas, Solar, Wind`).
+  Skipping the header is the sensible divergence.
