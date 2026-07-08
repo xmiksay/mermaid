@@ -20,17 +20,21 @@ Parser: `src/parse/block/` · Renderer: `src/svg/block/`.
   `block:ID … end` group works) and clip to the node boundary (`clip`) so
   arrowheads land on the edge, not the center. `block:id:span` keeps the span on
   `BlockGroup.span` (min group width).
-  - Layout & composite treatment (#259): columns share one width from
+  - Layout & composite treatment (#259, #310): columns share one width from
     `cell_dims` — the widest label's hug box (`text + PAD_X*2`, floored at
     `MIN_CELL_W`), divided down for multi-span blocks so `d["Wide"]:2` never
-    inflates every column; rows share `CELL_H`. Boxes hug text rather than
-    filling a fixed 100×60 cell. A composite (`block:id … end`) takes **one grid
-    slot** (its `span`, default 1) like any leaf — not a whole row — drawn as a
-    solid pale container (`flow_cluster_fill`/`flow_cluster_stroke`, no dashed
-    frame, no title text). Its children lay out in their own frame and are
-    scaled down to hug the slot via a `<g transform="translate scale">`; the
-    `Geom` collector composes each `Transform` so a scaled child still reports
-    its on-screen box for edge routing.
+    inflates every column. Rows track their own height (`row_h` in
+    `layout_items`) so a tall composite pushes the next row down instead of
+    overlapping it. Leaf boxes hug text at `CELL_H` rather than filling a fixed
+    100×60 cell. A composite (`block:id … end`) is a solid pale container
+    (`flow_cluster_fill`/`flow_cluster_stroke`, no dashed frame, no title text,
+    near-square `rx="1"`) that **hugs its children at their natural size** —
+    `#259` scaled them down into one slot and they collapsed to illegible ~10px
+    dots (`#310`), so the container instead grows: children lay out in their own
+    frame (`GROUP_PAD` inner pad each side), the container claims as many whole
+    grid columns as their width `inner_w` needs (`need`), and the child
+    `Transform` translates them in at `scale = 1`. The `Geom` collector composes
+    each `Transform` so a child still reports its on-screen box for edge routing.
   - Shape delimiters (`parse_shape`, via the `strip_pair` helper): beyond the
     classic set, `[[..]]`→`Subroutine`, `(((..)))`→`DoubleCircle`, `>..]`→`Odd`
     (asymmetric flag), and the parallelogram/trapezoid family `[/../]`→
