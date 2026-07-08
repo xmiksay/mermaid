@@ -59,11 +59,19 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   `done` set `TaskStatus`, while `crit`, `milestone` and `vert` are **orthogonal
   flags** (`GanttTask.crit`/`.milestone`/`.vert`) — upstream combines them, so
   `done, crit` keeps the done fill with a crit (red) border instead of the last
-  tag winning. `colors_for(status, crit)` picks the fill from the status and a
-  red border for `crit` (crit-only also takes the red fill). A `milestone`
-  renders as a diamond (rotated square `<path>`) centered on the start date; a
-  `vert` renders a solid full-height vertical marker line (2px, `fg`) spanning
-  the chart at the start date, with a bold label centered below the axis. Unlike
+  tag winning. `colors_for(status, crit)` picks the fill/border from upstream's
+  **default gantt theme** (#320): normal is purple (`#8a90dd`/`#534fbc`), active
+  pale lavender-blue (`#bfc7ff`/`#534fbc`), done light-grey (`#d3d3d3`/`#808080`),
+  and `crit` swaps in the light-red border `#ff8888` (crit-only also takes the
+  solid-`red` fill; `active, crit`/`done, crit` keep their status fill).
+  `inside_text_ink(status)` inks a label drawn *inside* a bar white on
+  normal/crit and dark (`#333`) on active/done (upstream `.taskText` vs
+  `.activeText`/`.doneText`); labels placed to the right of a bar use the dark
+  `fg`. A `milestone` renders as a diamond (rotated square `<path>`) centered on
+  the start date taking the default purple task fill, with an *italic* label to
+  its right; a `vert` renders a thick navy full-height marker line (4px,
+  `#000080`) spanning the chart at the start date, with a bold navy label
+  centered below the axis. Unlike
   bars/milestones a `vert` marker is **excluded from row allocation** — it gets
   no left-column name and consumes no row height — matching upstream. Both
   milestone and vert ignore the duration. Adding a tag to
@@ -109,4 +117,7 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   as the range grows; an explicit `tickInterval` still overrides it. The axis is
   laid out at the **bottom** by default (`body_top`/`axis_y` split by `d.top_axis`,
   matching upstream); the `topAxis` keyword sets `GanttDiagram.top_axis` to restore
-  the top placement.
+  the top placement. Every tick also draws a **full-height vertical grid line**
+  through the chart body (#320): light-grey (`#d3d3d3`, `opacity 0.8`, upstream
+  `gridColor`), rendered over the section bands but behind the bars, matching
+  upstream's d3 axis grid.

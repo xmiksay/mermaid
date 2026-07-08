@@ -130,13 +130,6 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     );
     for (dx, label) in &ticks {
         let x = body_x + dx;
-        svg.line(
-            x,
-            axis_y,
-            x,
-            axis_y + AXIS_H,
-            "stroke=\"#bbb\" stroke-width=\"1\"",
-        );
         svg.text(
             x + 2.0,
             axis_y + 14.0,
@@ -189,6 +182,21 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         }
     }
 
+    // Full-height vertical grid lines at every axis tick, spanning the chart
+    // body. Upstream's d3 axis draws these light-grey ticks through the rows
+    // (over the section bands, behind the bars); we match with `gridColor`
+    // (`lightgrey`) at the same 0.8 opacity.
+    for (dx, _) in &ticks {
+        let x = body_x + dx;
+        svg.line(
+            x,
+            body_top,
+            x,
+            body_bottom,
+            "stroke=\"#d3d3d3\" stroke-width=\"1\" opacity=\"0.8\"",
+        );
+    }
+
     // Today marker: positioned at the *current* date (system clock), drawn only
     // when it falls inside the chart's range. `todayMarker off` suppresses it;
     // any other value is a CSS style applied to the marker line; the default is
@@ -222,16 +230,17 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
             let r = &resolved[flat_idx];
             let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
             if task.vert {
-                // Vertical marker: a solid full-height line at the start date
-                // with the bold label centered below the axis. Excluded from
-                // row allocation — it consumes no row height and does not
-                // advance `y`. Duration is ignored.
+                // Vertical marker: a thick navy full-height line at the start
+                // date with the bold navy label centered below the axis
+                // (upstream `vert` styling). Excluded from row allocation — it
+                // consumes no row height and does not advance `y`. Duration is
+                // ignored.
                 svg.line(
                     x,
                     body_top,
                     x,
                     body_bottom,
-                    &format!("stroke=\"{fg}\" stroke-width=\"2\""),
+                    "stroke=\"#000080\" stroke-width=\"4\"",
                 );
                 // Label below the chart: under the bottom axis band by default,
                 // under the last row when the axis is on top.
@@ -243,9 +252,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 svg.text(
                     x,
                     label_y,
-                    &format!(
-                        "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""
-                    ),
+                    "text-anchor=\"middle\" fill=\"#000080\" font-size=\"11\" font-weight=\"bold\"",
                     &task.name,
                 );
                 flat_idx += 1;
@@ -278,7 +285,7 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 svg.text(
                     x + rad + 4.0,
                     cy + 4.0,
-                    &format!("fill=\"{fg}\" font-size=\"11\""),
+                    &format!("fill=\"{fg}\" font-size=\"11\" font-style=\"italic\""),
                     &task.name,
                 );
             } else {
@@ -294,11 +301,15 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 );
                 let label_w = text_width(&task.name, AXIS_LABEL_CHAR_W, TASK_FONT_SIZE);
                 if label_w + 8.0 <= w {
+                    // Inside the bar: white ink on normal/crit, dark on
+                    // active/done (upstream `.taskText` vs `.activeText`/
+                    // `.doneText`).
+                    let ink = inside_text_ink(task.status);
                     svg.text(
                         x + w / 2.0,
                         cy + 4.0,
                         &format!(
-                            "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"{TASK_FONT_SIZE}\""
+                            "text-anchor=\"middle\" fill=\"{ink}\" font-size=\"{TASK_FONT_SIZE}\""
                         ),
                         &task.name,
                     );
@@ -635,21 +646,36 @@ fn pick_tick_step(total_days: f64, min_step_days: f64) -> f64 {
         .unwrap_or(365.0)
 }
 
+/// Task bar fill/border, matching upstream's default gantt theme
+/// (`taskBkgColor`/`taskBorderColor` families): purple normal, pale
+/// lavender-blue active, light-grey done, solid-red crit.
 fn colors_for(status: TaskStatus, crit: bool) -> (&'static str, &'static str) {
     let (mut fill, mut stroke) = match status {
-        TaskStatus::Normal => ("#A8C5E1", "#5470C6"),
-        TaskStatus::Active => ("#FAC858", "#C99A3D"),
-        TaskStatus::Done => ("#B8D8B8", "#73A573"),
+        TaskStatus::Normal => ("#8a90dd", "#534fbc"),
+        TaskStatus::Active => ("#bfc7ff", "#534fbc"),
+        TaskStatus::Done => ("#d3d3d3", "#808080"),
     };
     if crit {
-        // `crit` adds a red border; a crit-only task also takes the red fill,
-        // while `done, crit` / `active, crit` keep their status fill.
+        // `crit` adds the light-red border; a crit-only task also takes the
+        // solid-red fill, while `done, crit` / `active, crit` keep their status
+        // fill (upstream `activeCrit`/`doneCrit`).
         if status == TaskStatus::Normal {
-            fill = "#F19E9E";
+            fill = "red";
         }
-        stroke = "#C0524F";
+        stroke = "#ff8888";
     }
     (fill, stroke)
+}
+
+/// Ink for a label drawn *inside* a bar. Upstream's default `.taskText` is white
+/// (used by normal and crit-only bars over their dark/red fills), while `active`
+/// and `done` bars override to the dark `taskTextDarkColor`. Labels drawn to the
+/// right of a bar always use the dark outside color (the caller passes `fg`).
+fn inside_text_ink(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Normal => "#fff",
+        TaskStatus::Active | TaskStatus::Done => "#333",
+    }
 }
 
 #[cfg(test)]
@@ -752,16 +778,57 @@ mod tests {
     fn crit_uses_red_palette() {
         let d = build("gantt\nsection S\nUrgent : crit, 2026-01-01, 1d\n");
         let svg = render(&d, &Theme::default());
-        assert!(svg.contains("#F19E9E") || svg.contains("#C0524F"));
+        // Solid-red fill with the light-red crit border (upstream default).
+        assert!(svg.contains("fill=\"red\""));
+        assert!(svg.contains("#ff8888"));
     }
 
     #[test]
     fn done_crit_keeps_done_fill_with_red_border() {
         let d = build("gantt\nsection S\nT : done, crit, 2026-01-01, 2d\n");
         let svg = render(&d, &Theme::default());
-        // Done fill + crit border, not the crit red fill.
-        assert!(svg.contains("#B8D8B8"));
-        assert!(svg.contains("#C0524F"));
+        // Done (light-grey) fill + crit red border, not the crit red fill.
+        assert!(svg.contains("#d3d3d3"));
+        assert!(svg.contains("#ff8888"));
+    }
+
+    #[test]
+    fn normal_bar_uses_purple_palette() {
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nSpec : 2026-01-01, 5d\n");
+        let svg = render(&d, &Theme::default());
+        // Upstream default task fill/border are the purple family, not the old
+        // light-blue; the fitting label is drawn in white ink over the bar.
+        assert!(svg.contains("fill=\"#8a90dd\" stroke=\"#534fbc\""));
+        assert!(svg.contains("fill=\"#fff\""));
+        assert!(!svg.contains("#A8C5E1"));
+    }
+
+    #[test]
+    fn active_bar_uses_lavender_palette() {
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nWork : active, 2026-01-01, 5d\n");
+        let svg = render(&d, &Theme::default());
+        // Pale lavender-blue fill, dark inside label (not the old orange).
+        assert!(svg.contains("fill=\"#bfc7ff\" stroke=\"#534fbc\""));
+        assert!(!svg.contains("#FAC858"));
+    }
+
+    #[test]
+    fn full_height_grid_lines_span_the_body() {
+        // Every axis tick draws a light-grey full-height grid line through the
+        // rows (#320), so at least one such line is present.
+        let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nT : 2026-01-01, 10d\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("stroke=\"#d3d3d3\" stroke-width=\"1\" opacity=\"0.8\""));
+    }
+
+    #[test]
+    fn milestone_label_is_italic() {
+        let d =
+            build("gantt\ndateFormat YYYY-MM-DD\nsection S\nKickoff : milestone, 2026-01-01, 0d\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("font-style=\"italic\""));
+        // Diamond takes the default purple task fill.
+        assert!(svg.contains("fill=\"#8a90dd\""));
     }
 
     #[test]
@@ -826,10 +893,12 @@ mod tests {
     fn vert_task_draws_marker_line_not_bar() {
         let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nBase : 2026-01-01, 10d\nFreeze : vert, v1, 2026-01-05, 0d\n");
         let svg = render(&d, &Theme::default());
-        // Solid full-height marker with a bold centered label; not dashed.
+        // Thick navy full-height marker with a bold navy centered label (#320);
+        // not dashed.
         assert!(!svg.contains("stroke-dasharray=\"2 2\""));
+        assert!(svg.contains("stroke=\"#000080\" stroke-width=\"4\""));
         assert!(svg.contains(
-            "text-anchor=\"middle\" fill=\"#333\" font-size=\"11\" font-weight=\"bold\""
+            "text-anchor=\"middle\" fill=\"#000080\" font-size=\"11\" font-weight=\"bold\""
         ));
         assert!(svg.contains(">Freeze<"));
     }
