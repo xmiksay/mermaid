@@ -38,11 +38,12 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     let (start_day, total_days, sub_day) = chart_span(&resolved);
     let min_bar_dur = if sub_day { 0.0 } else { 0.5 };
 
-    // Step 2 — compute dimensions.
+    // Step 2 — compute dimensions. `vert` markers are excluded from row
+    // allocation (they span the chart rather than occupying a list row).
     let n_rows: usize = d
         .sections
         .iter()
-        .map(|s| s.tasks.len() + if s.name.is_empty() { 0 } else { 1 })
+        .map(|s| s.tasks.iter().filter(|t| !t.vert).count() + if s.name.is_empty() { 0 } else { 1 })
         .sum();
     let body_h = n_rows as f64 * (BAR_H + ROW_GAP);
     let time_col_w = TIME_COL_MIN_W;
@@ -162,6 +163,37 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         }
         for task in &section.tasks {
             let r = &resolved[flat_idx];
+            let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
+            if task.vert {
+                // Vertical marker: a solid full-height line at the start date
+                // with the bold label centered below the axis. Excluded from
+                // row allocation — it prints no left-column name and does not
+                // advance `y`. Duration is ignored.
+                svg.line(
+                    x,
+                    body_top,
+                    x,
+                    body_bottom,
+                    &format!("stroke=\"{fg}\" stroke-width=\"2\""),
+                );
+                // Label below the chart: under the bottom axis band by default,
+                // under the last row when the axis is on top.
+                let label_y = if d.top_axis {
+                    body_bottom + 12.0
+                } else {
+                    axis_y + AXIS_H + 12.0
+                };
+                svg.text(
+                    x,
+                    label_y,
+                    &format!(
+                        "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\" font-weight=\"bold\""
+                    ),
+                    &task.name,
+                );
+                flat_idx += 1;
+                continue;
+            }
             // Task name in left column
             svg.text(
                 PAD,
@@ -169,29 +201,12 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 &format!("fill=\"{fg}\" font-size=\"12\""),
                 &task.name,
             );
-            let x = body_x + ((r.start_day - start_day) / total_days) * body_w;
             let (fill, stroke) = colors_for(task.status, task.crit);
             let sw = if task.crit { 2 } else { 1 };
             if let Some(click) = &task.click {
                 open_click(&mut svg, click);
             }
-            if task.vert {
-                // Vertical marker line spanning the whole chart at the start
-                // date; duration is ignored (the label sits beside the line).
-                svg.line(
-                    x,
-                    body_top,
-                    x,
-                    body_bottom,
-                    &format!("stroke=\"{stroke}\" stroke-width=\"1.5\" stroke-dasharray=\"2 2\""),
-                );
-                svg.text(
-                    x + 4.0,
-                    y + 14.0,
-                    &format!("fill=\"{fg}\" font-size=\"11\""),
-                    &task.name,
-                );
-            } else if task.milestone {
+            if task.milestone {
                 // Diamond centered on the start date; duration is ignored.
                 let cy = y + BAR_H / 2.0;
                 let rad = (BAR_H - 4.0) / 2.0;
@@ -631,9 +646,32 @@ mod tests {
     fn vert_task_draws_marker_line_not_bar() {
         let d = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nBase : 2026-01-01, 10d\nFreeze : vert, v1, 2026-01-05, 0d\n");
         let svg = render(&d, &Theme::default());
-        // The vertical marker is a dashed <line>; the label is drawn.
-        assert!(svg.contains("stroke-dasharray=\"2 2\""));
+        // Solid full-height marker with a bold centered label; not dashed.
+        assert!(!svg.contains("stroke-dasharray=\"2 2\""));
+        assert!(svg.contains(
+            "text-anchor=\"middle\" fill=\"#333\" font-size=\"11\" font-weight=\"bold\""
+        ));
         assert!(svg.contains(">Freeze<"));
+    }
+
+    #[test]
+    fn vert_task_allocates_no_row() {
+        // A lone `vert` marker in a section must not add a task row: the chart
+        // height matches the same chart without the marker.
+        let with = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nBase : 2026-01-01, 10d\nFreeze : vert, v1, 2026-01-05, 0d\n");
+        let without = build("gantt\ndateFormat YYYY-MM-DD\nsection S\nBase : 2026-01-01, 10d\n");
+        let h_with = render(&with, &Theme::default());
+        let h_without = render(&without, &Theme::default());
+        let vb = |s: &str| {
+            s.split("viewBox=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(vb(&h_with), vb(&h_without));
     }
 
     #[test]
