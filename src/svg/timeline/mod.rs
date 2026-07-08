@@ -23,9 +23,14 @@ const EVENT_BOX_H: f64 = 40.0;
 const EVENT_GAP: f64 = 10.0;
 /// Approx. chars that fit on one line inside a box at font-size 12.
 const EVENT_WRAP: usize = 18;
-const BOX_RX: &str = "6";
+const BOX_RX: &str = "5";
+/// How far each dashed connector continues past the last event before its
+/// downward tail arrowhead (upstream ends every connector this way).
+const CONNECTOR_TAIL: f64 = 22.0;
 
+mod color;
 mod vertical;
+use color::darken10;
 
 /// `direction TB`/`TD`/`BT` render the timeline vertically (time top→bottom);
 /// `LR`/`RL`/unset keep the default horizontal layout.
@@ -61,7 +66,7 @@ fn text_color_for(fill: &str) -> &'static str {
             let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255) as f64;
             let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255) as f64;
             let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255) as f64;
-            if 0.299 * r + 0.587 * g + 0.114 * b < 140.0 {
+            if 0.299 * r + 0.587 * g + 0.114 * b < 168.0 {
                 return "#fff";
             }
         }
@@ -117,7 +122,7 @@ fn wrap_event(text: &str) -> Vec<String> {
     lines
 }
 
-/// Draw a filled rounded box with a centered label in a contrasting ink.
+/// Draw a filled rounded box with a centered, regular-weight, contrasting label.
 #[allow(clippy::too_many_arguments)]
 fn box_label(
     svg: &mut SvgBuilder,
@@ -129,7 +134,6 @@ fn box_label(
     class: &str,
     label: &str,
     font_size: u32,
-    bold: bool,
 ) {
     svg.rect(
         x,
@@ -138,12 +142,11 @@ fn box_label(
         h,
         &format!("class=\"{class}\" fill=\"{color}\" stroke=\"{color}\" stroke-width=\"1\" rx=\"{BOX_RX}\""),
     );
-    let weight = if bold { " font-weight=\"bold\"" } else { "" };
     svg.text(
         x + w / 2.0,
         y + h / 2.0 + 4.0,
         &format!(
-            "text-anchor=\"middle\" fill=\"{ink}\" font-size=\"{font_size}\"{weight}",
+            "text-anchor=\"middle\" fill=\"{ink}\" font-size=\"{font_size}\"",
             ink = text_color_for(color)
         ),
         label,
@@ -175,11 +178,15 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let period_y = band_y + band_h;
     let axis_y = period_y + PERIOD_H + AXIS_GAP;
     let events_y0 = axis_y + AXIS_GAP;
-    let height = events_y0 + events_h + PAD;
+    // Every connector drops to one aligned tail below the tallest event stack,
+    // ending in a downward arrowhead like upstream.
+    let events_bottom = events_y0 + events_h - EVENT_GAP;
+    let tail_y = events_bottom + CONNECTOR_TAIL;
+    let height = tail_y + PAD;
     let chart_left = PAD;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
-    svg.def_arrow_marker("tl-arrow", fg, 8, 9);
+    svg.def_arrow_marker("tl-arrow", fg, 7, 6);
 
     if let Some(t) = &d.title {
         svg.text(
@@ -196,18 +203,17 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
         let w = sec.periods.len() as f64 * PERIOD_GAP;
         if w > 0.0 {
             if let Some(name) = &sec.name {
-                let color = theme.cscale_color(si);
+                let color = darken10(theme.cscale_color(si));
                 box_label(
                     &mut svg,
                     x + 3.0,
                     band_y,
                     w - 6.0,
                     SECTION_H,
-                    color,
+                    &color,
                     "tl-section",
                     name,
                     14,
-                    true,
                 );
             }
         }
@@ -218,23 +224,25 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
     let mut idx = 0usize;
     for (si, sec) in d.sections.iter().enumerate() {
         for period in &sec.periods {
-            let color = period_color(theme, has_named_section, d.disable_multicolor, si, idx);
+            let base = period_color(theme, has_named_section, d.disable_multicolor, si, idx);
+            let color = darken10(base);
             let col_x = chart_left + idx as f64 * PERIOD_GAP;
             let cx = col_x + PERIOD_GAP / 2.0;
             let box_x = col_x + BOX_INSET;
             let box_w = PERIOD_GAP - 2.0 * BOX_INSET;
 
-            let events_bottom = if period.events.is_empty() {
-                axis_y
-            } else {
-                events_y0 + period.events.len() as f64 * (event_box_h + EVENT_GAP) - EVENT_GAP
-            };
+            // Dark dashed connector from the period, through the axis, down past
+            // the events to an aligned tail arrow (upstream tints these dark
+            // gray, not with the section color).
             svg.line(
                 cx,
                 period_y + PERIOD_H,
                 cx,
-                events_bottom,
-                &format!("stroke=\"{color}\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\""),
+                tail_y,
+                &format!(
+                    "stroke=\"{fg}\" stroke-width=\"2\" stroke-dasharray=\"5 5\" \
+                     marker-end=\"url(#tl-arrow)\""
+                ),
             );
 
             box_label(
@@ -243,11 +251,10 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
                 period_y,
                 box_w,
                 PERIOD_H,
-                color,
+                &color,
                 "tl-period",
                 &period.label,
                 13,
-                true,
             );
 
             for (ei, ev) in period.events.iter().enumerate() {
@@ -258,11 +265,10 @@ pub(crate) fn render(d: &TimelineDiagram, theme: &Theme) -> String {
                     ey,
                     box_w,
                     event_box_h,
-                    color,
+                    &color,
                     "tl-event",
                     &wrap_event(ev).join("\n"),
                     12,
-                    false,
                 );
             }
             idx += 1;
@@ -376,17 +382,38 @@ mod tests {
     fn sectionless_timeline_advances_color_per_period() {
         let theme = Theme::default();
         let svg = render(&sectionless(false), &theme);
-        // Distinct period colors are present.
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
+        // Distinct period colors are present (darkened to the upstream fills).
+        assert!(svg.contains(&format!("fill=\"{}\"", darken10(theme.cscale_color(0)))));
+        assert!(svg.contains(&format!("fill=\"{}\"", darken10(theme.cscale_color(1)))));
     }
 
     #[test]
     fn disable_multicolor_keeps_one_color() {
         let theme = Theme::default();
         let svg = render(&sectionless(true), &theme);
-        assert!(svg.contains(&format!("fill=\"{}\"", theme.cscale_color(0))));
-        assert!(!svg.contains(&format!("fill=\"{}\"", theme.cscale_color(1))));
+        assert!(svg.contains(&format!("fill=\"{}\"", darken10(theme.cscale_color(0)))));
+        assert!(!svg.contains(&format!("fill=\"{}\"", darken10(theme.cscale_color(1)))));
+    }
+
+    #[test]
+    fn connectors_end_in_a_tail_arrow_below_the_events() {
+        // Dark dashed connector (not section-tinted) with a downward arrowhead
+        // past the last event, darkened fills, white ink, regular weight (#321).
+        let svg = render(&two_periods(None), &Theme::default());
+        let tails = svg
+            .split("<line ")
+            .filter(|c| c.contains("dasharray") && c.contains("url(#tl-arrow)"))
+            .count();
+        assert_eq!(tails, 2, "one tail arrow per period");
+        assert!(
+            !svg.contains("stroke=\"#FFFFAB\""),
+            "connector not fill-tinted"
+        );
+        assert_eq!(
+            text_color_for(&darken10(Theme::default().cscale_color(0))),
+            "#fff"
+        );
+        assert!(!svg.contains("font-weight=\"bold\" font-size=\"13\""));
     }
 
     /// `(cx, cy)` of each period box (`class="tl-period"` rect) in source order.
