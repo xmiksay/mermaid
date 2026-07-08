@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(t.pie_color(1), "#FFFFDE");
         // A `pie{N}` override touches only the pie scale, not the others.
         assert_eq!(t.cscale_color(0), "#B9B9FF");
-        assert_eq!(t.git_color(0), "#ECECFF");
+        assert_eq!(t.git_color(0), "#6D6DFF");
     }
 
     #[test]
