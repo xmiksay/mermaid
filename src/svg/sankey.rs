@@ -61,7 +61,7 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         .enumerate()
         .map(|(i, n)| (n.as_str(), i))
         .collect();
-    let node_color = |n: &str| theme.pie_color(index[n]);
+    let node_color = |n: &str| theme.cscale_color(index[n]);
 
     // Assign a column per node honoring `nodeAlignment`.
     let col = assign_columns(
@@ -421,7 +421,10 @@ mod tests {
         let svg = render(&chain(), &theme);
         // Each node rect carries its own palette color, not one flat fill.
         for i in 0..3 {
-            assert!(svg.contains(&format!("fill=\"{}\" stroke=\"#fff\"", theme.pie_color(i))));
+            assert!(svg.contains(&format!(
+                "fill=\"{}\" stroke=\"#fff\"",
+                theme.cscale_color(i)
+            )));
         }
     }
 
@@ -441,8 +444,14 @@ mod tests {
         let theme = Theme::default();
         let svg = render(&d, &theme);
         // A→B tinted from A (node 0), B→C tinted from B (node 1).
-        assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(0))));
-        assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(1))));
+        assert!(svg.contains(&format!(
+            "stroke=\"{}\" stroke-opacity",
+            theme.cscale_color(0)
+        )));
+        assert!(svg.contains(&format!(
+            "stroke=\"{}\" stroke-opacity",
+            theme.cscale_color(1)
+        )));
     }
 
     #[test]
@@ -479,8 +488,14 @@ mod tests {
         let theme = Theme::default();
         let svg = render(&d, &theme);
         // A→B tinted from B (node 1), B→C tinted from C (node 2).
-        assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(1))));
-        assert!(svg.contains(&format!("stroke=\"{}\" stroke-opacity", theme.pie_color(2))));
+        assert!(svg.contains(&format!(
+            "stroke=\"{}\" stroke-opacity",
+            theme.cscale_color(1)
+        )));
+        assert!(svg.contains(&format!(
+            "stroke=\"{}\" stroke-opacity",
+            theme.cscale_color(2)
+        )));
     }
 
     #[test]

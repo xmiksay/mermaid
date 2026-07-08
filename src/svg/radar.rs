@@ -143,7 +143,7 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
         if curve.values.is_empty() {
             continue;
         }
-        let color = theme.pie_color(ci);
+        let color = theme.cscale_color(ci);
         let pts: Vec<(f64, f64)> = (0..n)
             .map(|i| {
                 let v = curve.values.get(i).copied().unwrap_or(min);
@@ -170,7 +170,7 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
     }
     let lx = m_left + avail_w + 20.0;
     for (ci, curve) in d.curves.iter().enumerate() {
-        let color = theme.pie_color(ci);
+        let color = theme.cscale_color(ci);
         let y = m_top + title_h + 20.0 + ci as f64 * 22.0;
         svg.rect(lx, y - 10.0, 14.0, 14.0, &format!("fill=\"{color}\""));
         svg.text(

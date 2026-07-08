@@ -73,7 +73,7 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
 
     // Fields.
     for (fi, f) in d.fields.iter().enumerate() {
-        let color = theme.pie_color(fi);
+        let color = theme.cscale_color(fi);
         let mut cur = f.start;
         while cur <= f.end {
             let row = cur / bits_per_row;

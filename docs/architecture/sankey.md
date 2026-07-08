@@ -8,7 +8,8 @@ Parser: `src/parse/sankey.rs` · Renderer: `src/svg/sankey.rs`.
   is the node's `max(in, out)` flow, wrapped by `config.sankey.prefix`/`suffix`;
   `showValues: false` shows only the name). The `SvgBuilder::text` multi-line
   path stacks the value as a second `<tspan>`. Each node gets its **own palette
-  color** (`pie_color(node index)`), no longer one flat fill.
+  color** (`cscale_color(node index)`, the generic `cScale` scale), no longer
+  one flat fill.
   `config.sankey.{linkColor,nodeAlignment,showValues,prefix,suffix,width,height,
   nodeWidth,nodePadding}` (frontmatter/`%%{init}%%`) flow through the preamble →
   the matching `DiagramMeta.sankey_*` fields → copied onto `SankeyDiagram` in

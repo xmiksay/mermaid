@@ -20,5 +20,5 @@ Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart.rs`.
   `config.xyChart.showLegend: false` hides it). `config.xyChart.width`/`height`
   (→ `XyChartDiagram.width`/`height`) override the default plot size, and
   `themeVariables.xyChart.plotColorPalette` (comma-separated →
-  `plot_color_palette`) replaces the theme pie palette for series colors — all
+  `plot_color_palette`) replaces the theme `cScale` palette for series colors — all
   wired through `apply_xychart_config` in `parse_with_meta`.

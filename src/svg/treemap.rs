@@ -106,7 +106,7 @@ fn draw_node(n: &TreemapNode, r: Rect, i: usize, depth: usize, svg: &mut SvgBuil
     let color = rs
         .fill
         .clone()
-        .unwrap_or_else(|| ctx.theme.pie_color(i + depth).to_string());
+        .unwrap_or_else(|| ctx.theme.cscale_color(i + depth).to_string());
     let stroke = rs.stroke.as_deref().unwrap_or("#fff");
     let leaf = n.children.is_empty();
     svg.rect(

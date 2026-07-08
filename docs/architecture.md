@@ -135,12 +135,23 @@ constructors stay `const` (`Cow::Borrowed(...)`), but `themeVariables`/
 `fontFamily` config and downstream overrides supply owned runtime strings
 (`fg: "#000".into()`). `Theme` is thus `Clone`, **not** `Copy`. Renderers read a
 color as `&theme.fg` (a `&Cow<str>` that deref-coerces to `&str`), so
-`let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working. The categorical
-`pie_palette` is a `Cow<'static, [Cow<'static, str>]>` (owned-on-write) so
-per-slot `themeVariables` (`pie{N}`/`git{N}`/`cScale{N}`) can recolor
-individual entries via `Theme::set_palette` — `pie_color(i)` returns `&str` and
-still wraps modulo the (possibly grown) length. `theme: base` **without**
-overrides is now visibly distinct from `default`.
+`let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working. Upstream Mermaid
+derives *three distinct* categorical scales from a theme's
+primary/secondary/tertiary colors, and this crate mirrors that with three
+`Cow<'static, [Cow<'static, str>]>` (owned-on-write) fields: `cscale_palette`
+(upstream `cScale0..11`, read by journey/timeline/sankey/radar/packet/kanban/
+quadrant/xychart/treemap via `cscale_color(i)`), `pie_palette` (upstream
+`pie1..12`, pie only, `pie_color(i)`), and `git_palette` (upstream `git0..7`,
+gitGraph only, `git_color(i)`). The default theme carries the exact khroma-
+computed pastel values (pale-lavender `#ECECFF`/`#B9B9FF` family, pale yellows);
+dark/forest/neutral share one hand-tuned array across all three scales, since the
+upstream darken/hue-rotate derivation would drive their dark/achromatic primaries
+to black or monochrome. Per-slot `themeVariables` recolor individual entries in
+the matching scale (`pie{N}`→`set_pie_palette`, `git{N}`→`set_git_palette`,
+`cScale{N}`→`set_cscale_palette`, all via the shared `set_slot` helper); every
+`*_color(i)` accessor returns `&str` and wraps modulo the (possibly grown)
+length. `theme: base` **without** overrides is now visibly distinct from
+`default`.
 `Theme::apply_theme_variables(&mut self, vars)` recolors a base theme from the
 upstream `themeVariables` names — beyond the generic ones (`primaryColor`,
 `lineColor`, …) it now honors the documented per-diagram variables: sequence

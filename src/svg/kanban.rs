@@ -27,7 +27,7 @@ pub(crate) fn render(d: &KanbanDiagram, theme: &Theme) -> String {
 
     for (i, col) in d.columns.iter().enumerate() {
         let x = PAD + i as f64 * (COL_W + COL_GAP);
-        let color = theme.pie_color(i);
+        let color = theme.cscale_color(i);
         // Column header.
         svg.rect(
             x,

@@ -13,7 +13,8 @@ Parser: `src/parse/journey.rs` · Renderer: `src/svg/journey.rs`.
   section band per section, rounded task boxes beneath it, actor dots
   straddling each task's top edge, and a vertical actor legend in the left
   gutter (`LEFT_MARGIN` = 160). Section bands, actor dots and the legend all
-  draw from `theme.pie_color(i)` (sections and actors are indexed
+  draw from `theme.cscale_color(i)` (the generic `cScale` scale; sections and
+  actors are indexed
   independently). The legend is sorted **alphabetically** (upstream order),
   not by first appearance — and the sorted index is what colors both legend
   and dots.
