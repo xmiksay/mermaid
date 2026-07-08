@@ -20,6 +20,14 @@ const MIN_W: f64 = 130.0;
 const CANVAS_PAD: f64 = 24.0;
 const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
 const COL_GAP: f64 = 18.0; // gap between type/name/key columns
+
+// Crow's-foot marker geometry, measured along the edge from the entity boundary.
+const FOOT_TIP: f64 = CARD_GAP + 4.0; // splayed end of the crow's foot (18.0)
+const CARD_CIRCLE_R: f64 = 5.0; // radius of the optional-"zero" circle
+                                // Center of the zero-or-more circle: one marker length past the foot tip so the
+                                // circle reads as clearly separate from the foot (upstream "o{" layout) instead
+                                // of merging into it as a "Ø" blob.
+const ZERO_MORE_CIRCLE_D: f64 = FOOT_TIP + CARD_CIRCLE_R + 4.0; // 27.0
 const KEY_CHAR_W: f64 = 8.0; // PK/FK are bold — wider per char
 
 pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
@@ -347,14 +355,15 @@ fn draw_cardinality(
             draw_crowfoot(svg, anchor, ux, uy, px, py, &stroke);
         }
         Cardinality::ZeroOrMore => {
-            // Circle + crow's foot "o{"
+            // Crow's foot near the entity, then the "zero" circle set one marker
+            // length further along the edge so the two glyphs stay separate ("o{").
+            draw_crowfoot(svg, anchor, ux, uy, px, py, &stroke);
             svg.circle(
-                ax + ux * (CARD_GAP - 4.0),
-                ay + uy * (CARD_GAP - 4.0),
-                5.0,
+                ax + ux * ZERO_MORE_CIRCLE_D,
+                ay + uy * ZERO_MORE_CIRCLE_D,
+                CARD_CIRCLE_R,
                 &format!("fill=\"#fff\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\""),
             );
-            draw_crowfoot(svg, anchor, ux, uy, px, py, &stroke);
         }
     }
     let _ = (cx_glyph, cy_glyph);
@@ -370,16 +379,14 @@ fn draw_crowfoot(
     stroke: &str,
 ) {
     // Three lines fanning out from the anchor toward the far side.
-    let len = 10.0;
     let spread = 6.0;
     let (ax, ay) = anchor;
-    let tip_x = ax + ux * (CARD_GAP + 4.0);
-    let tip_y = ay + uy * (CARD_GAP + 4.0);
+    let tip_x = ax + ux * FOOT_TIP;
+    let tip_y = ay + uy * FOOT_TIP;
     // Three radial lines
     svg.line(ax, ay, tip_x, tip_y, stroke);
     svg.line(ax, ay, tip_x + px * spread, tip_y + py * spread, stroke);
     svg.line(ax, ay, tip_x - px * spread, tip_y - py * spread, stroke);
-    let _ = len;
 }
 
 #[cfg(test)]
@@ -402,6 +409,45 @@ mod tests {
         assert!(svg.contains(">CUSTOMER<"));
         assert!(svg.contains(">ORDER<"));
         assert!(svg.contains(">places<"));
+    }
+
+    // Pull the numeric value of `attr="…"` immediately following `after` in `s`.
+    fn attr_after(s: &str, after: &str, attr: &str) -> f64 {
+        let tail = &s[s.find(after).expect("marker present") + after.len()..];
+        let start = tail.find(attr).expect("attr present") + attr.len() + 2; // attr="
+        let end = start + tail[start..].find('"').unwrap();
+        tail[start..end].parse().unwrap()
+    }
+
+    #[test]
+    fn zero_or_more_circle_is_separate_from_foot() {
+        // Issue #256: the optional "zero" circle used to sit inside the crow's
+        // foot and read as a merged "Ø" blob. Draw the marker along +y from the
+        // origin and check the circle clears the foot tip.
+        let mut svg = SvgBuilder::new(60.0, 60.0);
+        draw_cardinality(
+            &mut svg,
+            (0.0, 0.0),
+            (0.0, 100.0),
+            Cardinality::ZeroOrMore,
+            &Theme::default(),
+        );
+        let out = svg.finish();
+        // The middle crow's-foot prong runs from the anchor to the foot tip.
+        let foot_tip_y = attr_after(&out, "<line", "y2");
+        let circle_cy = attr_after(&out, "<circle", "cy");
+        let circle_r = attr_after(&out, "<circle", "r");
+        // Circle sits beyond the foot tip and does not overlap it.
+        assert!(
+            circle_cy - circle_r > foot_tip_y,
+            "circle (cy={circle_cy}, r={circle_r}) overlaps foot tip {foot_tip_y}",
+        );
+        // Offset is about one marker length past the foot tip.
+        let offset = circle_cy - foot_tip_y;
+        assert!(
+            (7.0..=12.0).contains(&offset),
+            "circle not offset by ~one marker length: {offset}",
+        );
     }
 
     #[test]
