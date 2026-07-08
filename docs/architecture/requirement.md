@@ -19,7 +19,11 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   `find_unquoted` locates the body brace and `token::unquote` strips the
   surrounding quotes (`requirement "My Req" { … }` renders `My Req`, matching
   upstream's `qString`). The `contains` relation draws upstream's crossed-circle
-  containment head (`req-contains` marker) instead of the plain arrow.
+  containment head (`req-contains` marker) instead of the plain arrow, placed at
+  the **container** (`from`) end as a `marker-start` (upstream puts ⊕ on the
+  container's box edge). Because the parser normalizes both `src - contains ->
+  dst` and `dst <- contains - src` to the same `from`→`to`, the container is
+  always `from` regardless of the written direction.
 - Relation stroke style matches upstream 11.x: `contains` is the only solid
   relation; every other kind (`copies`, `derives`, `satisfies`, `verifies`,
   `refines`, `traces`) is dashed and ends in the thin `req-arrow` head.
