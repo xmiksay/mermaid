@@ -12,6 +12,8 @@ use crate::svg::theme::Theme;
 
 pub(super) const FRAME_PAD: f64 = 14.0;
 const FRAME_HEADER: f64 = 18.0;
+/// Height of the filled title band drawn at the top of a composite frame.
+const TITLE_BAND: f64 = 24.0;
 /// Vertical gap between two stacked parallel regions inside a composite.
 const REGION_GAP: f64 = 24.0;
 
@@ -225,16 +227,27 @@ pub(super) fn draw_composites(
     theme: &Theme,
 ) {
     let fg = &theme.fg;
+    let border = &theme.flow_node_stroke;
+    let band = &theme.flow_node_fill;
     for comp in &d.composites {
         let Some(&(x0, y0, x1, y1)) = boxes.get(&comp.id) else {
             continue;
         };
+        // Solid purple-bordered rounded frame with a filled lavender title band
+        // and a divider under the title, matching upstream's composite styling.
         svg.rect(
             x0,
             y0,
             x1 - x0,
             y1 - y0,
-            "fill=\"none\" stroke=\"#999\" stroke-width=\"1\" rx=\"10\" stroke-dasharray=\"5 3\"",
+            &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1\" rx=\"5\""),
+        );
+        svg.rect(
+            x0,
+            y0,
+            x1 - x0,
+            TITLE_BAND,
+            &format!("fill=\"{band}\" stroke=\"{border}\" stroke-width=\"1\" rx=\"5\""),
         );
         let label = d
             .states
@@ -244,18 +257,17 @@ pub(super) fn draw_composites(
             .filter(|l| !l.is_empty())
             .unwrap_or(comp.id.as_str());
         svg.text(
-            x0 + 10.0,
-            y0 + 14.0,
-            &format!("fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""),
+            (x0 + x1) / 2.0,
+            y0 + 16.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" font-weight=\"bold\""),
             label,
         );
-        // Divider under the title bar, matching upstream's composite header.
         svg.line(
             x0,
-            y0 + 20.0,
+            y0 + TITLE_BAND,
             x1,
-            y0 + 20.0,
-            "stroke=\"#999\" stroke-width=\"1\"",
+            y0 + TITLE_BAND,
+            &format!("stroke=\"{border}\" stroke-width=\"1\""),
         );
         // Dashed dividers between stacked parallel regions.
         if let Some(ys) = dividers.get(&comp.id) {
