@@ -142,7 +142,7 @@ pub(super) fn draw_edge(
     let d = match curve {
         EdgeCurve::Linear => curve_linear_path(&clipped),
         EdgeCurve::Step => curve_step_path(&clipped),
-        _ => curve_basis_path(&clipped),
+        _ => curve_basis_path(&basis_control_points(&clipped)),
     };
 
     // linkStyle overrides layer over the kind-based defaults.
@@ -191,6 +191,41 @@ pub(super) fn draw_edge(
     if let Some(label) = &edge.label {
         let mid = polyline_midpoint(&clipped);
         crate::svg::label::draw_edge_label(svg, mid, label, theme);
+    }
+}
+
+/// Upstream Mermaid renders every edge through `curveBasis`, so even a
+/// short edge between two offset nodes leaves and re-enters along the flow axis
+/// as a gentle S rather than a straight diagonal. A routed edge already carries
+/// interior waypoints; a bare two-point edge does not, so synthesize two control
+/// points that bend it along its dominant axis. Endpoints that share a column
+/// (or row) stay collinear and the basis curve draws straight — matching a plain
+/// vertical/horizontal link.
+fn basis_control_points(pts: &[(f64, f64)]) -> std::borrow::Cow<'_, [(f64, f64)]> {
+    use std::borrow::Cow;
+    if pts.len() != 2 {
+        return Cow::Borrowed(pts);
+    }
+    // Below this cross-axis offset the endpoints are effectively aligned; a
+    // straight line is faithful (and keeps `curveBasis` from emitting béziers).
+    const ALIGNED_EPS: f64 = 2.0;
+    let (ax, ay) = pts[0];
+    let (bx, by) = pts[1];
+    let (dx, dy) = (bx - ax, by - ay);
+    if dy.abs() >= dx.abs() {
+        // Vertical-dominant: leave/enter vertically, shift across at mid-height.
+        if dx.abs() < ALIGNED_EPS {
+            return Cow::Borrowed(pts);
+        }
+        let my = (ay + by) / 2.0;
+        Cow::Owned(vec![(ax, ay), (ax, my), (bx, my), (bx, by)])
+    } else {
+        // Horizontal-dominant: leave/enter horizontally, shift at mid-width.
+        if dy.abs() < ALIGNED_EPS {
+            return Cow::Borrowed(pts);
+        }
+        let mx = (ax + bx) / 2.0;
+        Cow::Owned(vec![(ax, ay), (mx, ay), (mx, by), (bx, by)])
     }
 }
 
@@ -260,7 +295,8 @@ fn clip_to_node(
 
 pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
     let flow_edge_stroke = &theme.flow_edge_stroke;
-    svg.def_arrow_marker("arrow-filled", flow_edge_stroke, 10, 10);
+    // Slightly larger than the 10px default to match upstream's arrowheads (#331).
+    svg.def_arrow_marker("arrow-filled", flow_edge_stroke, 10, 12);
     svg.defs_raw(&format!(
         "<marker id=\"arrow-circle\" viewBox=\"0 0 12 12\" refX=\"10\" refY=\"6\" \
          markerWidth=\"12\" markerHeight=\"12\" orient=\"auto-start-reverse\">\

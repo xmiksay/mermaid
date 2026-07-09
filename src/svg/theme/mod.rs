@@ -133,7 +133,10 @@ impl Theme {
             flow_node_fill: Cow::Borrowed("#ECECFF"),
             flow_node_stroke: Cow::Borrowed("#9370DB"),
             flow_edge_stroke: Cow::Borrowed("#333"),
-            flow_label_bg: Cow::Borrowed("#fff"),
+            // Upstream's `edgeLabelBackground` — a light gray that stays visible
+            // over the white canvas so a label reading over an edge is legible
+            // (#331; the old white blended into the background).
+            flow_label_bg: Cow::Borrowed("#e8e8e8"),
             flow_cluster_fill: Cow::Borrowed("#ffffde"),
             flow_cluster_stroke: Cow::Borrowed("#aaaa33"),
             cscale_palette: Cow::Borrowed(&CSCALE_DEFAULT),
