@@ -138,13 +138,15 @@ constructors stay `const` (`Cow::Borrowed(...)`), but `themeVariables`/
 (`fg: "#000".into()`). `Theme` is thus `Clone`, **not** `Copy`. Renderers read a
 color as `&theme.fg` (a `&Cow<str>` that deref-coerces to `&str`), so
 `let fg = &theme.fg;` keeps the `format!("{fg}")` idiom working. Upstream Mermaid
-derives *three distinct* categorical scales from a theme's
-primary/secondary/tertiary colors, and this crate mirrors that with three
+derives *distinct* categorical scales from a theme's
+primary/secondary/tertiary colors, and this crate mirrors that with four
 `Cow<'static, [Cow<'static, str>]>` (owned-on-write) fields: `cscale_palette`
 (upstream `cScale0..11`, read by journey/timeline/sankey/radar/packet/kanban/
-quadrant/xychart/treemap via `cscale_color(i)`), `pie_palette` (upstream
-`pie1..12`, pie only, `pie_color(i)`), and `git_palette` (upstream `git0..7`,
-gitGraph only, `git_color(i)`). The default theme carries the exact khroma-
+quadrant/treemap via `cscale_color(i)`), `pie_palette` (upstream
+`pie1..12`, pie only, `pie_color(i)`), `git_palette` (upstream `git0..7`,
+gitGraph only, `git_color(i)`), and `xychart_palette` (upstream
+`xyChart.plotColorPalette`, xychart only, `xychart_color(i)` — pale-lavender
+bars / dark gray-blue line, hardcoded per theme upstream, #319). The default theme carries the exact khroma-
 computed pastel values (pale-lavender `#ECECFF`/`#B9B9FF` family, pale yellows);
 dark/forest/neutral share one hand-tuned array across all three scales, since the
 upstream darken/hue-rotate derivation would drive their dark/achromatic primaries

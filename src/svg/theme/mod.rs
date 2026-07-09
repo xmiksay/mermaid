@@ -17,6 +17,7 @@ mod variables;
 use palette::{
     CSCALE_DEFAULT, GIT_DEFAULT, PALETTE_DARK, PALETTE_FOREST, PALETTE_NEUTRAL, PIE_DEFAULT,
     QUADRANT_FILLS_DARK, QUADRANT_FILLS_DEFAULT, QUADRANT_FILLS_FOREST, QUADRANT_FILLS_NEUTRAL,
+    XYCHART_BASE, XYCHART_DARK, XYCHART_DEFAULT, XYCHART_FOREST, XYCHART_NEUTRAL,
 };
 
 /// A borrowed-or-owned color/font string. Built-ins use `Cow::Borrowed`;
@@ -61,7 +62,7 @@ pub struct Theme {
     pub flow_cluster_stroke: Str,
     /// Generic categorical scale (upstream `cScale0..11`) read by the diagram
     /// kinds that cycle a color per series/section without a scale of their own:
-    /// journey, timeline, sankey, radar, packet, kanban, quadrant, xychart and
+    /// journey, timeline, sankey, radar, packet, kanban, quadrant and
     /// treemap. `cScale{N}` `themeVariables` recolor individual slots, so this
     /// is an owned-on-write [`Cow`] slice rather than a `&'static` one.
     pub cscale_palette: Cow<'static, [Str]>,
@@ -73,6 +74,11 @@ pub struct Theme {
     /// [`cscale_palette`][Theme::cscale_palette]. `git{N}` `themeVariables`
     /// recolor individual slots.
     pub git_palette: Cow<'static, [Str]>,
+    /// xychart series scale (upstream `xyChart.plotColorPalette`), distinct from
+    /// [`cscale_palette`][Theme::cscale_palette] — upstream hardcodes a pale
+    /// lavender / gray-blue palette per theme rather than reusing `cScale`
+    /// (#319). Overridden per-diagram by `themeVariables.xyChart.plotColorPalette`.
+    pub xychart_palette: Cow<'static, [Str]>,
     /// Pie slice/outer-circle stroke (`pieStrokeColor`). `None` falls back to
     /// `black`.
     pub pie_stroke: Option<Str>,
@@ -133,6 +139,7 @@ impl Theme {
             cscale_palette: Cow::Borrowed(&CSCALE_DEFAULT),
             pie_palette: Cow::Borrowed(&PIE_DEFAULT),
             git_palette: Cow::Borrowed(&GIT_DEFAULT),
+            xychart_palette: Cow::Borrowed(&XYCHART_DEFAULT),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -157,6 +164,7 @@ impl Theme {
             frame_label_fill: Cow::Borrowed("#fff4dd"),
             flow_node_fill: Cow::Borrowed("#fff4dd"),
             flow_node_stroke: Cow::Borrowed("#cba15b"),
+            xychart_palette: Cow::Borrowed(&XYCHART_BASE),
             ..Self::default_theme()
         }
     }
@@ -187,6 +195,7 @@ impl Theme {
             cscale_palette: Cow::Borrowed(&PALETTE_DARK),
             pie_palette: Cow::Borrowed(&PALETTE_DARK),
             git_palette: Cow::Borrowed(&PALETTE_DARK),
+            xychart_palette: Cow::Borrowed(&XYCHART_DARK),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -225,6 +234,7 @@ impl Theme {
             cscale_palette: Cow::Borrowed(&PALETTE_FOREST),
             pie_palette: Cow::Borrowed(&PALETTE_FOREST),
             git_palette: Cow::Borrowed(&PALETTE_FOREST),
+            xychart_palette: Cow::Borrowed(&XYCHART_FOREST),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -263,6 +273,7 @@ impl Theme {
             cscale_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
             pie_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
             git_palette: Cow::Borrowed(&PALETTE_NEUTRAL),
+            xychart_palette: Cow::Borrowed(&XYCHART_NEUTRAL),
             pie_stroke: None,
             pie_opacity: None,
             commit_label_color: None,
@@ -301,6 +312,12 @@ impl Theme {
     /// gitGraph lane color at index `i` (upstream `git{i}`), wrapping the scale.
     pub fn git_color(&self, i: usize) -> &str {
         &self.git_palette[i % self.git_palette.len()]
+    }
+
+    /// xychart series color at index `i` (upstream `xyChart.plotColorPalette`),
+    /// wrapping the scale.
+    pub fn xychart_color(&self, i: usize) -> &str {
+        &self.xychart_palette[i % self.xychart_palette.len()]
     }
 
     /// Pie slice/outer-circle stroke (`pieStrokeColor`), defaulting to black —
@@ -421,6 +438,10 @@ mod tests {
         assert_eq!(t.cscale_color(2), "#E8FFB9");
         assert_eq!(t.pie_color(2), "#B5FF20");
         assert_eq!(t.git_color(2), "#D1FF6D");
+        // xychart has its own scale: pale-lavender bars, dark gray-blue line —
+        // not the saturated cScale colors (#319).
+        assert_eq!(t.xychart_color(0), "#ECECFF");
+        assert_eq!(t.xychart_color(1), "#8493A6");
     }
 
     #[test]
