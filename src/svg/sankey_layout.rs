@@ -363,8 +363,10 @@ mod tests {
     }
 
     /// The energy-flow sample from `samples/sankey.mmd`. Reproduces d3-sankey
-    /// 0.12.3 (justify) exactly: left column ordered Coal, Gas, Solar, Wind,
-    /// with the `Heating` sink pushed to the last column.
+    /// (justify) exactly when fed upstream's layout inputs — vertical extent =
+    /// `height` (400) and padding = `nodePadding + 15` (27, showValues on): left
+    /// column Coal, Solar, Wind, Gas; right column Industry, Transport,
+    /// Residential, Heating. Matches Mermaid JS 11.16.0 (#317).
     #[test]
     fn energy_sample_matches_d3_column_order() {
         let links = vec![
@@ -385,12 +387,12 @@ mod tests {
         for n in ["Industry", "Transport", "Residential", "Heating"] {
             col.insert(n.into(), 2);
         }
-        let cols = order_columns(&order, &col, &links, &values, 380.0, 6.0);
-        assert_eq!(names(&order, &cols[0]), ["Coal", "Gas", "Solar", "Wind"]);
+        let cols = order_columns(&order, &col, &links, &values, 400.0, 27.0);
+        assert_eq!(names(&order, &cols[0]), ["Coal", "Solar", "Wind", "Gas"]);
         assert_eq!(names(&order, &cols[1]), ["Electricity"]);
         assert_eq!(
             names(&order, &cols[2]),
-            ["Industry", "Transport", "Heating", "Residential"]
+            ["Industry", "Transport", "Residential", "Heating"]
         );
         // The pre-fix bug placed Gas at the top of the left column; guard it.
         assert_ne!(cols[0].first().map(|&i| order[i].as_str()), Some("Gas"));

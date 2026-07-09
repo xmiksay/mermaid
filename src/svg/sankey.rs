@@ -18,8 +18,20 @@ const PAD: f64 = 30.0;
 const COL_GAP: f64 = 180.0;
 // Upstream defaults (config.schema.yaml SankeyDiagramConfig).
 const NODE_W: f64 = 10.0;
-const CHART_H: f64 = 380.0;
-const ROW_GAP: f64 = 6.0;
+const CHART_H: f64 = 400.0;
+const ROW_GAP: f64 = 12.0;
+// Extra vertical padding d3-sankey layout reserves for the value line when
+// `showValues` is on (`nodePadding + 15` in the upstream renderer).
+const VALUE_PAD: f64 = 15.0;
+
+/// Per-node fill scale used by upstream's sankey renderer: it colors nodes with
+/// a hardcoded `d3.scaleOrdinal(d3.schemeTableau10)` keyed by node id, i.e. the
+/// Tableau-10 palette cycled in first-appearance order — independent of the
+/// diagram theme's pastel `cScale` palette.
+const TABLEAU10: [&str; 10] = [
+    "#4e79a7", "#f28e2c", "#e15759", "#76b7b2", "#59a14f", "#edc949", "#af7aa1", "#ff9da7",
+    "#9c755f", "#bab0ac",
+];
 
 pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
@@ -55,14 +67,15 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Per-node palette color (upstream cycles a scheme per node); links inherit
-    // from it via `linkColor`.
+    // Per-node color: upstream sankey cycles the fixed Tableau-10 scheme in
+    // first-appearance order (not the theme palette); links inherit from it via
+    // `linkColor`.
     let index: BTreeMap<&str, usize> = order
         .iter()
         .enumerate()
         .map(|(i, n)| (n.as_str(), i))
         .collect();
-    let node_color = |n: &str| theme.cscale_color(index[n]);
+    let node_color = |n: &str| TABLEAU10[index[n] % TABLEAU10.len()];
 
     // Assign a column per node honoring `nodeAlignment`.
     let col = assign_columns(
@@ -97,7 +110,14 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
     // (first appearance, then barycenter relaxation minimising crossings)
     // rather than raw first-appearance order.
     let values: Vec<f64> = order.iter().map(|n| through(n)).collect();
-    let ordered = sankey_layout::order_columns(&order, &col, &d.links, &values, chart_h, row_gap);
+    // Order must be computed with upstream's own d3-sankey layout inputs: the
+    // vertical extent is the `height` config and the padding is
+    // `nodePadding + 15` when `showValues` is on. Feeding our proportional
+    // drawing gap here instead (the old bug) diverged from JS Mermaid's column
+    // order — the relaxation is padding-sensitive.
+    let layout_pad = row_gap + if show_values { VALUE_PAD } else { 0.0 };
+    let ordered =
+        sankey_layout::order_columns(&order, &col, &d.links, &values, chart_h, layout_pad);
     let mut by_col: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for (c, nodes) in ordered.iter().enumerate() {
         by_col.insert(c as u32, nodes.iter().map(|&i| order[i].clone()).collect());
@@ -219,16 +239,19 @@ pub(crate) fn render(d: &SankeyDiagram, theme: &Theme) -> String {
         };
         let anchor = if col[id] == max_col { "end" } else { "start" };
         // Upstream `showValues` (on by default) shows the node throughput after
-        // the name (`Name\n<prefix>42<suffix>`); `false` shows only the name.
+        // the name on a *single* line. Its label string is `Name\n<prefix>42
+        // <suffix>`, but SVG `<text>` collapses that newline to whitespace, so
+        // it renders as one line ("Coal 300"); emit a space to match rather than
+        // stacking two `<tspan>`s.
         let label = if show_values {
-            format!("{id}\n{prefix}{}{suffix}", fnum(through(id)))
+            format!("{id} {prefix}{}{suffix}", fnum(through(id)))
         } else {
             id.clone()
         };
         svg.text(
             label_x,
-            y + h / 2.0 + 4.0,
-            &format!("text-anchor=\"{anchor}\" fill=\"{fg}\" font-size=\"12\""),
+            y + h / 2.0 + 5.0,
+            &format!("text-anchor=\"{anchor}\" fill=\"{fg}\" font-size=\"14\""),
             &label,
         );
     }
@@ -378,6 +401,57 @@ mod tests {
     use super::*;
     use crate::parse::SankeyLink;
 
+    fn link(s: &str, t: &str, v: f64) -> SankeyLink {
+        SankeyLink {
+            source: s.into(),
+            target: t.into(),
+            value: v,
+        }
+    }
+
+    /// The `y` of the node rect painted with `fill`.
+    fn rect_y(svg: &str, fill: &str) -> f64 {
+        let needle = format!("fill=\"{fill}\" stroke=\"#fff\"");
+        let at = svg.find(&needle).expect("node rect present");
+        let rect = &svg[..at];
+        let ys = rect.rfind("y=\"").expect("y attr");
+        let rest = &rect[ys + 3..];
+        let end = rest.find('"').unwrap();
+        rest[..end].parse().unwrap()
+    }
+
+    /// End-to-end: the energy sample's left column must stack Coal, Solar, Wind,
+    /// Gas top→bottom — matching Mermaid JS 11.16.0 — which only holds when the
+    /// renderer feeds d3-sankey ordering upstream's extent/padding (#317).
+    #[test]
+    fn energy_sample_column_order_matches_upstream() {
+        let d = SankeyDiagram {
+            links: vec![
+                link("Electricity", "Industry", 250.0),
+                link("Electricity", "Transport", 80.0),
+                link("Electricity", "Residential", 150.0),
+                link("Gas", "Heating", 120.0),
+                link("Gas", "Industry", 60.0),
+                link("Coal", "Electricity", 300.0),
+                link("Solar", "Electricity", 90.0),
+                link("Wind", "Electricity", 120.0),
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        // Tableau-10 fills by first appearance: Gas=4, Coal=6, Solar=7, Wind=8.
+        let (coal, solar, wind, gas) = (
+            rect_y(&svg, "#af7aa1"),
+            rect_y(&svg, "#ff9da7"),
+            rect_y(&svg, "#9c755f"),
+            rect_y(&svg, "#59a14f"),
+        );
+        assert!(
+            coal < solar && solar < wind && wind < gas,
+            "left column order"
+        );
+    }
+
     #[test]
     fn produces_svg() {
         let d = SankeyDiagram {
@@ -397,9 +471,11 @@ mod tests {
         };
         let svg = render(&d, &Theme::default());
         assert!(svg.starts_with("<svg"));
-        assert!(svg.contains(">A<"));
-        assert!(svg.contains(">B<"));
-        assert!(svg.contains(">C<"));
+        // Name and value share one line ("A 5"), matching upstream (SVG collapses
+        // its `Name\nvalue` newline to whitespace), not a stacked two-line label.
+        assert!(svg.contains(">A 5<"));
+        assert!(svg.contains(">B 5<"));
+        assert!(svg.contains(">C 3<"));
     }
 
     fn chain() -> SankeyDiagram {
@@ -422,14 +498,11 @@ mod tests {
 
     #[test]
     fn nodes_get_distinct_palette_colors() {
-        let theme = Theme::default();
-        let svg = render(&chain(), &theme);
-        // Each node rect carries its own palette color, not one flat fill.
-        for i in 0..3 {
-            assert!(svg.contains(&format!(
-                "fill=\"{}\" stroke=\"#fff\"",
-                theme.cscale_color(i)
-            )));
+        let svg = render(&chain(), &Theme::default());
+        // Each node rect carries its own Tableau-10 color (upstream's hardcoded
+        // sankey scale), not the theme's pastel cScale palette.
+        for hex in ["#4e79a7", "#f28e2c", "#e15759"] {
+            assert!(svg.contains(&format!("fill=\"{hex}\" stroke=\"#fff\"")));
         }
     }
 
@@ -446,17 +519,10 @@ mod tests {
     fn link_color_source_tints_from_source_node() {
         let mut d = chain();
         d.link_color = Some("source".into());
-        let theme = Theme::default();
-        let svg = render(&d, &theme);
+        let svg = render(&d, &Theme::default());
         // A→B tinted from A (node 0), B→C tinted from B (node 1).
-        assert!(svg.contains(&format!(
-            "stroke=\"{}\" stroke-opacity",
-            theme.cscale_color(0)
-        )));
-        assert!(svg.contains(&format!(
-            "stroke=\"{}\" stroke-opacity",
-            theme.cscale_color(1)
-        )));
+        assert!(svg.contains("stroke=\"#4e79a7\" stroke-opacity"));
+        assert!(svg.contains("stroke=\"#f28e2c\" stroke-opacity"));
     }
 
     #[test]
@@ -475,7 +541,7 @@ mod tests {
         d.prefix = Some("$".into());
         d.suffix = Some(" USD".into());
         let svg = render(&d, &Theme::default());
-        assert!(svg.contains(">$5 USD<"));
+        assert!(svg.contains(">A $5 USD<"));
     }
 
     #[test]
@@ -490,17 +556,10 @@ mod tests {
     fn link_color_target() {
         let mut d = chain();
         d.link_color = Some("target".into());
-        let theme = Theme::default();
-        let svg = render(&d, &theme);
+        let svg = render(&d, &Theme::default());
         // A→B tinted from B (node 1), B→C tinted from C (node 2).
-        assert!(svg.contains(&format!(
-            "stroke=\"{}\" stroke-opacity",
-            theme.cscale_color(1)
-        )));
-        assert!(svg.contains(&format!(
-            "stroke=\"{}\" stroke-opacity",
-            theme.cscale_color(2)
-        )));
+        assert!(svg.contains("stroke=\"#f28e2c\" stroke-opacity"));
+        assert!(svg.contains("stroke=\"#e15759\" stroke-opacity"));
     }
 
     #[test]
