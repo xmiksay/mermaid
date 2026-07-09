@@ -1,5 +1,5 @@
-//! C4 relation drawing: point-to-point connectors clipped to each node, drawn
-//! as quadratic Bézier curves with an arrow head and an optional `[techn]` tag.
+//! C4 relation drawing: straight point-to-point connectors clipped to each
+//! node, with an arrow head and an optional `[techn]` tag.
 
 use std::collections::HashMap;
 
@@ -16,7 +16,6 @@ pub(super) fn draw_rel(
     r: &C4Relation,
     ov: Option<&C4RelStyle>,
     pos: &HashMap<String, (f64, f64, f64, f64)>,
-    route: Option<&[(f64, f64)]>,
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
@@ -36,24 +35,10 @@ pub(super) fn draw_rel(
     let (sx, sy) = (ax + aw / 2.0, ay + ah / 2.0);
     let (tx, ty) = (bx + bw / 2.0, by + bh / 2.0);
 
-    // Follow the layered route when one is given (endpoints clipped to each
-    // node's rectangle); otherwise fall back to a straight point-to-point line.
-    let clipped: Vec<(f64, f64)> = match route {
-        Some(pts) if pts.len() >= 2 => {
-            let toward_src = pts[1];
-            let toward_dst = pts[pts.len() - 2];
-            let mut v = Vec::with_capacity(pts.len());
-            v.push(clip_rect(toward_src, (sx, sy), (aw, ah)));
-            v.extend_from_slice(&pts[1..pts.len() - 1]);
-            v.push(clip_rect(toward_dst, (tx, ty), (bw, bh)));
-            v
-        }
-        _ => {
-            let p_first = clip_rect((tx, ty), (sx, sy), (aw, ah));
-            let p_last = clip_rect((sx, sy), (tx, ty), (bw, bh));
-            vec![p_first, p_last]
-        }
-    };
+    // Upstream draws a straight line between the two shape borders (#327).
+    let p_first = clip_rect((tx, ty), (sx, sy), (aw, ah));
+    let p_last = clip_rect((sx, sy), (tx, ty), (bw, bh));
+    let clipped = [p_first, p_last];
 
     let markers = if r.bidirectional {
         "marker-start=\"url(#c4-arrow)\" marker-end=\"url(#c4-arrow)\""
@@ -61,15 +46,14 @@ pub(super) fn draw_rel(
         "marker-end=\"url(#c4-arrow)\""
     };
 
-    // A two-point route curves as a quadratic Bézier through its midpoint;
-    // a routed multi-point polyline is drawn as straight segments.
-    let path = if clipped.len() == 2 {
-        quad_path(&clipped)
-    } else {
-        polyline_path(&clipped)
-    };
     svg.path(
-        &path,
+        &format!(
+            "M{} {} L{} {}",
+            fnum(p_first.0),
+            fnum(p_first.1),
+            fnum(p_last.0),
+            fnum(p_last.1),
+        ),
         &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1\" {markers}"),
     );
 
@@ -117,36 +101,6 @@ pub(super) fn draw_rel(
             &label,
         );
     }
-}
-
-/// Quadratic Bézier from the first to the last point, bent through the routed
-/// midpoint as its control point (matching upstream's `M … Q …` rel curves).
-/// A straight two-point path collapses to a plain line.
-fn quad_path(pts: &[(f64, f64)]) -> String {
-    let start = pts[0];
-    let end = pts[pts.len() - 1];
-    let (mx, my) = polyline_midpoint(pts);
-    // Lift the control point so the curve actually passes through the midpoint at t=0.5.
-    let cx = 2.0 * mx - (start.0 + end.0) / 2.0;
-    let cy = 2.0 * my - (start.1 + end.1) / 2.0;
-    format!(
-        "M{} {} Q{} {} {} {}",
-        fnum(start.0),
-        fnum(start.1),
-        fnum(cx),
-        fnum(cy),
-        fnum(end.0),
-        fnum(end.1),
-    )
-}
-
-/// Straight-segment path through every waypoint (`M … L … L …`).
-fn polyline_path(pts: &[(f64, f64)]) -> String {
-    let mut path = format!("M{} {}", fnum(pts[0].0), fnum(pts[0].1));
-    for p in &pts[1..] {
-        path.push_str(&format!(" L{} {}", fnum(p.0), fnum(p.1)));
-    }
-    path
 }
 
 fn truncate(s: &str, n: usize) -> String {
