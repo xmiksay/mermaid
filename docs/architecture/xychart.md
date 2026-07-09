@@ -26,5 +26,14 @@ Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart.rs`.
   `config.xyChart.showLegend: false` hides it). `config.xyChart.width`/`height`
   (→ `XyChartDiagram.width`/`height`) override the default plot size, and
   `themeVariables.xyChart.plotColorPalette` (comma-separated →
-  `plot_color_palette`) replaces the theme `cScale` palette for series colors — all
+  `plot_color_palette`) replaces the default palette for series colors — all
   wired through `apply_xychart_config` in `parse_with_meta`.
+- xychart series colors come from a **dedicated `Theme::xychart_palette`**
+  (upstream `xyChart.plotColorPalette`, hardcoded per theme), not the generic
+  `cScale`: the default theme opens with pale-lavender bars (`#ECECFF`) and a
+  dark gray-blue line (`#8493A6`). `theme.xychart_color(i)` wraps the scale;
+  `plot_color_palette` (set via config/themeVariables) overrides it (#319).
+- xychart draws **no gridlines and no point markers** — only the axes, short
+  value/category tick marks and labels, bars, and the line path. Upstream draws
+  neither the dotted horizontal gridlines across the plot nor circular markers
+  at each data point (#319).

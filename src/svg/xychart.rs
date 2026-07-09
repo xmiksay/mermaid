@@ -56,7 +56,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
 
     let color_at = |i: usize| -> String {
         if d.plot_color_palette.is_empty() {
-            theme.cscale_color(i).to_string()
+            theme.xychart_color(i).to_string()
         } else {
             d.plot_color_palette[i % d.plot_color_palette.len()].clone()
         }
@@ -171,7 +171,8 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         }
     };
 
-    // Value ticks (nice round values) with grid lines and labels.
+    // Value ticks (nice round values): a short tick mark and a label. Upstream
+    // draws no gridlines across the plot area, so we don't either (#319).
     for &v in &value_ticks {
         let p = value_pos(v);
         if horiz {
@@ -181,13 +182,6 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                 p,
                 chart_bottom + 4.0,
                 &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
-            );
-            svg.line(
-                p,
-                chart_top,
-                p,
-                chart_bottom,
-                &format!("stroke=\"{fg_muted}\" stroke-width=\"1\" stroke-dasharray=\"2 3\""),
             );
             svg.text(
                 p,
@@ -202,13 +196,6 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                 chart_left,
                 p,
                 &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
-            );
-            svg.line(
-                chart_left,
-                p,
-                chart_right,
-                p,
-                &format!("stroke=\"{fg_muted}\" stroke-width=\"1\" stroke-dasharray=\"2 3\""),
             );
             svg.text(
                 chart_left - 8.0,
@@ -365,7 +352,7 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                     } else {
                         let _ = write!(path, "L{} {}", fnum(px), fnum(py));
                     }
-                    svg.circle(px, py, 3.5, &format!("fill=\"{color}\""));
+                    // Upstream draws no point markers on the line (#319).
                     if let Some(label) = label_of(i) {
                         draw_point_label(&mut svg, px, py - 8.0, false, fg, label);
                     }
@@ -713,6 +700,37 @@ mod tests {
         assert!(svg.contains(">Trend<"));
         assert!(svg.contains("fill=\"#111111\""));
         assert!(svg.contains("fill=\"#222222\""));
+    }
+
+    #[test]
+    fn default_palette_and_no_extra_elements() {
+        // Upstream: pale-lavender bars, dark gray-blue line; no dotted gridlines
+        // across the plot and no circular point markers (#319).
+        let d = XyChartDiagram {
+            series: vec![
+                XySeries {
+                    kind: XySeriesKind::Bar,
+                    title: None,
+                    values: vec![40.0, 80.0],
+                    labels: Vec::new(),
+                },
+                XySeries {
+                    kind: XySeriesKind::Line,
+                    title: None,
+                    values: vec![40.0, 80.0],
+                    labels: Vec::new(),
+                },
+            ],
+            ..XyChartDiagram::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#ECECFF\""), "bar uses pale lavender");
+        assert!(
+            svg.contains("stroke=\"#8493A6\""),
+            "line uses dark gray-blue"
+        );
+        assert!(!svg.contains("stroke-dasharray"), "no dotted gridlines");
+        assert!(!svg.contains("<circle"), "no point markers");
     }
 
     #[test]

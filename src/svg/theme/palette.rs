@@ -1,14 +1,16 @@
 //! Built-in categorical color palettes. Split out of `theme/mod.rs` to keep
 //! each file under the size cap.
 //!
-//! Upstream Mermaid derives three *distinct* categorical scales from a theme's
+//! Upstream Mermaid derives several *distinct* categorical scales from a theme's
 //! primary/secondary/tertiary colors, and different diagram kinds read
 //! different ones:
 //!
 //! - [`CSCALE_DEFAULT`] — the generic `cScale0..11` scale (journey, timeline,
-//!   sankey, radar, packet, kanban, quadrant, xychart, treemap).
+//!   sankey, radar, packet, kanban, quadrant, treemap).
 //! - [`PIE_DEFAULT`] — the `pie1..12` scale (pie charts).
 //! - [`GIT_DEFAULT`] — the `git0..7` lane scale (gitGraph).
+//! - [`XYCHART_DEFAULT`] — the `xyChart.plotColorPalette` scale (xychart);
+//!   upstream hardcodes it per theme rather than deriving it.
 //!
 //! The default-theme values here are the exact colors upstream's `khroma`
 //! pipeline computes from `primaryColor #ECECFF` / `secondaryColor #ffffde`
@@ -35,6 +37,79 @@ pub(super) const CSCALE_DEFAULT: [Str; 12] = [
     Cow::Borrowed("#B9FFDC"),
     Cow::Borrowed("#B9FFFF"),
     Cow::Borrowed("#B9DCFF"),
+];
+
+/// xychart `plotColorPalette` per theme — a scale distinct from `cScale`
+/// (upstream hardcodes it in each `theme-*.js`). The default theme opens with
+/// pale-lavender bars (`#ECECFF`) and a dark gray-blue line (`#8493A6`), not the
+/// saturated `cScale` colors (#319).
+pub(super) const XYCHART_DEFAULT: [Str; 10] = [
+    Cow::Borrowed("#ECECFF"),
+    Cow::Borrowed("#8493A6"),
+    Cow::Borrowed("#FFC3A0"),
+    Cow::Borrowed("#DCDDE1"),
+    Cow::Borrowed("#B8E994"),
+    Cow::Borrowed("#D1A36F"),
+    Cow::Borrowed("#C3CDE6"),
+    Cow::Borrowed("#FFB6C1"),
+    Cow::Borrowed("#496078"),
+    Cow::Borrowed("#F8F3E3"),
+];
+
+/// xychart `plotColorPalette` for the `base` theme.
+pub(super) const XYCHART_BASE: [Str; 10] = [
+    Cow::Borrowed("#FFF4DD"),
+    Cow::Borrowed("#FFD8B1"),
+    Cow::Borrowed("#FFA07A"),
+    Cow::Borrowed("#ECEFF1"),
+    Cow::Borrowed("#D6DBDF"),
+    Cow::Borrowed("#C3E0A8"),
+    Cow::Borrowed("#FFB6A4"),
+    Cow::Borrowed("#FFD74D"),
+    Cow::Borrowed("#738FA7"),
+    Cow::Borrowed("#FFFFF0"),
+];
+
+/// xychart `plotColorPalette` for the `dark` theme.
+pub(super) const XYCHART_DARK: [Str; 10] = [
+    Cow::Borrowed("#3498db"),
+    Cow::Borrowed("#2ecc71"),
+    Cow::Borrowed("#e74c3c"),
+    Cow::Borrowed("#f1c40f"),
+    Cow::Borrowed("#bdc3c7"),
+    Cow::Borrowed("#ffffff"),
+    Cow::Borrowed("#34495e"),
+    Cow::Borrowed("#9b59b6"),
+    Cow::Borrowed("#1abc9c"),
+    Cow::Borrowed("#e67e22"),
+];
+
+/// xychart `plotColorPalette` for the `forest` theme.
+pub(super) const XYCHART_FOREST: [Str; 10] = [
+    Cow::Borrowed("#CDE498"),
+    Cow::Borrowed("#FF6B6B"),
+    Cow::Borrowed("#A0D2DB"),
+    Cow::Borrowed("#D7BDE2"),
+    Cow::Borrowed("#F0F0F0"),
+    Cow::Borrowed("#FFC3A0"),
+    Cow::Borrowed("#7FD8BE"),
+    Cow::Borrowed("#FF9A8B"),
+    Cow::Borrowed("#FAF3E0"),
+    Cow::Borrowed("#FFF176"),
+];
+
+/// xychart `plotColorPalette` for the `neutral` theme.
+pub(super) const XYCHART_NEUTRAL: [Str; 10] = [
+    Cow::Borrowed("#EEE"),
+    Cow::Borrowed("#6BB8E4"),
+    Cow::Borrowed("#8ACB88"),
+    Cow::Borrowed("#C7ACD6"),
+    Cow::Borrowed("#E8DCC2"),
+    Cow::Borrowed("#FFB2A8"),
+    Cow::Borrowed("#FFF380"),
+    Cow::Borrowed("#7E8D91"),
+    Cow::Borrowed("#FFD8B1"),
+    Cow::Borrowed("#FAF3E0"),
 ];
 
 /// Default-theme quadrant background tints (quadrant 1..4). Upstream fills all
