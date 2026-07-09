@@ -45,7 +45,9 @@ pub(crate) fn parse(input: &str) -> Result<RadarDiagram, ParseError> {
         }
 
         if let Some(rest) = line.strip_prefix("title") {
-            d.title = Some(unquote(rest.trim()).to_string());
+            // Upstream Mermaid keeps the surrounding quotes literally in the
+            // rendered radar title, so we do not `unquote` here (#330).
+            d.title = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("axis") {
             d.axes.extend(parse_axis_list(rest, line_no)?);
         } else if let Some(rest) = line.strip_prefix("curve") {
@@ -237,6 +239,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(d.curves[0].values, vec![20.0, 0.0, 30.0]);
+    }
+
+    #[test]
+    fn title_keeps_literal_quotes() {
+        // Upstream renders the surrounding quotes literally (#330).
+        let d = parse("radar-beta\ntitle \"Skills\"\naxis A, B\ncurve a{1, 2}\n").unwrap();
+        assert_eq!(d.title.as_deref(), Some("\"Skills\""));
+        let unquoted = parse("radar-beta\ntitle Skills\naxis A, B\ncurve a{1, 2}\n").unwrap();
+        assert_eq!(unquoted.title.as_deref(), Some("Skills"));
     }
 
     #[test]

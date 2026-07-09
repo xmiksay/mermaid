@@ -127,12 +127,23 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
             ey + TICK_LEN * ty,
             &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
         );
-        let lx = cx + (radius + 14.0) * a.cos();
+        // Anchor labels toward their outer side (start on the right, end on the
+        // left, middle near the vertical) so long words like "Intelligence" grow
+        // away from the disc instead of overlapping its edge (#330).
+        let ux = a.cos();
+        let anchor = if ux > 0.3 {
+            "start"
+        } else if ux < -0.3 {
+            "end"
+        } else {
+            "middle"
+        };
+        let lx = cx + (radius + 14.0) * ux;
         let ly = cy + (radius + 14.0) * a.sin() + 4.0;
         svg.text(
             lx,
             ly,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+            &format!("text-anchor=\"{anchor}\" fill=\"{fg}\" font-size=\"12\""),
             &ax.label,
         );
     }
@@ -157,11 +168,11 @@ pub(crate) fn render(d: &RadarDiagram, theme: &Theme) -> String {
             RadarGraticule::Circle => cardinal_closed_path(&pts, tension),
             RadarGraticule::Polygon => straight_closed_path(&pts),
         };
+        // Upstream `radar.curveOpacity` (0.5) — saturated enough that the faint
+        // graticule rings underneath do not read through the fill (#330).
         svg.path(
             &path,
-            &format!(
-                "fill=\"{color}\" fill-opacity=\"0.25\" stroke=\"{color}\" stroke-width=\"2\""
-            ),
+            &format!("fill=\"{color}\" fill-opacity=\"0.5\" stroke=\"{color}\" stroke-width=\"2\""),
         );
     }
 
@@ -417,11 +428,11 @@ mod tests {
     }
 
     /// Extract the `d` attribute of the curve path (the one with the
-    /// `fill-opacity="0.25"` translucent fill).
+    /// `fill-opacity="0.5"` translucent fill).
     fn curve_path_d(svg: &str) -> String {
         for seg in svg.split("<path ").skip(1) {
             let el = &seg[..seg.find("/>").expect("closed path")];
-            if el.contains("fill-opacity=\"0.25\"") {
+            if el.contains("fill-opacity=\"0.5\"") {
                 let d = el.strip_prefix("d=\"").expect("d attr first");
                 return d[..d.find('"').expect("closed d")].to_string();
             }
@@ -449,6 +460,38 @@ mod tests {
         ));
         assert!(d.contains('L'));
         assert!(!d.contains('C'));
+    }
+
+    #[test]
+    fn axis_labels_anchor_toward_their_outer_side() {
+        // Four axes give a horizontal pair: index 1 sits due-right (anchors
+        // `start`), index 3 due-left (anchors `end`), so long labels grow away
+        // from the disc instead of over it (#330). Top/bottom stay `middle`.
+        let d = RadarDiagram {
+            axes: vec![
+                RadarAxis {
+                    id: "t".into(),
+                    label: "Top".into(),
+                },
+                RadarAxis {
+                    id: "r".into(),
+                    label: "Right".into(),
+                },
+                RadarAxis {
+                    id: "b".into(),
+                    label: "Bottom".into(),
+                },
+                RadarAxis {
+                    id: "l".into(),
+                    label: "Left".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("text-anchor=\"start\" fill=\"#333\" font-size=\"12\">Right<"));
+        assert!(svg.contains("text-anchor=\"end\" fill=\"#333\" font-size=\"12\">Left<"));
+        assert!(svg.contains("text-anchor=\"middle\" fill=\"#333\" font-size=\"12\">Top<"));
     }
 
     #[test]

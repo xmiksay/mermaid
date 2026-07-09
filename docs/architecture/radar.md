@@ -15,13 +15,15 @@ Parser: `src/parse/radar.rs` · Renderer: `src/svg/radar.rs`.
   **circles** by default (`graticule polygon` for the old polygon rings) via the
   shared `draw_ring` helper; each spoke is capped with a short dark tick (`fg`)
   perpendicular to it at the outer ring, matching upstream's disc/ring/tick
-  styling. Curves scale over `[min, max]` so `min` acts as a scale offset;
+  styling. Curve fills use `fill-opacity 0.5` (upstream `radar.curveOpacity`) so
+  the faint rings do not read through the fills. Axis labels are anchored toward
+  their outer side (`start` on the right, `end` on the left, `middle` near the
+  vertical) so long words grow away from the disc rather than overlapping its
+  edge. Curves scale over `[min, max]` so `min` acts as a scale offset;
   `showLegend false` suppresses the legend.
-- **Title quotes are stripped** (`unquote` in `src/parse/radar.rs`), so
-  `title "Skills"` renders as `Skills`. This deliberately diverges from
-  upstream Mermaid 11.16, which renders the surrounding quotes literally;
-  stripping is consistent with how every other diagram kind treats quoted
-  titles/labels here, so we keep it. Curves are drawn as a **closed
+- **Title quotes are kept literally** (`src/parse/radar.rs` does *not* `unquote`
+  the title), so `title "Skills"` renders as `"Skills"`, matching upstream
+  Mermaid 11.16 (#330). Curves are drawn as a **closed
   cardinal (Catmull-Rom) spline** for the default circle graticule
   (`cardinal_closed_path`, d3's `curveCardinalClosed.tension`, `k=(1−t)/6`) and
   as straight closed segments (`straight_closed_path`) for `graticule polygon`.
