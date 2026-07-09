@@ -14,7 +14,6 @@ const POINT_RADIUS: f64 = 5.0;
 
 pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
-    let fg_muted = &theme.fg_muted;
 
     // `config.quadrantChart.chartWidth`/`chartHeight` override the plot size.
     let chart_w = d.chart_width.unwrap_or(SIZE);
@@ -40,45 +39,41 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
 
     let half_w = chart_w / 2.0;
     let half_h = chart_h / 2.0;
+    // Thin light-lavender border/dividers (upstream's `primaryBorderColor`),
+    // reusing the theme's primary node stroke rather than the old near-black
+    // heavy frame (#316).
+    let border = &theme.flow_node_stroke;
     // Quadrant backgrounds + labels (q2 top-left, q1 top-right, q3 bottom-left,
-    // q4 bottom-right). Fill comes from the `quadrant{N}Fill` themeVariable when
-    // set, else the palette index the quadrant historically used.
+    // q4 bottom-right). Fill is the `quadrant{N}Fill` themeVariable when set,
+    // else the per-theme tint — all four are shades of one primary-color family.
     let qrects = [
         (
             d.q2.as_deref(),
             chart_left,
             chart_top,
-            theme.quadrant_fill(2, 0),
+            theme.quadrant_fill(2),
         ),
         (
             d.q1.as_deref(),
             chart_left + half_w,
             chart_top,
-            theme.quadrant_fill(1, 1),
+            theme.quadrant_fill(1),
         ),
         (
             d.q3.as_deref(),
             chart_left,
             chart_top + half_h,
-            theme.quadrant_fill(3, 2),
+            theme.quadrant_fill(3),
         ),
         (
             d.q4.as_deref(),
             chart_left + half_w,
             chart_top + half_h,
-            theme.quadrant_fill(4, 3),
+            theme.quadrant_fill(4),
         ),
     ];
     for (label, x, y, color) in qrects {
-        svg.rect(
-            x,
-            y,
-            half_w,
-            half_h,
-            &format!(
-                "fill=\"{color}\" fill-opacity=\"0.15\" stroke=\"{fg_muted}\" stroke-width=\"1\""
-            ),
-        );
+        svg.rect(x, y, half_w, half_h, &format!("fill=\"{color}\""));
         if let Some(l) = label {
             svg.text(
                 x + half_w / 2.0,
@@ -95,21 +90,21 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
         chart_top,
         chart_w,
         chart_h,
-        &format!("fill=\"none\" stroke=\"{fg}\" stroke-width=\"1.5\""),
+        &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1\""),
     );
     svg.line(
         chart_left + half_w,
         chart_top,
         chart_left + half_w,
         chart_top + chart_h,
-        &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
+        &format!("stroke=\"{border}\" stroke-width=\"1\""),
     );
     svg.line(
         chart_left,
         chart_top + half_h,
         chart_left + chart_w,
         chart_top + half_h,
-        &format!("stroke=\"{fg_muted}\" stroke-width=\"1\""),
+        &format!("stroke=\"{border}\" stroke-width=\"1\""),
     );
 
     // X-axis labels: centered under each horizontal half, matching upstream
@@ -166,11 +161,13 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
     }
 
     // Points.
-    for (i, p) in d.points.iter().enumerate() {
+    for p in &d.points {
         let px = chart_left + p.x.clamp(0.0, 1.0) * chart_w;
         let py = chart_top + (1.0 - p.y.clamp(0.0, 1.0)) * chart_h;
 
         // Resolve styling: class defaults first, then per-point overrides.
+        // Upstream renders solid near-black dots (theme `fg`), not the pale
+        // categorical tints the old palette lookup produced (#316).
         let class = p.class_name.as_deref().and_then(|name| d.classes.get(name));
         let radius = p
             .radius
@@ -180,7 +177,7 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
             .color
             .clone()
             .or_else(|| class.and_then(|c| c.color.clone()))
-            .unwrap_or_else(|| theme.cscale_color(i + 4).to_string());
+            .unwrap_or_else(|| fg.to_string());
         let stroke = p
             .stroke_color
             .clone()
@@ -198,10 +195,12 @@ pub(crate) fn render(d: &QuadrantDiagram, theme: &Theme) -> String {
             radius,
             &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\""),
         );
+        // Label centered below the dot (upstream), rather than jammed to its
+        // right where it collided with and crossed the outer chart border (#316).
         svg.text(
-            px + 9.0,
-            py + 4.0,
-            &format!("fill=\"{fg}\" font-size=\"11\""),
+            px,
+            py + radius + 13.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
             &p.label,
         );
     }
@@ -247,6 +246,38 @@ mod tests {
         // title keeps its bold weight, matching upstream.
         assert!(!svg.contains("font-weight=\"bold\">Q1<"));
         assert!(svg.contains("font-weight=\"bold\">Chart</text>"));
+    }
+
+    #[test]
+    fn default_fills_one_family_points_near_black_labels_centered() {
+        // #316: all four quadrant tints are one lavender family (not distinct
+        // categorical hues), points default to solid near-black (theme fg), and
+        // labels sit centered below the dot rather than jammed to its right.
+        let d = QuadrantDiagram {
+            q1: Some("Q1".into()),
+            q2: Some("Q2".into()),
+            q3: Some("Q3".into()),
+            q4: Some("Q4".into()),
+            points: vec![QuadrantPoint {
+                label: "P".into(),
+                x: 0.9,
+                y: 0.4,
+                radius: None,
+                color: None,
+                stroke_color: None,
+                stroke_width: None,
+                class_name: None,
+            }],
+            ..Default::default()
+        };
+        let svg = render(&d, &Theme::default());
+        for fill in ["#ECECFF", "#F1F1FF", "#F6F6FF", "#FBFBFF"] {
+            assert!(svg.contains(&format!("fill=\"{fill}\"")), "missing {fill}");
+        }
+        // Point uses the theme foreground (near-black), not a pale palette tint.
+        assert!(svg.contains("fill=\"#333\" stroke=\"#fff\""));
+        // Label is centered below the dot.
+        assert!(svg.contains("text-anchor=\"middle\" fill=\"#333\" font-size=\"11\">P<"));
     }
 
     #[test]

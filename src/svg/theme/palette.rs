@@ -37,6 +37,41 @@ pub(super) const CSCALE_DEFAULT: [Str; 12] = [
     Cow::Borrowed("#B9DCFF"),
 ];
 
+/// Default-theme quadrant background tints (quadrant 1..4). Upstream fills all
+/// four quadrants with tints of the single `primaryColor` (`#ECECFF`) family —
+/// each successively lightened (`adjust` +5/+10/+15 per RGB channel) rather than
+/// spanning distinct categorical hues (#316).
+pub(super) const QUADRANT_FILLS_DEFAULT: [Str; 4] = [
+    Cow::Borrowed("#ECECFF"),
+    Cow::Borrowed("#F1F1FF"),
+    Cow::Borrowed("#F6F6FF"),
+    Cow::Borrowed("#FBFBFF"),
+];
+
+/// Dark-theme quadrant tints (lightened steps of the dark primary `#3B3B5B`).
+pub(super) const QUADRANT_FILLS_DARK: [Str; 4] = [
+    Cow::Borrowed("#3B3B5B"),
+    Cow::Borrowed("#404060"),
+    Cow::Borrowed("#454565"),
+    Cow::Borrowed("#4A4A6A"),
+];
+
+/// Forest-theme quadrant tints (lightened steps of the forest primary `#CDE7CD`).
+pub(super) const QUADRANT_FILLS_FOREST: [Str; 4] = [
+    Cow::Borrowed("#CDE7CD"),
+    Cow::Borrowed("#D2ECD2"),
+    Cow::Borrowed("#D7F1D7"),
+    Cow::Borrowed("#DCF6DC"),
+];
+
+/// Neutral-theme quadrant tints (lightened steps of the neutral primary `#EEE`).
+pub(super) const QUADRANT_FILLS_NEUTRAL: [Str; 4] = [
+    Cow::Borrowed("#EEEEEE"),
+    Cow::Borrowed("#F3F3F3"),
+    Cow::Borrowed("#F8F8F8"),
+    Cow::Borrowed("#FDFDFD"),
+];
+
 /// `pie1..12` slice scale for the default theme.
 pub(super) const PIE_DEFAULT: [Str; 12] = [
     Cow::Borrowed("#ECECFF"),

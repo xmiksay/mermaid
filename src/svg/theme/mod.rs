@@ -16,6 +16,7 @@ mod variables;
 
 use palette::{
     CSCALE_DEFAULT, GIT_DEFAULT, PALETTE_DARK, PALETTE_FOREST, PALETTE_NEUTRAL, PIE_DEFAULT,
+    QUADRANT_FILLS_DARK, QUADRANT_FILLS_DEFAULT, QUADRANT_FILLS_FOREST, QUADRANT_FILLS_NEUTRAL,
 };
 
 /// A borrowed-or-owned color/font string. Built-ins use `Cow::Borrowed`;
@@ -85,8 +86,13 @@ pub struct Theme {
     /// [`fg`][Theme::fg].
     pub tag_label_color: Option<Str>,
     /// Optional `quadrant{1..4}Fill` overrides (`themeVariables`), indexed by
-    /// quadrant number minus one. `None` falls back to the pie palette.
+    /// quadrant number minus one. `None` falls back to
+    /// [`quadrant_default_fills`][Theme::quadrant_default_fills].
     pub quadrant_fills: [Option<Str>; 4],
+    /// Per-theme default quadrant background tints (quadrant 1..4). Upstream
+    /// fills all four quadrants with lightened tints of the single primary-color
+    /// family rather than distinct categorical hues (#316).
+    pub quadrant_default_fills: [Str; 4],
     /// CSS `font-family` applied to the root `<svg>`; cascades to all text.
     pub font_family: Str,
     /// Base `font-size` (px) on the root `<svg>`; individual labels may
@@ -132,6 +138,7 @@ impl Theme {
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
+            quadrant_default_fills: QUADRANT_FILLS_DEFAULT,
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -185,6 +192,7 @@ impl Theme {
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
+            quadrant_default_fills: QUADRANT_FILLS_DARK,
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -222,6 +230,7 @@ impl Theme {
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
+            quadrant_default_fills: QUADRANT_FILLS_FOREST,
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -259,6 +268,7 @@ impl Theme {
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
+            quadrant_default_fills: QUADRANT_FILLS_NEUTRAL,
             font_family: Cow::Borrowed("sans-serif"),
             font_size: 14.0,
             responsive: true,
@@ -325,17 +335,16 @@ impl Theme {
     }
 
     /// Fill for quadrant `quadrant` (1-based). Returns the `quadrant{N}Fill`
-    /// `themeVariables` override if set, else the categorical color at
-    /// `palette_index` (the two differ because the quadrant-to-palette mapping
-    /// is not 1:1).
-    pub fn quadrant_fill(&self, quadrant: usize, palette_index: usize) -> &str {
+    /// `themeVariables` override if set, else the per-theme default tint — all
+    /// four are lightened tints of the single primary-color family (#316).
+    pub fn quadrant_fill(&self, quadrant: usize) -> &str {
         match self
             .quadrant_fills
             .get(quadrant - 1)
             .and_then(Option::as_deref)
         {
             Some(c) => c,
-            None => self.cscale_color(palette_index),
+            None => &self.quadrant_default_fills[quadrant - 1],
         }
     }
 
