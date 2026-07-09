@@ -19,9 +19,12 @@ Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture.rs`.
 - architecture-beta icons: `draw_arch_icon` (`src/svg/architecture.rs`) draws
   six built-in glyphs (`cloud`, `database`/`db`, `disk` — a distinct concentric
   platter, `server`, `internet`/`globe`, `queue`/`kafka`) at a caller-chosen
-  size, and returns `false` for anything else. Service glyphs render white on a
-  solid blue tile (`ICON_TILE`); a group's `(icon)` renders to the left of its
-  title. Service ids are no longer printed as captions — only the label. A
+  size, and returns `false` for anything else. A service renders as upstream
+  does (#326): a large bare blue icon square (`SERVICE_ICON`, 80px, no container
+  box) with a white glyph (`SERVICE_GLYPH`) centred on it and the label drawn
+  **below** — not a lavender box with a small icon and the label inside. A
+  group's `(icon)` renders to the left of its title. Service ids are no longer
+  printed as captions — only the label. A
   static renderer can't fetch Iconify packs (`logos:aws-lambda`, `mdi:…`), so an
   unrecognized name falls back to the generic box **plus** the name as a caption
   (`truncate_icon_name`: segment after the last `:`, capped at 16 chars) — the

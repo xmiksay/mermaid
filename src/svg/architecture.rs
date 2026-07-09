@@ -16,17 +16,21 @@ use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
-const SERVICE_W: f64 = 110.0;
-const SERVICE_H: f64 = 86.0;
+const SERVICE_W: f64 = 80.0;
+const SERVICE_H: f64 = 108.0;
 const H_GAP: f64 = 40.0;
 const V_GAP: f64 = 40.0;
 const GROUP_PAD: f64 = 16.0;
 const GROUP_HDR: f64 = 22.0;
 const GROUP_GAP: f64 = 30.0;
-const ICON_SIZE: f64 = 28.0;
+/// Bare service icon: a large flat blue square (no surrounding container box),
+/// matching upstream's ~80px service glyph. The label is drawn below it.
+const SERVICE_ICON: f64 = 80.0;
+/// White glyph drawn centred on the blue icon square.
+const SERVICE_GLYPH: f64 = 48.0;
 const GROUP_ICON_SIZE: f64 = 16.0;
 const JUNCTION_R: f64 = 6.0;
-/// Solid tile behind a service glyph — a fixed blue to match the JS reference
+/// Solid fill of a service icon square — a fixed blue to match the JS reference
 /// (upstream renders service icons as solid blue tiles regardless of theme).
 const ICON_TILE: &str = "#4a72d6";
 
@@ -43,8 +47,6 @@ struct Placed {
 pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let fg_muted = &theme.fg_muted;
-    let stroke = &theme.flow_node_stroke;
-    let fill = &theme.flow_node_fill;
 
     // Collect node ids per parent group (None = top-level).
     let mut by_parent: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
@@ -285,42 +287,40 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             );
             continue;
         }
+        // Upstream renders a service as a large bare blue icon square with the
+        // label below it — no surrounding container box.
+        let tile = SERVICE_ICON;
+        let tx = p.x + (p.w - tile) / 2.0;
+        let ty = p.y;
         svg.rect(
-            p.x,
-            p.y,
-            p.w,
-            p.h,
-            &format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\" rx=\"6\""),
+            tx,
+            ty,
+            tile,
+            tile,
+            &format!("fill=\"{ICON_TILE}\" stroke=\"none\" rx=\"6\""),
         );
-        let label_y = if let Some(icon_kind) = &p.icon {
-            // Solid blue icon tile with a white glyph on top.
-            let tile = ICON_SIZE + 10.0;
-            let tx = p.x + (p.w - tile) / 2.0;
-            let ty = p.y + 8.0;
-            svg.rect(
-                tx,
-                ty,
-                tile,
-                tile,
-                &format!("fill=\"{ICON_TILE}\" stroke=\"none\" rx=\"6\""),
-            );
-            let ix = tx + (tile - ICON_SIZE) / 2.0;
-            let iy = ty + (tile - ICON_SIZE) / 2.0;
-            // A pure-Rust renderer can't fetch Iconify packs (`logos:aws-lambda`
-            // etc.), so unrecognized names fall back to a generic glyph plus the
-            // name as a caption — the icon identity is shown, not silently lost.
-            if !draw_arch_icon(&mut svg, icon_kind, ix, iy, ICON_SIZE, "#ffffff", "none") {
-                svg.text(
-                    p.x + p.w / 2.0,
-                    ty + tile + 10.0,
-                    &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"8\""),
-                    &truncate_icon_name(icon_kind),
-                );
+        let ix = tx + (tile - SERVICE_GLYPH) / 2.0;
+        let iy = ty + (tile - SERVICE_GLYPH) / 2.0;
+        let mut label_y = ty + tile + 16.0;
+        // A pure-Rust renderer can't fetch Iconify packs (`logos:aws-lambda`
+        // etc.), so unrecognized names fall back to a generic glyph plus the
+        // name as a caption — the icon identity is shown, not silently lost.
+        match &p.icon {
+            Some(kind) => {
+                if !draw_arch_icon(&mut svg, kind, ix, iy, SERVICE_GLYPH, "#ffffff", "none") {
+                    svg.text(
+                        p.x + p.w / 2.0,
+                        ty + tile + 12.0,
+                        &format!("text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\""),
+                        &truncate_icon_name(kind),
+                    );
+                    label_y = ty + tile + 26.0;
+                }
             }
-            ty + tile + 24.0
-        } else {
-            p.y + p.h / 2.0 + 4.0
-        };
+            None => {
+                draw_arch_icon(&mut svg, "", ix, iy, SERVICE_GLYPH, "#ffffff", "none");
+            }
+        }
         svg.text(
             p.x + p.w / 2.0,
             label_y,
@@ -649,6 +649,23 @@ mod tests {
     }
 
     #[test]
+    fn service_renders_bare_icon_no_container_box() {
+        // #326: a service is a large bare blue icon square (80px) with the label
+        // below — no lavender container box (theme flow_node_fill).
+        let d = arch("architecture-beta\nservice db(database)[Database]\n");
+        let svg = render(&d, &Theme::default());
+        assert!(
+            svg.contains("width=\"80\""),
+            "service icon square (80px) missing"
+        );
+        assert!(
+            !svg.contains("fill=\"#ECECFF\""),
+            "service must not draw the lavender container box"
+        );
+        assert!(svg.contains(ICON_TILE), "blue icon fill missing");
+    }
+
+    #[test]
     fn unknown_icon_renders_name_caption() {
         // Iconify pack names can't be fetched by a static renderer; instead of
         // silently drawing a blank box, the name is shown as a caption.
@@ -694,10 +711,11 @@ architecture-beta
         assert!(svg.contains(">Queries<"), "edge title missing");
     }
 
-    /// Top-left `(x, y)` of every service box (`width="110"`) in source order.
+    /// Top-left `(x, y)` of every service icon square (`width="80"`) in source
+    /// order.
     fn service_boxes(svg: &str) -> Vec<(f64, f64)> {
         svg.split("<rect ")
-            .filter(|chunk| chunk.contains("width=\"110\""))
+            .filter(|chunk| chunk.contains("width=\"80\""))
             .filter_map(|chunk| {
                 let x = attr(chunk, "x=\"")?;
                 let y = attr(chunk, "y=\"")?;
