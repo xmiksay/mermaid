@@ -18,7 +18,8 @@ src/
 │   ├── mod.rs       parse()/parse_with_meta() dispatcher, ParseError + SyntaxKind, ast re-export
 │   ├── ast/         all AST types (pub via lib.rs as `ast::*`) incl. DiagramMeta —
 │   │                mod + block/c4/charts/class/er/flowchart/gantt/sequence/state/structure
-│   ├── preamble.rs  strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
+│   ├── preamble/    strips frontmatter/%%{init}%%/accTitle/accDescr → DiagramMeta
+│   │                (mod + frontmatter/init/config submodules)
 │   ├── style.rs     `classDef`/`class`/`:::className`/`style`/`linkStyle` parsing;
 │   │                parse_style_props + parse_multi_id_stmt (id-list/payload split)
 │   ├── token.rs     quote-aware tokenizing: unquote/unquote_any/find_unquoted/split_unquoted/
@@ -28,7 +29,7 @@ src/
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
-│   ├── builder.rs   string-based SVG writer (escape, fnum, SvgBuilder, def_arrow_marker)
+│   ├── builder/    string-based SVG writer (escape, fnum, SvgBuilder, def_arrow_marker, curves, text)
 │   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
 │   ├── color.rs     readable_text_color: contrast-aware label color for filled shapes
 │   ├── label.rs     decode_label: `#…;` entity codes (markdown emphasis → markup.rs)
@@ -176,7 +177,7 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
 
 ## Cross-cutting behavior
 
-- **Source preamble** (`src/parse/preamble.rs`) is stripped by
+- **Source preamble** (`src/parse/preamble/`) is stripped by
   `parse_with_meta` *before* per-diagram dispatch, yielding a `DiagramMeta`
   (title, `acc_title`, `acc_descr`, and the config-derived fields): YAML
   frontmatter (`--- title: … / config: { … } ---`), `%%{init: {…}}%%`
@@ -270,7 +271,7 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   nudges each label `LABEL_STAGGER` arc-length back toward its own source — the
   two edges run opposite ways, so their labels separate along the shared axis
   and the backgrounds clear.
-- Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
+- Label line breaks: `split_label_lines()` in `src/svg/builder/text.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
   `<tspan>`s for multi-line labels, so every renderer honors `<br>` for free;

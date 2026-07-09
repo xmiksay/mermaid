@@ -1,7 +1,8 @@
 # Gantt — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_date.rs)`.
+Parser: `src/parse/gantt/` · Renderer: `src/svg/gantt/` (`mod.rs` layout/draw,
+`tasks.rs` scheduling/colors, `axis.rs` tick computation; `+ src/svg/gantt_date.rs`).
 
 - **Row layout matches upstream** (#245): one row *per task*, task names drawn
   **in the chart** — centered inside the bar when `text_width` says the name
@@ -82,12 +83,12 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   days), `Date` (an explicit end date — the renderer computes the length from
   the resolved start), or `UntilId` (`until <taskId>` — ends where the named
   task *starts*, resolved against `id_to_start_end`). `parse_end` in
-  `src/parse/gantt.rs` classifies the trailing time token; a task with a single
+  `src/parse/gantt/tokens.rs` classifies the trailing time token; a task with a single
   time token (`X : 24d` / `X : until id`) implies `TaskStart::AfterPrevious`.
   `TaskStart::AfterId` holds a **`Vec<String>`**: `after a b c` starts at the
   *latest* end of the listed predecessors (unknown ids ignored, empty falls back
   to the previous task's end). `until`/end-date resolution happens in
-  `resolve_tasks` (`src/svg/gantt.rs`), so forward/unknown refs fall back to a
+  `resolve_tasks` (`src/svg/gantt/tasks.rs`), so forward/unknown refs fall back to a
   1-day length like `after` does. Config keywords `includes …` and
   `inclusiveEndDates` are consumed in `parse()` (informational only) so they
   don't fall through to the task path; `topAxis` sets `GanttDiagram.top_axis`
@@ -103,12 +104,13 @@ Parser: `src/parse/gantt.rs` · Renderer: `src/svg/gantt.rs (+ src/svg/gantt_dat
   and `displayMode[:] compact` are parsed via `strip_kw` (space- or colon-separated)
   into `GanttDiagram.{weekend,weekday,tick_interval,display_mode}` — previously
   `weekend`/`displayMode` hard-errored and `weekday`/`tickInterval` were dropped.
-  Honored in `src/svg/gantt.rs`: `weekend` shifts the `excludes weekends` day pair
+  Honored in `src/svg/gantt/`: `weekend` shifts the `excludes weekends` day pair
   (`weekend_days_for` in `gantt_date.rs`: `friday` → Fri+Sat, else Sat+Sun),
   `tickInterval` overrides `pick_tick_step` (`parse_tick_interval` → days), and
-  `weekday` offsets the first axis tick onto that weekday (`weekday_tick_offset`).
+  `weekday` offsets the first axis tick onto that weekday (`weekday_tick_offset`);
+  the last three live in `src/svg/gantt/axis.rs`.
   `display_mode` is stored but the compact row-packing layout is a follow-up.
-- The date axis (`axis_ticks` in `src/svg/gantt.rs`) **caps tick density from the
+- The date axis (`axis_ticks` in `src/svg/gantt/axis.rs`) **caps tick density from the
   label width** so labels never overlap into a smear (#244): `axis_label_width`
   estimates the widest formatted label (via `metrics::text_width` at the 11px axis
   font, sampled at both ends and the middle), and `pick_tick_step` picks the

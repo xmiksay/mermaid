@@ -1,7 +1,7 @@
 # Sankey — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/sankey.rs` · Renderer: `src/svg/sankey.rs`.
+Parser: `src/parse/sankey.rs` · Renderer: `src/svg/sankey/`.
 
 - Sankey nodes render their **throughput value** after the name on a **single
   line** (`Name <prefix>42<suffix>`, upstream `showValues` — on by default; the
@@ -13,7 +13,7 @@ Parser: `src/parse/sankey.rs` · Renderer: `src/svg/sankey.rs`.
   **own color** from the hardcoded **Tableau-10** scheme
   (`d3.scaleOrdinal(d3.schemeTableau10)`) cycled in first-appearance order — the
   fixed sankey palette upstream uses, independent of the theme's pastel `cScale`
-  scale (`TABLEAU10` in `src/svg/sankey.rs`, #317).
+  scale (`TABLEAU10` in `src/svg/sankey/mod.rs`, #317).
   `config.sankey.{linkColor,nodeAlignment,showValues,prefix,suffix,width,height,
   nodeWidth,nodePadding}` (frontmatter/`%%{init}%%`) flow through the preamble →
   the matching `DiagramMeta.sankey_*` fields → copied onto `SankeyDiagram` in

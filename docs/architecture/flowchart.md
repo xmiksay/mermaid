@@ -88,7 +88,7 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     resolves the effective curve per edge — `@{ curve }` → per-index
     interpolate → default interpolate → `config_curve` → basis — and `curve_basis_path`,
     `curve_linear_path` (straight segments), and `curve_step_path` (orthogonal
-    right-angle steps) in `src/svg/builder.rs` build the path. Any other
+    right-angle steps) in `src/svg/builder/curves.rs` build the path. Any other
     upstream curve name (`cardinal`, `natural`, …) falls back to basis.
   - Under the default basis curve, a *bare two-point* edge (adjacent layers, no
     routed waypoints) between horizontally/vertically offset nodes gets two
@@ -114,11 +114,11 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - Asymmetric flowchart shapes are fully supported: parallelogram `[/text/]`,
   parallelogram-alt `[\text\]`, trapezoid `[/text\]`, trapezoid-alt
   `[\text/]`, and the asymmetric flag `>text]` — parsed in
-  `src/parse/flowchart/node.rs` and rendered in `src/svg/flowchart/nodes.rs`.
+  `src/parse/flowchart/node/` and rendered in `src/svg/flowchart/nodes.rs`.
   The flag mirrors upstream `rect_left_inv_arrow`: a concave notch on the left
   edge and a straight vertical right edge (not a right-pointing arrow).
 - Flowchart v11 attribute syntax `id@{ shape: …, label: … }` is handled in
-  `parse_at_node` (`src/parse/flowchart/node.rs`): the `@{…}` block right after a
+  `parse_at_node` (`src/parse/flowchart/node/spec.rs`): the `@{…}` block right after a
   node id is split into `key: value` pairs (quote-aware comma/colon split), the
   `shape` name mapped onto a `NodeShape` by `shape_from_name` (aliases like
   `rounded`/`diam`/`cyl`/`lean-r`/`trap-b`/`dbl-circ`/`subproc`), and

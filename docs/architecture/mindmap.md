@@ -1,7 +1,7 @@
 # Mindmap — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/mindmap.rs` · Renderer: `src/svg/mindmap.rs`.
+Parser: `src/parse/mindmap.rs` · Renderer: `src/svg/mindmap/`.
 
 **Upstream-compat gotcha:** a node whose label is the bare word `Mindmap`
 parses here but upstream 11.x's lexer treats it as the diagram keyword and
@@ -11,7 +11,7 @@ word (`Mind maps`) so it stays dual-renderable.
 - mindmap `:::class1 class2` and `::icon(fa fa-book)` are **attachment lines**,
   not child nodes (`src/parse/mindmap.rs`): both attach to the most-recent node
   (`stack.last_mut()` / `root`), `:::` filling `MindmapNode.classes` and `::icon`
-  filling `MindmapNode.icon`. The renderer (`src/svg/mindmap.rs`) never prints the
+  filling `MindmapNode.icon`. The renderer (`src/svg/mindmap/draw.rs`) never prints the
   raw Font Awesome class string — `draw_mindmap_icon` maps `icon_name()` (the last
   `fa-`-prefixed token) onto a small builtin glyph set (book/star/clock/user/cog/
   cloud/database/check/heart), unknown names falling back to a generic tag glyph.
@@ -19,7 +19,7 @@ word (`Mind maps`) so it stays dual-renderable.
   (which is re-centred in the remaining width), so an icon never floats onto a
   sibling node — the earlier bug where a glyph rendered below its node landed
   visually on the node stacked beneath it.
-- The layout (`src/svg/mindmap.rs`) is a **deterministic radial tree** matching
+- The layout (`src/svg/mindmap/layout.rs`) is a **deterministic radial tree** matching
   upstream's radial silhouette. `build` recurses over the tree: the root sits at
   the origin and its children are dealt around the full circle by *angular
   sector*, each sector sized in proportion to the subtree's leaf count

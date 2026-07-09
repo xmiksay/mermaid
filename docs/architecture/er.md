@@ -1,7 +1,7 @@
 # ER — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/er.rs` · Renderer: `src/svg/er.rs`.
+Parser: `src/parse/er/` · Renderer: `src/svg/er/`.
 
 - ER `EntityAttribute.comment` is populated from a quoted string after the
   attribute (`string name "the customer name"`) and rendered as a fourth
@@ -17,7 +17,7 @@ Parser: `src/parse/er.rs` · Renderer: `src/svg/er.rs`.
   (issue #255).
 - ER relations accept both the glyph cardinality form (`||--o{`) and the
   **verbal/numeric** form `LEFT <card> to|optionally to <card> RIGHT : label`
-  (`src/parse/er.rs`, `find_reltype` + `split_card_end`/`split_card_start`):
+  (`src/parse/er/relation.rs`, `find_reltype` + `split_card_end`/`split_card_start`):
   `to` is identifying, `optionally to` non-identifying; cardinality words
   (`only one`, `zero or one`, `zero or more`, `one or many`, `many(0)`, `0+`,
   `1+`, `1`) map onto the existing `Cardinality` enum.

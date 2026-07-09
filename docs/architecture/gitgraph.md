@@ -1,7 +1,7 @@
 # GitGraph — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph.rs`.
+Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph/`.
 
 - gitGraph header (`src/parse/gitgraph.rs`) tolerates a trailing colon on both
   the keyword and the direction token — `gitGraph:`, `gitGraph TB:`,
@@ -9,7 +9,7 @@ Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph.rs`.
   trailing `:` off the head token). `branch <name> order: <n>` consumes the
   `order:`/`tag:` attributes instead of swallowing them into the branch name
   (`parse_branch`); `order` reaches `GitEvent::Branch.order`. The renderer
-  (`src/svg/gitgraph.rs`) sorts lanes by explicit `order` (falling back to
+  (`src/svg/gitgraph/mod.rs`) sorts lanes by explicit `order` (falling back to
   insertion order) and, for `BT`, flips the commit axis (`cols - 1 - col`) so
   newer commits sit higher. **Statement keywords match on a word boundary**
   (`keyword()`: the keyword must end the line or be followed by whitespace), so
@@ -19,7 +19,7 @@ Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph.rs`.
   through `take_value`, so `branch "feat x"` + `checkout "feat x"` +
   `merge "feat x"` reference one lane.
 - gitGraph **config directives** (`config.gitGraph.*`, from `%%{init}%%` or
-  frontmatter `config:`) flow through the preamble: `preamble.rs` fills a
+  frontmatter `config:`) flow through the preamble: `preamble/config.rs` fills a
   `DiagramMeta.git_graph` (`GitGraphMeta`, all-`Option`), and
   `parse_with_meta` overlays them onto `GitGraphDiagram.config`
   (`GitGraphConfig`, whose `Default` keeps upstream's own defaults). Honored:

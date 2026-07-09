@@ -33,24 +33,18 @@
 //! [`@Starter`] participant at the top level (defaulting to a synthetic
 //! `Starter` lane), or the receiver of the enclosing method-call brace.
 
-use super::ast::{
-    AltBranch, Participant, ParticipantKind, SequenceBlock, SequenceDiagram, SequenceItem,
-};
+use super::ast::{AltBranch, SequenceBlock, SequenceDiagram, SequenceItem};
 use super::ParseError;
+use lexer::{strip_line_comment, tokenize, Tok};
 
 mod blocks;
+mod declare;
+mod lexer;
 mod message;
+#[cfg(test)]
+mod tests;
 
 const DEFAULT_STARTER: &str = "Starter";
-
-/// A structural token: an opening/closing brace, or a logical statement string
-/// tagged with the 1-based source line it started on (for error reporting).
-#[derive(Debug, Clone, PartialEq)]
-enum Tok {
-    Open,
-    Close,
-    Stmt(String, usize),
-}
 
 pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
     let mut lines = input.lines().enumerate();
@@ -98,79 +92,6 @@ pub(crate) fn parse(input: &str) -> Result<SequenceDiagram, ParseError> {
     }
     p.diag.items = items;
     Ok(p.diag)
-}
-
-/// Strip a `//` or `%%` line comment. Only a `//` run (two slashes) counts, so a
-/// single `/` inside a path like `GET /login` survives.
-fn strip_line_comment(line: &str) -> &str {
-    let cut = [line.find("//"), line.find("%%")]
-        .into_iter()
-        .flatten()
-        .min();
-    match cut {
-        Some(pos) => &line[..pos],
-        None => line,
-    }
-}
-
-/// Split a body into brace/statement tokens. Braces inside parentheses or
-/// quotes are kept literal; newlines and `;` terminate statements. Each
-/// statement is tagged with the 1-based source line it started on.
-fn tokenize(body: &str, base_line: usize) -> Vec<Tok> {
-    let mut toks = Vec::new();
-    let mut cur = String::new();
-    let mut paren = 0u32;
-    let mut in_quote = false;
-    let mut line = base_line;
-    let mut stmt_line = base_line;
-    let flush = |cur: &mut String, toks: &mut Vec<Tok>, stmt_line: usize| {
-        let s = cur.trim();
-        if !s.is_empty() {
-            toks.push(Tok::Stmt(s.to_string(), stmt_line));
-        }
-        cur.clear();
-    };
-    for ch in body.chars() {
-        if !ch.is_whitespace() && cur.trim().is_empty() {
-            stmt_line = line;
-        }
-        if ch == '\n' {
-            line += 1;
-        }
-        if in_quote {
-            cur.push(ch);
-            if ch == '"' {
-                in_quote = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => {
-                in_quote = true;
-                cur.push(ch);
-            }
-            '(' => {
-                paren += 1;
-                cur.push(ch);
-            }
-            ')' => {
-                paren = paren.saturating_sub(1);
-                cur.push(ch);
-            }
-            '{' if paren == 0 => {
-                flush(&mut cur, &mut toks, stmt_line);
-                toks.push(Tok::Open);
-            }
-            '}' if paren == 0 => {
-                flush(&mut cur, &mut toks, stmt_line);
-                toks.push(Tok::Close);
-            }
-            '\n' | ';' if paren == 0 => flush(&mut cur, &mut toks, stmt_line),
-            _ => cur.push(ch),
-        }
-    }
-    flush(&mut cur, &mut toks, stmt_line);
-    toks
 }
 
 struct Parser {
@@ -289,131 +210,6 @@ impl Parser {
             _ => self.parse_call(s, ctx, ret, items),
         }
     }
-
-    /// A participant declaration: a bare identifier (`Bob`) or an alias
-    /// (`A as Alice`, id `A` displayed as `Alice`). Returns `false` for anything
-    /// that carries a call (`(`) or an arrow (`->`), leaving it to `parse_call`.
-    fn try_declaration(&mut self, s: &str) -> bool {
-        let s = s.trim();
-        if s.contains('(') || s.contains("->") {
-            return false;
-        }
-        if let Some((id, display)) = split_alias(s) {
-            self.declare_alias(&id, &display);
-            return true;
-        }
-        if !s.is_empty() && is_identifier(s) {
-            self.ensure(s);
-            return true;
-        }
-        false
-    }
-
-    fn declare_alias(&mut self, id: &str, display: &str) {
-        if let Some(p) = self.diag.participants.iter_mut().find(|p| p.id == id) {
-            p.display = display.to_string();
-        } else {
-            self.diag.participants.push(Participant {
-                id: id.to_string(),
-                display: display.to_string(),
-                kind: ParticipantKind::Participant,
-            });
-        }
-    }
-
-    /// Declare a participant from an annotator line (`Actor Alice`,
-    /// `Database DB`, `Starter(Alice)`).
-    fn annotator(&mut self, rest: &str) {
-        let rest = rest.trim();
-        if let Some(inner) = rest
-            .strip_prefix("Starter(")
-            .and_then(|r| r.strip_suffix(')'))
-        {
-            let id = inner.trim().to_string();
-            if !id.is_empty() {
-                self.ensure(&id);
-                self.starter = Some(id);
-            }
-            return;
-        }
-        let (kind_word, name) = match rest.split_once(char::is_whitespace) {
-            Some((k, n)) => (k, n.trim()),
-            None => return, // `@Type` with no name declares nothing.
-        };
-        if name.is_empty() {
-            return;
-        }
-        let kind = match kind_word.to_ascii_lowercase().as_str() {
-            "actor" => ParticipantKind::Actor,
-            "boundary" => ParticipantKind::Boundary,
-            "control" => ParticipantKind::Control,
-            "entity" => ParticipantKind::Entity,
-            "database" => ParticipantKind::Database,
-            _ => ParticipantKind::Participant,
-        };
-        self.declare(name, kind);
-    }
-
-    /// The originating participant for a context: the enclosing receiver, or the
-    /// starter (created lazily on first top-level use).
-    fn source(&mut self, ctx: Option<&str>) -> String {
-        match ctx {
-            Some(c) => c.to_string(),
-            None => {
-                let id = self
-                    .starter
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_STARTER.into());
-                self.ensure(&id);
-                self.starter = Some(id.clone());
-                id
-            }
-        }
-    }
-
-    fn ensure(&mut self, id: &str) {
-        if !self.diag.participants.iter().any(|p| p.id == id) {
-            self.diag.participants.push(Participant {
-                id: id.to_string(),
-                display: id.to_string(),
-                kind: ParticipantKind::Participant,
-            });
-        }
-    }
-
-    fn declare(&mut self, id: &str, kind: ParticipantKind) {
-        if let Some(p) = self.diag.participants.iter_mut().find(|p| p.id == id) {
-            p.kind = kind;
-        } else {
-            self.diag.participants.push(Participant {
-                id: id.to_string(),
-                display: id.to_string(),
-                kind,
-            });
-        }
-    }
-}
-
-/// True if `s` is a single participant identifier (letters, digits, `_`).
-fn is_identifier(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_')
-}
-
-/// Split an `Id as Display` alias declaration into `(id, display)`. `id` must be
-/// a plain identifier; `display` may be quoted. Returns `None` when the `as`
-/// keyword is absent.
-fn split_alias(s: &str) -> Option<(String, String)> {
-    let (id, rest) = s.trim().split_once(char::is_whitespace)?;
-    let after = rest.trim_start().strip_prefix("as")?;
-    // `as` must be a whole word, not the head of a longer identifier.
-    if !after.starts_with(char::is_whitespace) {
-        return None;
-    }
-    let display = after.trim().trim_matches('"').trim();
-    if !is_identifier(id) || display.is_empty() {
-        return None;
-    }
-    Some((id.to_string(), display.to_string()))
 }
 
 /// The leading identifier word of a statement (letters, digits, `_`).
@@ -441,117 +237,5 @@ fn strip_kw_cond(s: &str) -> String {
     match rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
         Some(inner) => inner.trim().to_string(),
         None => rest.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse_ok(src: &str) -> SequenceDiagram {
-        parse(src).unwrap()
-    }
-
-    #[test]
-    fn annotator_declares_actor_and_starter() {
-        let d = parse_ok("zenuml\n@Actor Alice\n@Database DB\n@Starter(Alice)\nDB.query()\n");
-        let alice = d.participants.iter().find(|p| p.id == "Alice").unwrap();
-        assert_eq!(alice.kind, ParticipantKind::Actor);
-        // The call originates from the declared starter, not the synthetic one.
-        assert!(matches!(
-            d.items.first(),
-            Some(SequenceItem::Message(m)) if m.from == "Alice" && m.to == "DB"
-        ));
-        assert!(d.participants.iter().all(|p| p.id != DEFAULT_STARTER));
-    }
-
-    #[test]
-    fn comments_are_stripped() {
-        let d = parse_ok("zenuml\n// a comment\nA.b() // trailing\n");
-        assert_eq!(
-            d.items
-                .iter()
-                .filter(|i| matches!(i, SequenceItem::Message(_)))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn stereotype_annotators_set_participant_kind() {
-        let d = parse_ok(
-            "zenuml\n@Boundary UI\n@Control Ctrl\n@Entity Order\n@Database DB\nUI.click()\n",
-        );
-        let kind = |id: &str| d.participants.iter().find(|p| p.id == id).unwrap().kind;
-        assert_eq!(kind("UI"), ParticipantKind::Boundary);
-        assert_eq!(kind("Ctrl"), ParticipantKind::Control);
-        assert_eq!(kind("Order"), ParticipantKind::Entity);
-        assert_eq!(kind("DB"), ParticipantKind::Database);
-    }
-
-    #[test]
-    fn bare_and_alias_declarations() {
-        let d = parse_ok("zenuml\nBob\nA as Alice\nA.greet()\n");
-        // Declaration order is column order: Bob, then A.
-        assert_eq!(d.participants[0].id, "Bob");
-        let a = d.participants.iter().find(|p| p.id == "A").unwrap();
-        assert_eq!(a.display, "Alice");
-        // The declarations produced no phantom Starter self-message; only the
-        // real `A.greet()` call remains (from the implicit starter to A).
-        let msgs: Vec<_> = d
-            .items
-            .iter()
-            .filter_map(|i| match i {
-                SequenceItem::Message(m) => Some(m),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(msgs.len(), 1);
-        assert_eq!((&*msgs[0].from, &*msgs[0].to), (DEFAULT_STARTER, "A"));
-    }
-
-    #[test]
-    fn new_materializes_participant_with_creation_message() {
-        let d = parse_ok("zenuml\nnew A1\nnew A2(with, parameters)\n");
-        assert!(d
-            .items
-            .iter()
-            .any(|i| matches!(i, SequenceItem::Create(id) if id == "A1")));
-        assert!(d
-            .items
-            .iter()
-            .any(|i| matches!(i, SequenceItem::Create(id) if id == "A2")));
-        // Each `new` draws a creation message to the new participant, not a
-        // Starter self-call.
-        let create_msg = d
-            .items
-            .iter()
-            .filter_map(|i| match i {
-                SequenceItem::Message(m) if m.to == "A1" => Some(m),
-                _ => None,
-            })
-            .next()
-            .unwrap();
-        assert_ne!(&*create_msg.from, "A1");
-        assert_eq!(create_msg.text, "«create»");
-    }
-
-    #[test]
-    fn foreach_is_a_loop_keyword() {
-        let d = parse_ok("zenuml\nforeach (item) {\n  A.step()\n}\n");
-        assert!(matches!(
-            d.items.first(),
-            // A.step() is a method call: message + activate/deactivate band.
-            Some(SequenceItem::Loop(b)) if b.label == "item"
-                && matches!(b.items.first(), Some(SequenceItem::Message(_)))
-        ));
-    }
-
-    #[test]
-    fn rejects_missing_header() {
-        assert!(matches!(
-            parse("flowchart TD\n"),
-            Err(ParseError::Syntax { line: 1, .. })
-        ));
     }
 }

@@ -1,7 +1,7 @@
 # Treemap — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/treemap.rs` · Renderer: `src/svg/treemap.rs`.
+Parser: `src/parse/treemap.rs` · Renderer: `src/svg/treemap/`.
 
 - Treemap honors `classDef <name> <props>` (into `TreemapDiagram.class_defs`)
   and a node's trailing `:::name` (into `TreemapNode.class_name`, stripped
@@ -9,7 +9,7 @@ Parser: `src/parse/treemap.rs` · Renderer: `src/svg/treemap.rs`.
   the shared `resolve_style`, overriding the branch fill/stroke — the raw
   `:::name` no longer leaks into the label text. Layout is **squarified**
   (Bruls/Huizing/van Wijk worst-aspect-ratio row packing in `squarify`/`worst`,
-  `src/svg/treemap.rs`), not slice-and-dice, so rectangles stay near square.
+  `src/svg/treemap/squarify.rs`), not slice-and-dice, so rectangles stay near square.
   Siblings are sorted by value descending at every level before layout
   (`order_by_value`, stable so ties keep source order), matching upstream.
 - **Per-section color.** Every section (any node with children) takes the next

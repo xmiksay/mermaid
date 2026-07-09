@@ -4,7 +4,7 @@ Part of the [mermaid-svg architecture reference](../architecture.md).
 Parser: `src/parse/zenuml/` · Renderer: `src/svg/sequence/zenuml.rs`
 (a ZenUML-chrome pass over the shared sequence layout).
 
-- zenuml (`src/parse/zenuml/`: `mod.rs` header/tokenize/dispatch + declarations,
+- zenuml (`src/parse/zenuml/`: `mod.rs` header/dispatch, `lexer.rs` tokenize, `declare.rs` declarations,
   `message.rs` calls/returns/assignment, `blocks.rs` if/try chains) is a
   **brace-structured** translation to a
   `SequenceDiagram` with its `zenuml` flag set. After the `zenuml` header the
@@ -21,7 +21,7 @@ Parser: `src/parse/zenuml/` · Renderer: `src/svg/sequence/zenuml.rs`
     top-level caller. A bare/`A.method()` call with no explicit `A -> B` source
     originates from the starter — a synthetic `Starter` lane, created lazily,
     when none is declared.
-  - Participant declarations (`try_declaration` in `mod.rs`): a bare identifier
+  - Participant declarations (`try_declaration` in `declare.rs`): a bare identifier
     `Bob` declares the participant, and `A as Alice` is an alias (id `A`,
     displayed `Alice` — `split_alias`, quoted display allowed). Declaration
     order is column order. A statement carrying `(` or `->` is never a
