@@ -219,7 +219,7 @@ fn generic_boundary_is_dashed_7_7() {
 }
 
 #[test]
-fn rel_is_curved_and_unbacked() {
+fn rel_is_straight_and_unbacked() {
     let d = C4Diagram {
         kind: C4Kind::Context,
         title: None,
@@ -238,8 +238,9 @@ fn rel_is_curved_and_unbacked() {
         ..Default::default()
     };
     let svg = render(&d, &Theme::default());
-    // Quadratic Bézier, #444444, width 1.
-    assert!(svg.contains(" Q"));
+    // Straight line (upstream #327), #444444, width 1 — no Bézier control point.
+    assert!(svg.contains(" L"));
+    assert!(!svg.contains(" Q"));
     assert!(svg.contains("stroke=\"#444444\" stroke-width=\"1\""));
     // No translucent label background rect.
     assert!(!svg.contains("fill-opacity=\"0.5\""));
@@ -496,83 +497,32 @@ fn context_sample() -> C4Diagram {
     }
 }
 
-/// #258: persons are ranked above the systems they use, and the system they
-/// feed sits above the systems it in turn drives.
+/// #327: the flat System Context diagram uses the upstream row-flow — the
+/// external Email system sits to the right of Internet Banking on the same row
+/// (not symmetrically below it), and only Mainframe wraps to the next row.
 #[test]
-fn context_tiers_persons_above_systems() {
+fn context_uses_upstream_row_flow() {
     let d = context_sample();
-    let (pos, _leaves, _routes) = layered_layout(&d, PAD, PAD + TITLE_GAP).expect("layered layout");
-    let y = |alias: &str| pos.get(alias).expect("placed").1;
-    assert!(
-        y("customerA") < y("SystemAA"),
-        "customerA must tier above the system"
-    );
-    assert!(
-        y("customerB") < y("SystemAA"),
-        "customerB must tier above the system"
-    );
-    assert!(
-        y("SystemAA") < y("SystemB"),
-        "downstream system must sit below"
-    );
-    assert!(
-        y("SystemAA") < y("SystemC"),
-        "downstream system must sit below"
-    );
-}
-
-/// #258 acceptance: no relation route crosses a node box that isn't one of its
-/// two endpoints (the Customer→Internet Banking edge used to pass through the
-/// Bank Employee box).
-#[test]
-fn context_edges_avoid_nonendpoint_boxes() {
-    let d = context_sample();
-    let (pos, _leaves, routes) = layered_layout(&d, PAD, PAD + TITLE_GAP).expect("layered layout");
-    for r in &d.relations {
-        let route = routes
-            .get(&(r.from.clone(), r.to.clone()))
-            .expect("relation routed");
-        for (alias, &rect) in &pos {
-            if *alias == r.from || *alias == r.to {
-                continue;
-            }
-            for seg in route.windows(2) {
-                assert!(
-                    !seg_intersects_rect(seg[0], seg[1], rect),
-                    "route {}->{} crosses box {alias}",
-                    r.from,
-                    r.to
-                );
-            }
-        }
-    }
-}
-
-/// True when the segment `a`–`b` touches the interior or border of `rect`.
-fn seg_intersects_rect(a: (f64, f64), b: (f64, f64), rect: (f64, f64, f64, f64)) -> bool {
-    let (rx, ry, rw, rh) = rect;
-    let inside = |p: (f64, f64)| p.0 >= rx && p.0 <= rx + rw && p.1 >= ry && p.1 <= ry + rh;
-    if inside(a) || inside(b) {
-        return true;
-    }
-    let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)];
-    for i in 0..4 {
-        if segs_cross(a, b, corners[i], corners[(i + 1) % 4]) {
-            return true;
-        }
-    }
-    false
-}
-
-fn segs_cross(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), p4: (f64, f64)) -> bool {
-    let d = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| {
-        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    let (nodes, _, _) = flow_layout(&d.elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
+    let by_alias = |a: &str| {
+        nodes
+            .iter()
+            .find(|n| n.el.alias == a)
+            .map(|n| (n.x, n.y))
+            .expect("placed")
     };
-    let d1 = d(p3, p4, p1);
-    let d2 = d(p3, p4, p2);
-    let d3 = d(p1, p2, p3);
-    let d4 = d(p1, p2, p4);
-    ((d1 > 0.0) != (d2 > 0.0)) && ((d3 > 0.0) != (d4 > 0.0))
+    let (bank_x, bank_y) = by_alias("SystemAA");
+    let (email_x, email_y) = by_alias("SystemB");
+    let (main_x, main_y) = by_alias("SystemC");
+    // Email shares Internet Banking's row, to its right.
+    assert_eq!(email_y, bank_y, "Email must share Internet Banking's row");
+    assert!(
+        email_x > bank_x,
+        "Email must sit to the right of the system"
+    );
+    // Mainframe wraps to the next row.
+    assert!(main_y > bank_y, "Mainframe must wrap below");
+    let _ = main_x;
 }
 
 #[test]

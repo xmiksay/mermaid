@@ -59,13 +59,13 @@ pub(super) fn draw_element(
     let _ = theme;
 }
 
-/// Height reserved at the top of a person box for the centered figure, so the
-/// label block clears it.
-const PERSON_GLYPH_H: f64 = 26.0;
+/// Height of the centered person figure (head + shoulders), reserved between the
+/// stereotype and the name in a person box.
+const PERSON_GLYPH_H: f64 = 30.0;
 
-/// A large, horizontally centered person figure (head + shoulders) at the top of
-/// the box, drawn in a contrasting fill — matching upstream's centered glyph
-/// rather than a small corner icon (#258).
+/// A large, horizontally centered person figure (head + shoulders), drawn in a
+/// contrasting fill — matching upstream's centered glyph rather than a small
+/// corner icon (#258). Upstream stacks it below the stereotype line (#327).
 fn draw_person_icon(svg: &mut SvgBuilder, cx: f64, top: f64, fill: &str) {
     let color = if is_dark_fill(fill) {
         "#FFFFFF"
@@ -109,14 +109,7 @@ fn draw_box(
         h,
         &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"6\""),
     );
-    // Persons carry a centered figure at the top; inset the label to clear it.
-    let inset = if matches!(el.kind, C4ElementKind::Person) {
-        draw_person_icon(svg, x + w / 2.0, y + 6.0, fill);
-        PERSON_GLYPH_H
-    } else {
-        0.0
-    };
-    write_label_block(svg, el, x, y + inset, w, h - inset, text_fill, muted);
+    write_label_block(svg, el, x, y, w, h, fill, text_fill, muted);
 }
 
 fn draw_cylinder(
@@ -170,7 +163,7 @@ fn draw_cylinder(
         ),
         &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
-    write_label_block(svg, el, x, y + ry, w, h - 2.0 * ry, text_fill, muted);
+    write_label_block(svg, el, x, y + ry, w, h - 2.0 * ry, fill, text_fill, muted);
 }
 
 fn draw_queue(
@@ -196,9 +189,12 @@ fn draw_queue(
             "fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"{rx}\" ry=\"{rx}\""
         ),
     );
-    write_label_block(svg, el, x, y, w, h, text_fill, muted);
+    write_label_block(svg, el, x, y, w, h, fill, text_fill, muted);
 }
 
+/// Stack a shape's text block top-down as upstream does: stereotype → (person
+/// icon) → name → `[techn]` → description, with the description sinking toward
+/// the bottom of the box instead of clustering under the name (#327).
 #[allow(clippy::too_many_arguments)]
 fn write_label_block(
     svg: &mut SvgBuilder,
@@ -207,6 +203,7 @@ fn write_label_block(
     y: f64,
     w: f64,
     h: f64,
+    fill: &str,
     fg: &str,
     muted: &str,
 ) {
@@ -223,15 +220,22 @@ fn write_label_block(
         &format!("text-anchor=\"middle\" fill=\"{muted}\" font-size=\"10\" font-style=\"italic\""),
         &kind_label,
     );
-    let title_y = top + 32.0;
+    // A person's figure sits between the stereotype and the name.
+    let mut next_y = top + 20.0;
+    if matches!(el.kind, C4ElementKind::Person) {
+        draw_person_icon(svg, cx, next_y, fill);
+        next_y += PERSON_GLYPH_H + 4.0;
+    }
+    let title_y = next_y + 12.0;
     svg.text(
         cx,
         title_y,
         &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
         &el.label,
     );
-    let mut next_y = title_y + 16.0;
+    let mut next_y = title_y + 4.0;
     if let Some(t) = &el.technology {
+        next_y += 14.0;
         svg.text(
             cx,
             next_y,
@@ -240,16 +244,20 @@ fn write_label_block(
             ),
             &format!("[{}]", t),
         );
-        next_y += 14.0;
     }
     if let Some(d) = &el.descr {
         let max_chars = ((w - 16.0) / 6.2).max(8.0) as usize;
-        let max_lines = (((y + h) - next_y - 4.0) / 12.0).max(1.0) as usize;
+        let bottom = (y + h) - 6.0;
+        let max_lines = ((bottom - (next_y + 12.0)) / 12.0).max(1.0) as usize;
         let lines = wrap_text(d, max_chars, max_lines);
+        // Sink the block so its last line rests near the bottom border, but never
+        // overlap the name/tech above it.
+        let block_h = lines.len() as f64 * 12.0;
+        let first_baseline = (bottom - block_h + 10.0).max(next_y + 14.0);
         for (i, line) in lines.iter().enumerate() {
             svg.text(
                 cx,
-                next_y + (i as f64) * 12.0,
+                first_baseline + (i as f64) * 12.0,
                 &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
                 line,
             );
