@@ -4,13 +4,23 @@ Part of the [mermaid-svg architecture reference](../architecture.md).
 Parser: `src/parse/class/` · Renderer: `src/svg/class/`.
 
 - Class `namespace X { class A; class B }` is stored in `namespaces`; the
-  renderer draws a dashed rect around the members. `namespace Name["label"]`
-  splits into a clean id + display `Namespace.label` (via `extract_class_label`,
-  like `class Name["label"]`), the renderer showing the label. Nested
-  namespaces work: each class is registered with **every** namespace on the
-  stack, so an outer frame's bounds enclose the inner one's classes;
-  `Namespace.depth` (0 = outermost) makes the renderer draw shallower frames
-  with more padding so the outer visibly wraps the inner.
+  renderer draws a **solid light-yellow** rect (`flow_cluster_fill`/
+  `flow_cluster_stroke`) around the members with the title **centered at the
+  top** — matching upstream, not the old dashed/unfilled/italic-corner box
+  (#328). The frame is drawn *before* the relations and class boxes so its fill
+  sits behind them. Its header band extends above the topmost member, so the
+  post-layout translate that clears left-side overflow also clears top overflow
+  (`shift_x`/`shift_y`), and the canvas height grows to cover the lowest frame.
+  `namespace Name["label"]` splits into a clean id + display `Namespace.label`
+  (via `extract_class_label`, like `class Name["label"]`), the renderer showing
+  the label. Nested namespaces work: each class is registered with **every**
+  namespace on the stack, so an outer frame's bounds enclose the inner one's
+  classes; `Namespace.depth` (0 = outermost) makes the renderer draw shallower
+  frames with more padding so the outer visibly wraps the inner.
+- Class boxes always draw the **three compartments** (name, attributes,
+  methods): a memberless class shows two empty rows rather than a single plain
+  rect, and an empty compartment reserves `EMPTY_COMPARTMENT_H` (#328). The
+  `«stereotype»` line is drawn upright (regular), not italic.
 - Class **namespace containment** (`src/svg/class/namespace.rs`): the shared
   sugiyama layout is cluster-agnostic, so a class declared *outside* a namespace
   can land horizontally inside a member's bounding box and straddle the dashed

@@ -25,6 +25,10 @@ const LINE_H: f64 = 18.0;
 const PAD_X: f64 = 14.0;
 const HEADER_PAD: f64 = 24.0;
 const COMPARTMENT_PAD: f64 = 8.0;
+/// Height reserved for an empty attribute/method compartment. Upstream always
+/// draws the three-compartment box (name + attributes + methods), so a
+/// memberless class shows two empty rows rather than a single plain rect.
+const EMPTY_COMPARTMENT_H: f64 = 20.0;
 const MIN_W: f64 = 110.0;
 const CANVAS_PAD: f64 = 24.0;
 
@@ -105,34 +109,40 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     let frames = namespace::frames(d, &id_to_u32, &pos, &sizes);
     namespace::separate_outsiders(d, &id_to_u32, &sizes, &frames, &mut pos, &mut edge_pts);
 
-    // A left-side push can carry a node past the canvas edge; translate
-    // everything right so nothing is clipped, then recompute frames on the
+    // A left-side push can carry a node past the canvas edge, and a namespace
+    // frame's header band extends above/left of its topmost/leftmost member;
+    // translate everything so nothing is clipped, then recompute frames on the
     // final positions.
     let min_left = pos
         .iter()
         .map(|(u, &(x, _))| x - sizes[*u as usize].0 / 2.0)
         .chain(frames.iter().map(|f| f.x))
         .fold(f64::INFINITY, f64::min);
-    if min_left < 0.0 {
-        let shift = -min_left;
+    let min_top = frames.iter().map(|f| f.y).fold(f64::INFINITY, f64::min);
+    let shift_x = (-min_left).max(0.0);
+    let shift_y = (-min_top).max(0.0);
+    if shift_x > 0.0 || shift_y > 0.0 {
         for p in pos.values_mut() {
-            p.0 += shift;
+            p.0 += shift_x;
+            p.1 += shift_y;
         }
         for v in edge_pts.values_mut() {
             for p in v.iter_mut() {
-                p.0 += shift;
+                p.0 += shift_x;
+                p.1 += shift_y;
             }
         }
     }
     let frames = namespace::frames(d, &id_to_u32, &pos, &sizes);
 
     let mut width = canvas_w + CANVAS_PAD * 2.0;
-    let mut height = canvas_h + CANVAS_PAD * 2.0;
+    let mut height = canvas_h + CANVAS_PAD * 2.0 + shift_y;
     for (u, &(x, _)) in &pos {
         width = width.max(x + sizes[*u as usize].0 / 2.0 + CANVAS_PAD);
     }
     for f in &frames {
         width = width.max(f.x + f.w + CANVAS_PAD);
+        height = height.max(f.y + f.h + CANVAS_PAD);
     }
 
     // Notes are laid out in a row below the diagram body; grow the canvas to fit.
@@ -160,6 +170,29 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_markers(&mut svg, theme);
 
+    // Namespace frames first — a solid light-yellow rect with the title centered
+    // at the top, matching upstream. Drawn before the relations and class boxes
+    // so its fill sits behind them rather than covering them.
+    for f in &frames {
+        let ns = &d.namespaces[f.idx];
+        svg.rect(
+            f.x,
+            f.y,
+            f.w,
+            f.h,
+            &format!(
+                "fill=\"{}\" stroke=\"{}\" stroke-width=\"1\" rx=\"4\"",
+                theme.flow_cluster_fill, theme.flow_cluster_stroke
+            ),
+        );
+        svg.text(
+            f.x + f.w / 2.0,
+            f.y + 16.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+            ns.label.as_deref().unwrap_or(&ns.name),
+        );
+    }
+
     // Relations first.
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.from), id_to_u32.get(&rel.to)) else {
@@ -178,27 +211,6 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
     for (i, c) in d.classes.iter().enumerate() {
         let center = pos[&(i as NodeId)];
         draw_class(&mut svg, center, sizes[i], c, &d.class_defs, theme);
-    }
-
-    // Namespace frames around their member classes. A nested namespace's
-    // classes count toward its ancestors' bounds too (the parser registers each
-    // class with every enclosing namespace), so a deeper namespace draws a
-    // smaller frame nested inside its parent's.
-    for f in &frames {
-        let ns = &d.namespaces[f.idx];
-        svg.rect(
-            f.x,
-            f.y,
-            f.w,
-            f.h,
-            "fill=\"none\" stroke=\"#888\" stroke-width=\"1\" rx=\"4\" stroke-dasharray=\"4 3\"",
-        );
-        svg.text(
-            f.x + 8.0,
-            f.y + 14.0,
-            &format!("fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
-            ns.label.as_deref().unwrap_or(&ns.name),
-        );
     }
 
     // Notes (yellow sticky boxes) with a dashed connector to their target class.
@@ -298,12 +310,12 @@ fn class_size(c: &UmlClass, font_size: f64) -> (f64, f64) {
         HEADER_PAD
     };
     let attr_h = if attr_lines == 0 {
-        0.0
+        EMPTY_COMPARTMENT_H
     } else {
         attr_lines as f64 * LINE_H + COMPARTMENT_PAD * 2.0
     };
     let meth_h = if meth_lines == 0 {
-        0.0
+        EMPTY_COMPARTMENT_H
     } else {
         meth_lines as f64 * LINE_H + COMPARTMENT_PAD * 2.0
     };
@@ -349,7 +361,7 @@ fn draw_class(
         svg.text(
             cx,
             cursor,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\" font-style=\"italic\""),
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
             &format!("«{s}»"),
         );
     } else {
@@ -375,15 +387,19 @@ fn draw_class(
         .filter(|m| m.kind == MemberKind::Method)
         .collect();
 
-    if !attrs.is_empty() {
-        cursor += 4.0;
-        svg.line(
-            x,
-            cursor,
-            x + w,
-            cursor,
-            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
-        );
+    // Attributes compartment (always drawn: upstream keeps the three-compartment
+    // box even when a section is empty).
+    cursor += 4.0;
+    svg.line(
+        x,
+        cursor,
+        x + w,
+        cursor,
+        &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
+    );
+    if attrs.is_empty() {
+        cursor += EMPTY_COMPARTMENT_H - 4.0;
+    } else {
         cursor += COMPARTMENT_PAD;
         for m in attrs {
             cursor += LINE_H - 4.0;
@@ -393,14 +409,15 @@ fn draw_class(
         cursor += COMPARTMENT_PAD - 4.0;
     }
 
+    // Methods compartment (always drawn).
+    svg.line(
+        x,
+        cursor,
+        x + w,
+        cursor,
+        &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
+    );
     if !meths.is_empty() {
-        svg.line(
-            x,
-            cursor,
-            x + w,
-            cursor,
-            &format!("stroke=\"{flow_node_stroke}\" stroke-width=\"1\""),
-        );
         cursor += COMPARTMENT_PAD;
         for m in meths {
             cursor += LINE_H - 4.0;
@@ -476,8 +493,8 @@ mod tests {
         assert!(svg.contains("Outer Label"));
         assert!(svg.contains(">Inner<"));
         assert!(!svg.contains('['));
-        // Two dashed namespace frames are drawn.
-        assert!(svg.matches("stroke-dasharray=\"4 3\"").count() >= 2);
+        // Two solid light-yellow namespace frames are drawn.
+        assert!(svg.matches("fill=\"#ffffde\"").count() >= 2);
     }
 
     /// Every `<rect .../>` as `(x, y, w, h, attrs)`.
@@ -519,7 +536,7 @@ mod tests {
         let all = rects(&svg);
         let frame = all
             .iter()
-            .find(|(.., attrs)| attrs.contains("stroke=\"#888\""))
+            .find(|(.., attrs)| attrs.contains("fill=\"#ffffde\""))
             .expect("namespace frame drawn");
         let (fx, fy, fw, fh, _) = frame;
         let (fx1, fy1) = (fx + fw, fy + fh);
@@ -536,6 +553,42 @@ mod tests {
                  ({fx},{fy},{fw},{fh}); attrs={attrs}"
             );
         }
+    }
+
+    #[test]
+    fn memberless_class_draws_three_compartments() {
+        // A class with no members still gets the two dividers (three
+        // compartments), not a single plain rect (issue #328).
+        let d = build("classDiagram\nclass Collar\n");
+        let svg = render(&d, &Theme::default());
+        // No relations, so every `<line` is a compartment divider: two of them.
+        assert_eq!(svg.matches("<line").count(), 2);
+    }
+
+    #[test]
+    fn namespace_frame_is_solid_with_centered_title() {
+        // Upstream draws the namespace as a solid light-yellow rect with the
+        // title centered at the top — not a dashed, unfilled, italic-corner box.
+        let d = build("classDiagram\nnamespace Domain {\nclass A\nclass B\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("fill=\"#ffffde\""));
+        assert!(!svg.contains("stroke=\"#888\""));
+        // Title centered, upright (not italic).
+        assert!(svg.contains(">Domain<"));
+        let title_idx = svg.find(">Domain<").unwrap();
+        let tag_start = svg[..title_idx].rfind("<text").unwrap();
+        let title_tag = &svg[tag_start..title_idx];
+        assert!(title_tag.contains("text-anchor=\"middle\""));
+        assert!(!title_tag.contains("font-style=\"italic\""));
+    }
+
+    #[test]
+    fn stereotype_renders_upright() {
+        // `«abstract»` is regular weight, not italic (issue #328).
+        let d = build("classDiagram\nclass Animal {\n<<abstract>>\n}\n");
+        let svg = render(&d, &Theme::default());
+        assert!(svg.contains("«abstract»"));
+        assert!(!svg.contains("font-style=\"italic\""));
     }
 
     #[test]
