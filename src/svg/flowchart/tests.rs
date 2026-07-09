@@ -93,9 +93,8 @@ fn subgraph_frame_drawn() {
         &parse_flow("flowchart TD\nA --> B\nsubgraph S [Group]\nB --> C\nend\n"),
         &Theme::default(),
     );
-    // Themed cluster frame + centered bold label.
+    // Themed cluster frame + centered (normal-weight) label.
     assert!(svg.contains("fill=\"#ffffde\""));
-    assert!(svg.contains("font-weight=\"bold\""));
     assert!(svg.contains(">Group<"));
 }
 
@@ -421,9 +420,23 @@ fn v11_shapes_render_distinct_geometry() {
 
 #[test]
 fn adjacent_layer_edge_stays_straight() {
-    // A single short edge clips to 2 points → straight M..L.., no curve.
+    // A single short edge whose endpoints share a column clips to 2 aligned
+    // points → straight M..L.., no curve.
     let svg = render(&parse_flow("flowchart TD\na --> b\n"), &Theme::default());
     assert!(!any_bezier_path(&svg));
+}
+
+#[test]
+fn offset_adjacent_edge_curves() {
+    // #331: an adjacent-layer edge between horizontally offset nodes leaves and
+    // re-enters along the flow axis as a gentle basis curve (cubic `C`), not a
+    // straight diagonal. `a` fans out to two side-by-side children, so `a -> b`
+    // and `a -> c` are both offset.
+    let svg = render(
+        &parse_flow("flowchart TD\na --> b\na --> c\n"),
+        &Theme::default(),
+    );
+    assert!(any_bezier_path(&svg));
 }
 
 #[test]
@@ -458,11 +471,20 @@ fn link_style_interpolate_linear_removes_curve() {
 
 #[test]
 fn edge_attr_curve_step_is_honored() {
-    // `curve: step` renders orthogonal steps — no cubic bezier on the skip edge.
+    // `curve: step` renders the multi-rank skip edge as orthogonal right-angle
+    // segments — a path with several `L` commands and no cubic bezier `C`.
+    // (Sibling basis edges may curve; this asserts the step edge specifically.)
     let svg = render(
         &parse_flow("flowchart TD\na --> b --> c --> d\na e1@--> d\ne1@{ curve: step }\n"),
         &Theme::default(),
     );
     assert!(svg.starts_with("<svg"));
-    assert!(!any_bezier_path(&svg));
+    let has_step_edge = svg.split("d=\"").skip(1).any(|seg| {
+        let d = &seg[..seg.find('"').unwrap_or(seg.len())];
+        !d.contains('C') && d.matches('L').count() >= 4
+    });
+    assert!(
+        has_step_edge,
+        "step edge should be orthogonal (many Ls, no C)"
+    );
 }

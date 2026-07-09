@@ -65,8 +65,9 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
   visually distinct (`draw_node`).
 - Flowchart `subgraph` is tracked in `FlowchartDiagram.subgraphs` including
   nesting. The renderer draws a solid rounded cluster frame with the themed
-  `flow_cluster_fill`/`flow_cluster_stroke` and a centered bold top label
-  (`draw_subgraphs`).
+  `flow_cluster_fill`/`flow_cluster_stroke` and a centered normal-weight label
+  set just inside the top border (`draw_subgraphs`) — upstream draws it in
+  normal weight below the border, not bold on it (#331).
   - `style <id>`/`class <id> <name>` naming a subgraph id styles the cluster
     frame: the directive lands on the phantom node dropped during subgraph-id
     cleanup, so the parser moves its `style`/`classes` onto `Subgraph.style`/
@@ -89,6 +90,13 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     `curve_linear_path` (straight segments), and `curve_step_path` (orthogonal
     right-angle steps) in `src/svg/builder.rs` build the path. Any other
     upstream curve name (`cardinal`, `natural`, …) falls back to basis.
+  - Under the default basis curve, a *bare two-point* edge (adjacent layers, no
+    routed waypoints) between horizontally/vertically offset nodes gets two
+    synthesized control points from `basis_control_points` (`edges.rs`) so it
+    leaves and re-enters along its dominant flow axis as a gentle S — matching
+    upstream instead of a straight diagonal (#331). Endpoints that share a
+    column/row stay collinear, so the curve draws straight. Linear/step curves
+    are unaffected.
   - `direction X` inside a subgraph body fills `Subgraph.direction`. The
     renderer works in screen space and, for a cluster whose flow axis differs
     from the diagram's, transposes just that cluster's members (and their

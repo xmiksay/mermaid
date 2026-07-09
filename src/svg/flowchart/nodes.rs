@@ -364,10 +364,12 @@ pub(super) fn draw_subgraphs(
             sub.label.as_str()
         };
         let label_fill = rs.label_fill(fg);
+        // Upstream draws the cluster title in normal weight, set inside the frame
+        // below the top border rather than bold sitting on it (#331).
         svg.text(
             (x0 + x1) / 2.0,
-            y0 + 15.0,
-            &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\" font-weight=\"bold\""),
+            y0 + 18.0,
+            &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\""),
             label,
         );
     }
