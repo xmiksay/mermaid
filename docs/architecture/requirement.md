@@ -30,9 +30,14 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   always `from` regardless of the written direction.
 - Relation stroke style matches upstream 11.x: `contains` is the only solid
   relation; every other kind (`copies`, `derives`, `satisfies`, `verifies`,
-  `refines`, `traces`) is dashed and ends in the thin `req-arrow` head. The
-  relation label is drawn in upstream's `<<kind>>` form on a plain edge-label
-  background patch (no border/pill), not a lowercase guillemet pill.
+  `refines`, `traces`) is dashed and ends in the thin `req-arrow` head. Edges
+  use the theme's thin dark-gray `flow_edge_stroke` (not the purple node
+  stroke), and the `req-arrow` marker is a small *open* (line) chevron —
+  a stroked `M1,1 L9,5 L1,9` V with no `fill`/`z` — rather than a filled
+  triangle; the `contains` crossed-circle is stroked in the same edge color.
+  The relation label is drawn in upstream's `<<kind>>` form on a light-gray
+  background patch (`.relationshipLabelBox`, `#e8e8e8` at 0.85 opacity, no
+  border/pill), not a lowercase guillemet pill.
 - Node header/body match upstream's format (`svg/requirement.rs`): the header
   stereotype is title-cased in `<<…>>` form (`<<Requirement>>`,
   `<<Functional Requirement>>`, …, `<<Element>>`) and the body is prose
