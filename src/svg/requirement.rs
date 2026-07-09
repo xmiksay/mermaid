@@ -62,6 +62,9 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let stroke = &theme.flow_node_stroke;
     let fill = &theme.flow_node_fill;
+    // Relations follow upstream's thin dark-gray edge color, not the purple
+    // node stroke — `contains` circle and the plain arrowhead included.
+    let edge = &theme.flow_edge_stroke;
 
     let mut boxes: Vec<Box> = Vec::new();
 
@@ -179,12 +182,18 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
 
     let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0)).theme(theme);
 
-    svg.def_arrow_marker("req-arrow", stroke, 9, 9);
+    // Upstream's relation arrowhead is a small *open* (line) chevron, not a
+    // filled triangle: a stroked `M…L…L…` V with no `fill` and no closing `z`.
+    svg.defs_raw(&format!(
+        "<marker id=\"req-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" \
+         markerWidth=\"8\" markerHeight=\"8\" orient=\"auto-start-reverse\">\
+         <path d=\"M1,1 L9,5 L1,9\" fill=\"none\" stroke=\"{edge}\" stroke-width=\"1.5\"/></marker>"
+    ));
     svg.defs_raw(&format!(
         "<marker id=\"req-contains\" viewBox=\"0 0 20 20\" refX=\"19\" refY=\"10\" \
          markerWidth=\"18\" markerHeight=\"18\" orient=\"auto-start-reverse\">\
-         <circle cx=\"10\" cy=\"10\" r=\"9\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\"/>\
-         <path d=\"M1,10 L19,10 M10,1 L10,19\" stroke=\"{stroke}\" stroke-width=\"1\"/></marker>"
+         <circle cx=\"10\" cy=\"10\" r=\"9\" fill=\"{fill}\" stroke=\"{edge}\" stroke-width=\"1\"/>\
+         <path d=\"M1,10 L19,10 M10,1 L10,19\" stroke=\"{edge}\" stroke-width=\"1\"/></marker>"
     ));
 
     let by_name: HashMap<String, (f64, f64, f64, f64)> = boxes
@@ -267,7 +276,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         svg.path(
             &curve_basis_path(&clipped),
             &format!(
-                "fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1.5\"{dash_attr} {marker_attr}"
+                "fill=\"none\" stroke=\"{edge}\" stroke-width=\"1.5\"{dash_attr} {marker_attr}"
             ),
         );
 
@@ -276,14 +285,15 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         // form that carries the `#lt;`/`#gt;` sentinels.
         let label_w = super::metrics::text_width(&format!("<<{kind_word}>>"), 5.5, theme.font_size);
         let lw = (label_w + 14.0).max(60.0);
-        // Upstream draws the relation label on a plain background patch (edge
-        // label color, no border/pill) that just masks the line beneath it.
+        // Upstream draws the relation label on a light-gray background patch
+        // (`.relationshipLabelBox`, rgb(232,232,232) at 0.85 opacity), no
+        // border/pill, that just masks the line beneath it.
         svg.rect(
             mx - lw / 2.0,
             my - 9.0,
             lw,
             16.0,
-            &format!("fill=\"{}\"", &theme.flow_label_bg),
+            "fill=\"#e8e8e8\" fill-opacity=\"0.85\"",
         );
         svg.text(
             mx,
@@ -305,9 +315,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         svg.text(
             b.x + b.w / 2.0,
             b.y + 16.0,
-            &format!(
-                "text-anchor=\"middle\" fill=\"{text_fill}\" font-size=\"11\" font-style=\"italic\""
-            ),
+            &format!("text-anchor=\"middle\" fill=\"{text_fill}\" font-size=\"11\""),
             &b.title_kind,
         );
         svg.text(
@@ -383,6 +391,34 @@ mod tests {
         assert!(svg.contains(">req1<"));
         assert!(svg.contains(">e1<"));
         assert!(svg.contains("req-arrow"));
+    }
+
+    #[test]
+    fn edges_are_thin_dark_gray_with_open_arrowheads() {
+        let svg = render_single_relation(ReqRelationKind::Satisfies);
+        let edge = &Theme::default().flow_edge_stroke;
+        // The relation edge path is dark-gray, not the purple node stroke.
+        assert!(svg.contains(&format!(
+            "fill=\"none\" stroke=\"{edge}\" stroke-width=\"1.5\""
+        )));
+        assert!(!svg.contains("fill=\"none\" stroke=\"#9370DB\""));
+        // The arrowhead marker is an open (line) chevron: stroked, no fill.
+        assert!(svg.contains("id=\"req-arrow\""));
+        assert!(svg.contains(&format!(
+            "<path d=\"M1,1 L9,5 L1,9\" fill=\"none\" stroke=\"{edge}\""
+        )));
+    }
+
+    #[test]
+    fn relation_label_has_light_gray_background_box() {
+        let svg = render_single_relation(ReqRelationKind::Traces);
+        assert!(svg.contains("fill=\"#e8e8e8\" fill-opacity=\"0.85\""));
+    }
+
+    #[test]
+    fn header_stereotype_is_upright_not_italic() {
+        let svg = render_single_relation(ReqRelationKind::Satisfies);
+        assert!(!svg.contains("font-style=\"italic\""));
     }
 
     #[test]
