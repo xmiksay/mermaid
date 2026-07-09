@@ -53,6 +53,15 @@ pub(super) fn clip_rhombus(from: (f64, f64), center: (f64, f64), (w, h): (f64, f
 /// edge's label at its visual midpoint rather than the midpoint of its
 /// bounding box.
 pub(super) fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
+    polyline_midpoint_offset(pts, 0.0)
+}
+
+/// Like [`polyline_midpoint`], but shifts the returned point `offset` units of
+/// arc-length along the polyline away from its midpoint — negative pulls toward
+/// the start, positive toward the end (clamped to the polyline). Used to pull
+/// the two labels of an opposite-pair transition apart along their own edges so
+/// one label's opaque background does not occlude the other (#312).
+pub(super) fn polyline_midpoint_offset(pts: &[(f64, f64)], offset: f64) -> (f64, f64) {
     if pts.len() < 2 {
         return pts.first().copied().unwrap_or((0.0, 0.0));
     }
@@ -65,11 +74,11 @@ pub(super) fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
         segs.push(l);
         total += l;
     }
-    let half = total / 2.0;
+    let target = (total / 2.0 + offset).clamp(0.0, total);
     let mut walked = 0.0;
     for (i, w) in pts.windows(2).enumerate() {
-        if walked + segs[i] >= half {
-            let t = (half - walked) / segs[i].max(1e-9);
+        if walked + segs[i] >= target {
+            let t = (target - walked) / segs[i].max(1e-9);
             return (
                 w[0].0 + t * (w[1].0 - w[0].0),
                 w[0].1 + t * (w[1].1 - w[0].1),

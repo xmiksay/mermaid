@@ -7,7 +7,7 @@ use crate::parse::{FlowDirection, State, StateDiagram, StateKind, StateTransitio
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, fnum, SvgBuilder};
-use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
+use super::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint_offset};
 use super::interact::{close_click, open_click};
 use super::metrics::text_width;
 use super::style::resolve_style;
@@ -165,6 +165,21 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     // Cluster frames first (under nodes/edges) so labels stay legible.
     draw_composites(&mut svg, d, &boxes, &dividers, theme);
 
+    // Opposite-pair transitions (`A --> B` alongside `B --> A`) bow onto
+    // separate curves, but their labels still land at the shared midpoint y and
+    // one's opaque background occludes the other (#312). Detect the pairs so the
+    // label of each is nudged back along its own arc toward its source.
+    let reversed_pairs: HashSet<(&str, &str)> = d
+        .transitions
+        .iter()
+        .filter(|t| {
+            d.transitions
+                .iter()
+                .any(|o| o.from == t.to && o.to == t.from)
+        })
+        .map(|t| (t.from.as_str(), t.to.as_str()))
+        .collect();
+
     for tr in &d.transitions {
         let (Some(start), Some(end)) = (
             endpoint_clip(&tr.from, &id_to_u32, &d.states, &sizes, &pos, &boxes),
@@ -192,7 +207,15 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
             },
             _ => vec![start.center, end.center],
         };
-        draw_transition(&mut svg, &pts, tr, &start, &end, theme);
+        // For an opposite pair, pull the label back toward this edge's own
+        // source; the two edges run in opposite directions, so their labels
+        // separate along the shared axis and stop overlapping.
+        let label_offset = if reversed_pairs.contains(&(tr.from.as_str(), tr.to.as_str())) {
+            -LABEL_STAGGER
+        } else {
+            0.0
+        };
+        draw_transition(&mut svg, &pts, tr, &start, &end, label_offset, theme);
     }
 
     for (i, state) in d.states.iter().enumerate() {
@@ -329,12 +352,18 @@ fn draw_state(
     }
 }
 
+/// Arc-length by which an opposite-pair transition's label is nudged toward its
+/// own source, so the two labels of the pair clear each other's opaque
+/// background (#312).
+const LABEL_STAGGER: f64 = 15.0;
+
 fn draw_transition(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
     tr: &StateTransition,
     start: &StateEndClip,
     end: &StateEndClip,
+    label_offset: f64,
     theme: &Theme,
 ) {
     let flow_edge_stroke = &theme.flow_edge_stroke;
@@ -362,7 +391,7 @@ fn draw_transition(
         ),
     );
     if let Some(label) = &tr.label {
-        let mid = polyline_midpoint(&clipped);
+        let mid = polyline_midpoint_offset(&clipped, label_offset);
         crate::svg::label::draw_edge_label(svg, mid, label, theme);
     }
 }
@@ -571,6 +600,44 @@ mod tests {
         assert!(
             (sx - tx).abs() > 1.0 || (sy - ty).abs() > 1.0,
             "labels overlap: start ({sx},{sy}) vs stop ({tx},{ty})",
+        );
+    }
+
+    /// Bounds `(x0, y0, x1, y1)` of the opaque background rect drawn directly
+    /// before the `text-anchor=middle` label for `id` (the `edgeLabelBackground`
+    /// rect, `fill="#fff" stroke="none"`).
+    fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
+        let text = svg.find(&format!(">{id}</text>")).unwrap();
+        let rect_open = svg[..text].rfind("<rect ").unwrap();
+        let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+        let tag = &svg[rect_open..rect_end];
+        let grab = |attr: &str| {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse::<f64>().unwrap()
+        };
+        let (x, y, w, h) = (
+            grab("x=\""),
+            grab("y=\""),
+            grab("width=\""),
+            grab("height=\""),
+        );
+        (x, y, x + w, y + h)
+    }
+
+    #[test]
+    fn opposite_pair_label_backgrounds_do_not_overlap() {
+        // Regression for #312: the opaque background of one opposite-pair label
+        // occluded the other ("sta… stop"). Each label is staggered along its
+        // own arc, so the two background rects must be disjoint.
+        let d = build("stateDiagram-v2\nIdle --> Running : start\nRunning --> Idle : stop\n");
+        let svg = render(&d, &Theme::default());
+        let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "start");
+        let (bx0, by0, bx1, by1) = label_bg_box(&svg, "stop");
+        let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+        assert!(
+            !overlap,
+            "label backgrounds overlap: start ({ax0},{ay0},{ax1},{ay1}) vs stop ({bx0},{by0},{bx1},{by1})",
         );
     }
 

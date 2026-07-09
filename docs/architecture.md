@@ -261,6 +261,13 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   the pair bows to opposite sides; endpoints stay on the node centers (only the
   midpoint / interior waypoints move) so arrowheads leave each node at an angle
   and the labels no longer overlap. All graph-shaped kinds benefit for free.
+  The `BOW` only parts the curves sideways, though; the two labels still land at
+  the shared midpoint *along* the axis, so with #260's opaque backgrounds one
+  still occludes the other (#312). The state renderer therefore detects the pair
+  (a matching `(to, from)` transition) and, via `polyline_midpoint_offset`,
+  nudges each label `LABEL_STAGGER` arc-length back toward its own source — the
+  two edges run opposite ways, so their labels separate along the shared axis
+  and the backgrounds clear.
 - Label line breaks: `split_label_lines()` in `src/svg/builder.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
