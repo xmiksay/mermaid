@@ -1,7 +1,7 @@
 # Requirement — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
+Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement/mod.rs`.
 
 - requirementDiagram (`src/parse/requirement.rs`) accepts both relation
   directions — forward `src - kind -> dst` and reverse `dst <- kind - src`
@@ -38,7 +38,7 @@ Parser: `src/parse/requirement.rs` · Renderer: `src/svg/requirement.rs`.
   The relation label is drawn in upstream's `<<kind>>` form on a light-gray
   background patch (`.relationshipLabelBox`, `#e8e8e8` at 0.85 opacity, no
   border/pill), not a lowercase guillemet pill.
-- Node header/body match upstream's format (`svg/requirement.rs`): the header
+- Node header/body match upstream's format (`svg/requirement/mod.rs`): the header
   stereotype is title-cased in `<<…>>` form (`<<Requirement>>`,
   `<<Functional Requirement>>`, …, `<<Element>>`) and the body is prose
   `Label: value` lines (`ID`/`Text`/`Risk`/`Verification` for requirements,

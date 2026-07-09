@@ -1,7 +1,7 @@
 # XY chart — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart.rs`.
+Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart/mod.rs`.
 
 - xychart axis titles (`parse_axis`) accept upstream's `text: alphaNum | STR |
   MD_STR` — a **quoted or bare-word** title before the optional `[..]` band or

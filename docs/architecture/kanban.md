@@ -10,7 +10,7 @@ Parser: `src/parse/kanban.rs` · Renderer: `src/svg/kanban.rs`.
   (`src/svg/kanban.rs`) color-codes the card border by priority
   (`priority_color`: Very High/High/Low/Very Low; others use the default
   stroke) and draws the `ticket` id on the card — hyperlinked when
-  `config.kanban.ticketBaseUrl` is set (captured in `preamble.rs` →
+  `config.kanban.ticketBaseUrl` is set (captured in `preamble/config.rs` →
   `DiagramMeta.ticket_base_url`, copied onto `KanbanDiagram` in
   `parse_with_meta`; `#TICKET#` in the URL is replaced by the id).
 - Each column header is filled with `theme.cscale_color(i)` (a pale `cScale`

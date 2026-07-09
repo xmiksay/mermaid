@@ -1,10 +1,10 @@
 # Architecture (architecture-beta) — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture.rs`.
+Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture/` (`mod.rs` driver, `layout.rs` grid/routing, `draw.rs` icons).
 
 - Layout is driven by the edge **port hints**, not sugiyama (#257). `grid_place`
-  (`src/svg/architecture.rs`) assigns each node integer `(col, row)` grid
+  (`src/svg/architecture/layout.rs`) assigns each node integer `(col, row)` grid
   coordinates: following an edge `from:S₁ -- S₂:to`, the neighbour sits one cell
   away in the direction of the anchored node's named side (`side_delta`: `L`→left,
   `R`→right, `T`→up, `B`→down), so an `L`/`R` pair shares a row (`db:L -- R:server`
@@ -16,7 +16,7 @@ Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture.rs`.
   with straight orthogonal segments between the pinned sides (`ortho_route`):
   same-axis ports get a two-segment jog (straight when already aligned), mixed
   axes a single elbow — never a free-angle diagonal.
-- architecture-beta icons: `draw_arch_icon` (`src/svg/architecture.rs`) draws
+- architecture-beta icons: `draw_arch_icon` (`src/svg/architecture/draw.rs`) draws
   six built-in glyphs (`cloud`, `database`/`db`, `disk` — a distinct concentric
   platter, `server`, `internet`/`globe`, `queue`/`kafka`) at a caller-chosen
   size, and returns `false` for anything else. A service renders as upstream
@@ -34,7 +34,7 @@ Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture.rs`.
   langium Arrow `'--' | '-' title=ARCH_TITLE '-'`) fills `ArchEdge.label`
   (`split_titled_edge`), rendered at the edge midpoint. `align row|column id id…`
   (v11.16+) is parsed by `parse_align` into `ArchitectureDiagram.aligns` and
-  honored by `apply_aligns` (`src/svg/architecture.rs`): within a group, the
+  honored by `apply_aligns` (`src/svg/architecture/layout.rs`): within a group, the
   listed nodes are repositioned into a shared row (common y, boxes left→right) or
   column (common x, boxes top→bottom), anchored at their current top-left, after
   the grid pass. Directives naming fewer than two in-group nodes are ignored.

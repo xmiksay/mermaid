@@ -1,7 +1,7 @@
 # Radar — architecture notes
 
 Part of the [mermaid-svg architecture reference](../architecture.md).
-Parser: `src/parse/radar.rs` · Renderer: `src/svg/radar.rs`.
+Parser: `src/parse/radar.rs` · Renderer: `src/svg/radar/mod.rs`.
 
 - radar-beta (`src/parse/radar.rs`): multiple `axis` lines **accumulate**
   (`d.axes.extend`, not assign). Option keywords `min`/`max`/`ticks`/
@@ -9,7 +9,7 @@ Parser: `src/parse/radar.rs` · Renderer: `src/svg/radar.rs`.
   hard-erroring. A curve body is either a positional list (`{85, 90}`) or
   `key: value` pairs (`{ Power: 85, Speed: 90 }`, detected by a `:`), the
   latter matched to axes by id then label — order-independent, missing axes
-  default to 0. The renderer (`src/svg/radar.rs`) draws a **filled light-gray
+  default to 0. The renderer (`src/svg/radar/mod.rs`) draws a **filled light-gray
   graticule disc** (`fg_muted` at `fill-opacity 0.12`) behind `ticks` fainter
   ring outlines (`fg_muted` at `stroke-opacity 0.35`), drawn as concentric
   **circles** by default (`graticule polygon` for the old polygon rings) via the

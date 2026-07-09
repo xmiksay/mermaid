@@ -46,7 +46,7 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   — or a single barb behind a `|` shaft (`-|\`, `-|/`). Dashed forms add a dash
   on the shaft side (`--\\`, `--//`, `--|\`, `--|/`), and the eight **reverse**
   forms put the barb at the tail (`\\-`, `//-`, `\|-`, `/|-` plus their dashed
-  `--` variants). The `ARROWS` table (`src/parse/sequence/message.rs`) is
+  `--` variants). The `ARROWS` table (`src/parse/sequence/message/arrow.rs`) is
   ordered longest-first so a dashed/pipe token wins over its bare prefix at the
   same position. Each spelling maps to one of eight `ArrowKind` variants split
   by upper/lower barb × solid/dashed × forward/reverse; the barb picks the
@@ -74,7 +74,7 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   not half a row below it: `layout_items` remembers the previous message's arrow
   y (`prev_msg_arrow_y`) and the activation event borrows it, matching upstream.
   - The `->>+`/`-->>-` **activation shorthand** is handled in the parser
-    (`parse_message` in `src/parse/sequence/message.rs`): a leading `+`/`-` on the
+    (`parse_message` in `src/parse/sequence/message/arrow.rs`): a leading `+`/`-` on the
     target id is stripped (not part of the participant name) and
     `parse_line_to_items` synthesizes the paired event **after** the message
     (upstream jison `actor signaltype +/- actor text`) — `+` appends
