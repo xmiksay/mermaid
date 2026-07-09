@@ -5,16 +5,22 @@ use crate::parse::PacketDiagram;
 use super::builder::SvgBuilder;
 use super::theme::Theme;
 
+// Reserved band below the last row for the caption title (plain weight,
+// beneath the diagram — upstream renders `.packetTitle` under, not above).
 const TITLE_GAP: f64 = 32.0;
 // Vertical strip reserved above every row for the absolute start/end bit
 // numbers printed over each field block.
 const BIT_LABEL_H: f64 = 14.0;
+// Upstream packet block defaults are theme-independent: a uniform light-gray
+// fill (`packet.blockFillColor`) with black strokes (`blockStrokeColor`),
+// never a rotating categorical scale (issue #325).
+const BLOCK_FILL: &str = "#efefef";
+const BLOCK_STROKE: &str = "black";
 
 pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
     let fg = &theme.fg;
     let fg_muted = &theme.fg_muted;
     let fill = &theme.flow_node_fill;
-    let stroke = &theme.flow_node_stroke;
 
     let bits_per_row = d.config.bits_per_row;
     let bit_w = d.config.bit_width;
@@ -36,17 +42,8 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
-    if let Some(t) = &d.title {
-        svg.text(
-            width / 2.0,
-            pad_y + 18.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"18\" font-weight=\"bold\""),
-            t,
-        );
-    }
-
     let chart_left = pad_x;
-    let chart_top = pad_y + title_h;
+    let chart_top = pad_y;
     // Absolute y of a row's field rectangles (below that row's bit-number strip).
     let row_y = |row: u32| chart_top + row as f64 * row_stride + label_h;
 
@@ -71,9 +68,9 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
         }
     }
 
-    // Fields.
-    for (fi, f) in d.fields.iter().enumerate() {
-        let color = theme.cscale_color(fi);
+    // Fields: every block is a uniform light-gray rectangle with a black
+    // stroke, matching upstream — not a rotating pastel scale (issue #325).
+    for f in &d.fields {
         let mut cur = f.start;
         while cur <= f.end {
             let row = cur / bits_per_row;
@@ -87,9 +84,7 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
                 y,
                 w,
                 row_h,
-                &format!(
-                    "fill=\"{color}\" fill-opacity=\"0.45\" stroke=\"{stroke}\" stroke-width=\"1\""
-                ),
+                &format!("fill=\"{BLOCK_FILL}\" stroke=\"{BLOCK_STROKE}\" stroke-width=\"1\""),
             );
             svg.text(
                 x + w / 2.0,
@@ -104,20 +99,35 @@ pub(crate) fn render(d: &PacketDiagram, theme: &Theme) -> String {
                 svg.text(
                     x + 2.0,
                     bit_y,
-                    &format!("text-anchor=\"start\" fill=\"{fg_muted}\" font-size=\"9\""),
+                    &format!("text-anchor=\"start\" fill=\"{fg}\" font-size=\"9\""),
                     &cur.to_string(),
                 );
                 if row_end != cur {
                     svg.text(
                         x + w - 2.0,
                         bit_y,
-                        &format!("text-anchor=\"end\" fill=\"{fg_muted}\" font-size=\"9\""),
+                        &format!("text-anchor=\"end\" fill=\"{fg}\" font-size=\"9\""),
                         &row_end.to_string(),
                     );
                 }
             }
             cur = row_end + 1;
         }
+    }
+
+    // Caption title below the diagram in plain weight (upstream places
+    // `.packetTitle` beneath the blocks, not as a bold heading above).
+    if let Some(t) = &d.title {
+        let title_y = chart_top + rows as f64 * row_stride + 20.0;
+        svg.text(
+            width / 2.0,
+            title_y,
+            &format!(
+                "text-anchor=\"middle\" fill=\"{}\" font-size=\"14\"",
+                theme.title()
+            ),
+            t,
+        );
     }
 
     svg.finish()
@@ -150,6 +160,59 @@ mod tests {
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains(">TCP<"));
         assert!(svg.contains(">src<"));
+    }
+
+    #[test]
+    fn blocks_are_uniform_gray_with_black_strokes() {
+        // Upstream fills every block the same light gray with a black stroke;
+        // no rotating pastel scale, no purple-tinted borders (issue #325).
+        let svg = render(
+            &PacketDiagram {
+                title: None,
+                fields: vec![
+                    PacketField {
+                        start: 0,
+                        end: 15,
+                        label: "a".into(),
+                    },
+                    PacketField {
+                        start: 16,
+                        end: 31,
+                        label: "b".into(),
+                    },
+                ],
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        assert_eq!(svg.matches("fill=\"#efefef\"").count(), 2);
+        assert_eq!(svg.matches("stroke=\"black\"").count(), 2);
+        // No categorical pastels or the old translucent fills survive.
+        assert!(!svg.contains("fill-opacity=\"0.45\""));
+        assert!(!svg.contains("#9370DB"));
+    }
+
+    #[test]
+    fn title_renders_below_in_plain_weight() {
+        let svg = render(
+            &PacketDiagram {
+                title: Some("TCP header".into()),
+                fields: vec![PacketField {
+                    start: 0,
+                    end: 31,
+                    label: "word".into(),
+                }],
+                config: PacketConfig::default(),
+            },
+            &Theme::default(),
+        );
+        // Plain caption (font-size 14, no bold), not a bold 18px heading.
+        assert!(svg.contains("font-size=\"14\""));
+        assert!(!svg.contains("font-weight=\"bold\""));
+        // Below the diagram: the title's y sits past the field row's y.
+        let field_y = svg.find(">word<").unwrap();
+        let title_y = svg.find(">TCP header<").unwrap();
+        assert!(title_y > field_y);
     }
 
     #[test]
