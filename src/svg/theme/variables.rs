@@ -214,15 +214,15 @@ mod tests {
     #[test]
     fn quadrant_fill_variables_override_palette() {
         let mut t = Theme::default_theme();
-        // Unset quadrants fall back to the generic categorical scale.
-        assert_eq!(t.quadrant_fill(1, 1), t.cscale_color(1));
+        // Unset quadrants fall back to the per-theme lavender tints (#316).
+        assert_eq!(t.quadrant_fill(1), "#ECECFF");
         let mut vars = BTreeMap::new();
         vars.insert("quadrant1Fill".to_string(), "#ff0000".to_string());
         vars.insert("quadrant3Fill".to_string(), "#00ff00".to_string());
         t.apply_theme_variables(&vars);
-        assert_eq!(t.quadrant_fill(1, 1), "#ff0000");
-        assert_eq!(t.quadrant_fill(3, 2), "#00ff00");
-        assert_eq!(t.quadrant_fill(2, 0), t.cscale_color(0));
+        assert_eq!(t.quadrant_fill(1), "#ff0000");
+        assert_eq!(t.quadrant_fill(3), "#00ff00");
+        assert_eq!(t.quadrant_fill(2), "#F1F1FF");
     }
 
     #[test]
