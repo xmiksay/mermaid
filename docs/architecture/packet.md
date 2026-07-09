@@ -20,3 +20,9 @@ Parser: `src/parse/packet.rs` · Renderer: `src/svg/packet.rs`.
 - Background cells are drawn only for bits no field covers — a field is one
   undivided rectangle, not a grid of per-bit cells (issue #248), matching
   upstream's flat field rectangles.
+- Every field block is a uniform light-gray rectangle (`#efefef`) with a black
+  stroke, matching upstream's theme-independent packet defaults
+  (`packet.blockFillColor` / `blockStrokeColor`) — not a rotating categorical
+  scale (issue #325). Bit-offset labels are `theme.fg` (black-ish), not muted.
+  The caption title renders *below* the blocks in plain weight (font-size 14),
+  matching upstream's `.packetTitle`, rather than as a bold heading above.
