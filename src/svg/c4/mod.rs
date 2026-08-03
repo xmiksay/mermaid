@@ -1,11 +1,13 @@
 //! C4 diagram renderer.
 //!
 //! Layout: every diagram uses upstream's row-flow placement — each level lays
-//! its shapes out left-to-right, wrapping after `SHAPE_IN_ROW` shapes, and is
-//! then sized from that content (so, e.g., a system and the external system it
-//! feeds sit side by side, and only the overflow wraps to the next row — #327).
-//! Boundaries recurse the same way and are flowed `BOUNDARY_IN_ROW` per row, so
-//! sibling boxes never overlap by construction.
+//! its shapes out left-to-right, wrapping after `SHAPE_IN_ROW` shapes or once
+//! the row outgrows `SHAPE_ROW_WIDTH_LIMIT` (mirroring upstream's
+//! screen-width-driven wrap — #370), and is then sized from that content (so,
+//! e.g., a system and the external system it feeds sit side by side, and only
+//! the overflow wraps to the next row — #327). Boundaries recurse the same
+//! way and are flowed `BOUNDARY_IN_ROW` per row, so sibling boxes never
+//! overlap by construction.
 //!
 //! Boundaries are drawn as an outline around their content: dashed `7.0,7.0` for
 //! most kinds, but solid for `Deployment_Node` (matching upstream's `nodeType`
@@ -51,6 +53,19 @@ const BOUNDARY_IN_ROW: usize = 2;
 
 const H_GAP: f64 = 40.0;
 const V_GAP: f64 = 40.0;
+
+// Upstream wraps a shape row not just after `c4ShapeInRow` shapes but also
+// once the row's content would outgrow the render surface — its `Bounds.insert`
+// wraps as soon as a shape's `stopx` would reach `screen.availWidth` (the
+// browser's screen width). In a headless render that's the default ~800px
+// viewport, which — with upstream's own default `width: 216` and
+// `c4ShapeMargin: 50` — already wraps after two same-sized shapes, well
+// before the `c4ShapeInRow` default of 4 ever applies. That's why upstream
+// tiers `samples/c4.mmd` into short rows (persons, then systems two at a
+// time) instead of one wide row (#370). `SHAPE_ROW_WIDTH_LIMIT` mirrors that
+// with our own `BOX_W`/`H_GAP`: any value in (2·BOX_W + H_GAP, 3·BOX_W +
+// 2·H_GAP] reproduces the same two-per-row grouping.
+const SHAPE_ROW_WIDTH_LIMIT: f64 = 700.0;
 
 /// Boundary outlines and relation lines both use upstream's `#444444`.
 pub(super) const C4_LINE: &str = "#444444";
@@ -224,7 +239,11 @@ fn flow_layout(
         } else {
             shape_in_row
         };
-        if col >= per_row {
+        // Shapes additionally wrap once the row would outgrow
+        // `SHAPE_ROW_WIDTH_LIMIT`, matching upstream's screen-width-driven
+        // wrap (#370); boundaries keep the plain per-row count.
+        let outgrows_width = !node.is_boundary && col > 0 && x + node.w > SHAPE_ROW_WIDTH_LIMIT;
+        if col >= per_row || outgrows_width {
             x = 0.0;
             y += row_h + V_GAP;
             row_h = 0.0;

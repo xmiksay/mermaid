@@ -1,3 +1,4 @@
+use super::layout::context_sample;
 use super::*;
 use crate::parse::{C4Kind, C4RelDirection, C4Relation};
 
@@ -138,36 +139,31 @@ fn rel_style_override_colors_line_and_label() {
 
 #[test]
 fn label_does_not_land_on_an_unrelated_node() {
-    // Regression for #366: `samples/c4.mmd` places three shapes on one
-    // row (row-flow, #327) and relates the first to the third, so the
-    // straight connector — and its label — pass directly over the middle
-    // node. The label must dodge it instead of rendering on its fill.
-    let elements = vec![
-        person("customerA", "Banking Customer"),
-        person("customerB", "Bank Employee"),
-        C4Element {
-            kind: C4ElementKind::System,
-            alias: "SystemAA".into(),
-            label: "Internet Banking".into(),
-            descr: None,
-            technology: None,
-            sprite: None,
-            tags: None,
-            link: None,
-            external: false,
-            boundary_alias: None,
-            boundary_label: None,
-            boundary_kind: None,
-            boundary_type: None,
-            members: vec![],
-        },
-    ];
+    // Regression for #366, adapted for the #370 width-based row wrap: with
+    // `samples/c4.mmd`'s five elements, Internet Banking sits directly below
+    // Banking Customer and Mainframe sits two rows below it in the same
+    // column (row-flow, #370), so a straight connector from Banking Customer
+    // to Mainframe — and its label — pass directly over Internet Banking.
+    // The label must dodge it instead of rendering on its fill.
+    let elements = context_sample().elements;
     let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
     let mut pos = HashMap::new();
     let mut boundaries = Vec::new();
     let mut leaves = Vec::new();
     place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
-    let obstacle = *pos.get("customerB").expect("Bank Employee placed");
+    let obstacle = *pos.get("SystemAA").expect("Internet Banking placed");
+    let source = *pos.get("customerA").expect("Banking Customer placed");
+    let target = *pos.get("SystemC").expect("Mainframe placed");
+    // Sanity: the obstacle must actually sit between the two endpoints
+    // (same column, middle row) or this test would pass vacuously.
+    assert!(
+        obstacle.1 > source.1 && obstacle.1 < target.1,
+        "Internet Banking {obstacle:?} must sit between Banking Customer {source:?} and Mainframe {target:?}"
+    );
+    assert!(
+        obstacle.0 < source.0 + source.2 && source.0 < obstacle.0 + obstacle.2,
+        "Internet Banking {obstacle:?} must share a column with Banking Customer {source:?}"
+    );
 
     let d = C4Diagram {
         kind: C4Kind::Context,
@@ -175,7 +171,7 @@ fn label_does_not_land_on_an_unrelated_node() {
         elements,
         relations: vec![C4Relation {
             from: "customerA".into(),
-            to: "SystemAA".into(),
+            to: "SystemC".into(),
             label: "Uses".into(),
             technology: None,
             sprite: None,
@@ -204,6 +200,6 @@ fn label_does_not_land_on_an_unrelated_node() {
         (label_rect.1 + label_rect.3).min(obstacle.1 + obstacle.3) - label_rect.1.max(obstacle.1);
     assert!(
         overlap_x <= 0.0 || overlap_y <= 0.0,
-        "label {label_rect:?} must not overlap Bank Employee's box {obstacle:?}"
+        "label {label_rect:?} must not overlap Internet Banking's box {obstacle:?}"
     );
 }
