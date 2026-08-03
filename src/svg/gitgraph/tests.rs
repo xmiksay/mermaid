@@ -369,6 +369,79 @@ fn merge_join_is_a_rounded_elbow() {
     assert!(svg.contains("Q"));
 }
 
+#[test]
+fn merge_riser_ends_at_merge_commit_not_preceding_commit() {
+    // issue #365: a plain commit on main between dev's last commit and the
+    // merge must not steal the riser's endpoint — it has to land on the
+    // merge commit's own column, one further along.
+    let d = GitGraphDiagram {
+        events: vec![
+            GitEvent::Commit {
+                id: Some("a".into()),
+                tags: Vec::new(),
+                kind: CommitKind::Normal,
+            },
+            GitEvent::Branch {
+                name: "dev".into(),
+                order: None,
+            },
+            GitEvent::Checkout { name: "dev".into() },
+            GitEvent::Commit {
+                id: Some("b".into()),
+                tags: Vec::new(),
+                kind: CommitKind::Normal,
+            },
+            GitEvent::Checkout {
+                name: "main".into(),
+            },
+            GitEvent::Commit {
+                id: Some("c".into()),
+                tags: Vec::new(),
+                kind: CommitKind::Normal,
+            },
+            GitEvent::Merge {
+                from: "dev".into(),
+                id: Some("m".into()),
+                tags: Vec::new(),
+                kind: CommitKind::Merge,
+            },
+        ],
+        ..Default::default()
+    };
+    let svg = render(&d, &Theme::default());
+
+    let merge_x = circle_x_before(&svg, svg.find(">m<").unwrap());
+    let preceding_x = circle_x_before(&svg, svg.find(">c<").unwrap());
+    assert_ne!(
+        merge_x, preceding_x,
+        "sanity: c and m sit in different columns"
+    );
+
+    // The elbow's final `L{x} {y}` segment must land on the merge commit's
+    // column, not the plain commit's.
+    let elbow_end = format!("L{} 60", fnum(merge_x));
+    let wrong_end = format!("L{} 60", fnum(preceding_x));
+    assert!(
+        svg.contains(&elbow_end),
+        "riser must terminate at the merge commit's column"
+    );
+    assert!(
+        !svg.contains(&wrong_end),
+        "riser must not terminate at the preceding plain commit's column"
+    );
+}
+
+/// Reads the `cx="…"` of the `<circle>` immediately preceding the id label
+/// that ends just before byte `end` (the commit's own dot, not a tag pin).
+fn circle_x_before(svg: &str, end: usize) -> f64 {
+    let circle_start = svg[..end].rfind("<circle").unwrap();
+    let seg = &svg[circle_start..end];
+    let x_pos = seg.find("cx=\"").unwrap() + 4;
+    let rest = &seg[x_pos..];
+    let x_end = rest.find('"').unwrap();
+    rest[..x_end].parse().unwrap()
+}
+
 /// Reads the `x="…"` of the `<text>` element ending just before byte `end`.
 fn lane_x_before(svg: &str, end: usize) -> f64 {
     let text_start = svg[..end].rfind("<text").unwrap();
