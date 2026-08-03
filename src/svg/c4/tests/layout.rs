@@ -39,7 +39,7 @@ fn rel(from: &str, to: &str, label: &str) -> C4Relation {
 }
 
 /// The `samples/c4.mmd` System Context diagram (#258).
-fn context_sample() -> C4Diagram {
+pub(super) fn context_sample() -> C4Diagram {
     C4Diagram {
         kind: C4Kind::Context,
         title: Some("System Context diagram".into()),
@@ -163,6 +163,38 @@ fn context_uses_upstream_row_flow() {
     // Mainframe wraps to the next row.
     assert!(main_y > bank_y, "Mainframe must wrap below");
     let _ = main_x;
+}
+
+/// #370: upstream's own row-flow wraps a row once it outgrows the render
+/// surface, not just after `SHAPE_IN_ROW` shapes — so the two persons tier
+/// onto their own row above the systems, instead of all four leading shapes
+/// (2 persons + 2 systems) cramming into one wide row with Mainframe reached
+/// by a long diagonal.
+#[test]
+fn context_tiers_persons_above_systems() {
+    let d = context_sample();
+    let (nodes, _, _) = flow_layout(&d.elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
+    let by_alias = |a: &str| {
+        nodes
+            .iter()
+            .find(|n| n.el.alias == a)
+            .map(|n| (n.x, n.y))
+            .expect("placed")
+    };
+    let (customer_x, customer_y) = by_alias("customerA");
+    let (employee_x, employee_y) = by_alias("customerB");
+    let (_, bank_y) = by_alias("SystemAA");
+
+    // Both persons share a row, distinct from the systems below.
+    assert_eq!(customer_y, employee_y, "the two persons must share a row");
+    assert!(
+        employee_x > customer_x,
+        "Bank Employee must sit to the right of Banking Customer"
+    );
+    assert!(
+        bank_y > customer_y,
+        "Internet Banking must wrap below the persons row, not share it"
+    );
 }
 
 #[test]
