@@ -165,17 +165,18 @@ pub(super) const PIE_DEFAULT: [Str; 12] = [
 
 /// `git0..7` lane scale for the default theme. Upstream's `theme-default.js`
 /// darkens each raw base color (`#ECECFF`, `#FFFFDE`, …) by 25% lightness in
-/// light mode before use; without that step the whole graph renders washed
-/// out (issue #309). These are the darkened lane colors.
+/// light mode *twice* — once at declaration, once again in `updateColors()`
+/// — before use; without both steps the whole graph renders washed out
+/// (issues #309, #364). These are the twice-darkened lane colors.
 pub(super) const GIT_DEFAULT: [Str; 8] = [
-    Cow::Borrowed("#6D6DFF"),
-    Cow::Borrowed("#FFFF5E"),
-    Cow::Borrowed("#D1FF6D"),
-    Cow::Borrowed("#6DB2FF"),
-    Cow::Borrowed("#6DFFFF"),
-    Cow::Borrowed("#6DFFB2"),
-    Cow::Borrowed("#FF6DFF"),
-    Cow::Borrowed("#FF6D6D"),
+    Cow::Borrowed("#0000EC"),
+    Cow::Borrowed("#DDDE00"),
+    Cow::Borrowed("#A2EC00"),
+    Cow::Borrowed("#0070EC"),
+    Cow::Borrowed("#00ECEC"),
+    Cow::Borrowed("#00EC70"),
+    Cow::Borrowed("#EC00EC"),
+    Cow::Borrowed("#EC0000"),
 ];
 
 /// Shared dark-theme palette (all three scales). Light pastels on the dark

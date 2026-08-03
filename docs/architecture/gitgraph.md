@@ -52,8 +52,10 @@ Parser: `src/parse/gitgraph.rs` · Renderer: `src/svg/gitgraph/`.
   are **colored rounded pills** (`git_color` fill, `rx=10`, contrast text via
   `label_text_color`) drawn in the **saturated** default `git0..7` lane colors:
   `GIT_DEFAULT` in `src/svg/theme/palette.rs` bakes in upstream's 25% lightness
-  darken of the raw base colors, so main renders a saturated blue rather than
-  the washed-out pale lavender of issue #309. Tags are **luggage-tag shapes**
+  darken of the raw base colors applied *twice* (once at declaration, once in
+  `updateColors()`), so main renders a saturated blue (`#0000EC`) rather than
+  the washed-out pale lavender of issue #309 or the still-too-light single-darken
+  shade of issue #364. Tags are **luggage-tag shapes**
   (`draw_tag`, pointed left
   edge + punch hole, upstream's `#fff5ad`/`#aaaa33` yellow). Auto commit ids are
   upstream-style `<seq>-<hash>` (`seq_hash`, a deterministic FNV digest of the
