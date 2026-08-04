@@ -101,6 +101,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         .collect();
 
     apply_local_directions(d, dir, &id_to_u32, &mut pos, &mut edge_pts);
+    resolve_subgraph_overlaps(d, &id_to_u32, &mut pos, &mut edge_pts, &node_sizes);
 
     let mut boxes = compute_subgraph_boxes(d, &id_to_u32, &pos, &node_sizes);
 

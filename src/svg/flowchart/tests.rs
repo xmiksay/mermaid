@@ -577,6 +577,36 @@ fn subgraph_with_local_direction_stays_within_canvas() {
 }
 
 #[test]
+fn nested_subgraph_transposed_by_outer_local_direction_stays_within_outer_frame() {
+    // An outer subgraph's local `direction` (differing from the diagram's
+    // global one) must rigidly carry every recursively-nested descendant
+    // node along when it transposes, not just its own direct members —
+    // otherwise the outer frame (sized from recursive membership) and the
+    // inner subgraph's actual node positions (previously moved only if a
+    // direct member) disagree, leaving the inner subgraph's nodes outside
+    // the outer frame it's supposed to be nested inside.
+    let src = "flowchart TD\n\
+               subgraph Backend\n\
+               direction LR\n\
+               Auth --> Users\n\
+               subgraph Storage\n\
+               direction TB\n\
+               Users --> Cache\n\
+               Cache --> DB\n\
+               end\n\
+               end\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "Backend");
+    for id in ["Auth", "Users", "Cache", "DB"] {
+        let (cx, cy) = label_center(&svg, id);
+        assert!(
+            cx >= bx0 && cx <= bx1 && cy >= by0 && cy <= by1,
+            "{id} at ({cx}, {cy}) falls outside Backend's frame ({bx0}, {by0})-({bx1}, {by1})"
+        );
+    }
+}
+
+#[test]
 fn back_edge_label_stays_within_canvas_on_the_right() {
     // #368: a routed back-edge (e.g. `Retry? --> Start`) curves around to the
     // right of every node in the sugiyama layout; its label must expand the

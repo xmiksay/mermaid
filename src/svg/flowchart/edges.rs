@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::parse::{
     EdgeCurve, EdgeHead, EdgeLine, FlowDirection, FlowEdge, FlowNode, FlowchartDiagram, NodeShape,
+    Subgraph,
 };
 use crate::sugiyama::NodeId;
 
@@ -12,6 +13,8 @@ use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, 
 use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus};
 use crate::svg::style::ResolvedStyle;
 use crate::svg::theme::Theme;
+
+use super::nodes::collect_node_ids;
 
 /// Clip target for one end of an edge: the shape boundary a connector stops at.
 pub(super) struct EndClip {
@@ -101,10 +104,56 @@ fn is_horizontal(d: FlowDirection) -> bool {
     matches!(d, FlowDirection::LeftRight | FlowDirection::RightLeft)
 }
 
+/// Nesting depth of each subgraph (root clusters = 0, each level of
+/// `child_subgraph_ids` nesting adds one), used to order [`apply_local_directions`]
+/// innermost-first so an ancestor's transpose carries its already-transposed
+/// descendants along rigidly instead of re-deriving their positions.
+fn subgraph_depths(d: &FlowchartDiagram, sub_idx_by_id: &HashMap<&str, usize>) -> Vec<usize> {
+    let mut depths = vec![0usize; d.subgraphs.len()];
+    let mut is_child = vec![false; d.subgraphs.len()];
+    for sub in &d.subgraphs {
+        for child_id in &sub.child_subgraph_ids {
+            if let Some(&ci) = sub_idx_by_id.get(child_id.as_str()) {
+                is_child[ci] = true;
+            }
+        }
+    }
+    fn assign(
+        i: usize,
+        depth: usize,
+        subs: &[Subgraph],
+        sub_idx_by_id: &HashMap<&str, usize>,
+        depths: &mut [usize],
+    ) {
+        depths[i] = depths[i].max(depth);
+        for child_id in &subs[i].child_subgraph_ids {
+            if let Some(&ci) = sub_idx_by_id.get(child_id.as_str()) {
+                assign(ci, depth + 1, subs, sub_idx_by_id, depths);
+            }
+        }
+    }
+    for (i, &child) in is_child.iter().enumerate() {
+        if !child {
+            assign(i, 0, &d.subgraphs, sub_idx_by_id, &mut depths);
+        }
+    }
+    depths
+}
+
 /// Apply each subgraph's local `direction` by transposing its members (and
 /// their internal edges) in place about the cluster centre. Only clusters whose
 /// flow axis differs from the diagram's are affected — a TD chain inside a
 /// `direction LR` subgraph becomes a horizontal row, matching upstream.
+///
+/// Membership is gathered *recursively* through nested child subgraphs (the
+/// same [`collect_node_ids`] helper `compute_subgraph_boxes` uses for frame
+/// sizing), so a transposed outer cluster carries its nested subgraphs' nodes
+/// along too — otherwise the frame (sized from recursive membership) and the
+/// actual node positions (previously moved from direct membership only)
+/// disagree, leaving the outer frame not containing its nested child. Clusters
+/// are processed innermost-first (by nesting depth) so a nested subgraph's own
+/// local-direction transpose is already baked into its members' positions
+/// before an ancestor transposes them again as a rigid group.
 pub(super) fn apply_local_directions(
     d: &FlowchartDiagram,
     global_dir: FlowDirection,
@@ -112,17 +161,27 @@ pub(super) fn apply_local_directions(
     pos: &mut HashMap<NodeId, (f64, f64)>,
     edge_pts: &mut HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
 ) {
-    let mut moved: HashSet<NodeId> = HashSet::new();
-    for sub in &d.subgraphs {
+    let sub_idx_by_id: HashMap<&str, usize> = d
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let depths = subgraph_depths(d, &sub_idx_by_id);
+    let mut order: Vec<usize> = (0..d.subgraphs.len()).collect();
+    order.sort_by(|&a, &b| depths[b].cmp(&depths[a]));
+
+    for i in order {
+        let sub = &d.subgraphs[i];
         let Some(local) = sub.direction else { continue };
         if is_horizontal(local) == is_horizontal(global_dir) {
             continue;
         }
-        let members: Vec<NodeId> = sub
-            .node_ids
+        let mut ids: Vec<&str> = Vec::new();
+        collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
+        let members: Vec<NodeId> = ids
             .iter()
-            .filter_map(|id| id_to_u32.get(id).copied())
-            .filter(|u| !moved.contains(u))
+            .filter_map(|id| id_to_u32.get(*id).copied())
             .collect();
         if members.len() < 2 {
             continue;
@@ -147,7 +206,6 @@ pub(super) fn apply_local_directions(
         for &u in &members {
             let p = transpose(pos[&u]);
             pos.insert(u, p);
-            moved.insert(u);
         }
         for (&(a, b), pts) in edge_pts.iter_mut() {
             let (a_in, b_in) = (member_set.contains(&a), member_set.contains(&b));
