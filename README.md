@@ -220,6 +220,9 @@ help`) to list them:
 `CARGO_BUILD_JOBS` defaults to 4; override per invocation, e.g.
 `make build CARGO_BUILD_JOBS=8`.
 
+Browse every rendered sample, grouped by diagram kind, in
+[`assets/gallery/README.md`](assets/gallery/README.md).
+
 Releasing: bump the version in `Cargo.toml` and push a matching `v<version>`
 tag — the Release pipeline re-verifies (lint + tests with coverage), uploads
 the coverage report, and publishes to crates.io (via the

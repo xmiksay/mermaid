@@ -1,0 +1,10 @@
+---
+title: Decision tree
+---
+flowchart TD
+    Start{Start} -->|yes| A{Continue?}
+    Start -->|no| Stop[Stop]
+    A -->|yes| B{Retry?}
+    A -->|no| End1[Done]
+    B -->|yes| Start
+    B -->|no| End2[Abort]

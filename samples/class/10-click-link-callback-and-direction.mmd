@@ -1,0 +1,10 @@
+classDiagram
+    direction LR
+    class Shape
+    class Circle
+    class Square
+    Shape <|-- Circle
+    Shape <|-- Square
+    click Shape href "https://example.com/shape" "Shape docs"
+    link Circle "https://example.com/circle"
+    callback Square "showSquareDetails" "Inspect square"

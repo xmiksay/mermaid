@@ -1,0 +1,6 @@
+C4Context
+    title Keyword arguments
+    Person(user, "User", $descr="Primary end user of the system")
+    System(app, "App", $techn="Rust/Axum", $descr="Core application", $tags="critical", $link="https://example.com/app")
+    System_Ext(cdn, "CDN", $techn="CloudFront", $sprite="cloud")
+    Rel(user, app, "Uses", $techn="HTTPS", $tags="primary-flow")

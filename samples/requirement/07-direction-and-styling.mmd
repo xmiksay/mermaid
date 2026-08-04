@@ -1,0 +1,32 @@
+requirementDiagram
+
+direction LR
+
+classDef important fill:#ffdddd,stroke:#cc0000
+classDef flagged stroke-dasharray: 5 5
+
+requirement critical_req:::important {
+    id: 1
+    text: must not fail
+    risk: high
+    verifymethod: test
+}
+
+requirement normal_req {
+    id: 2
+    text: nice to have
+    risk: low
+    verifymethod: inspection
+}
+
+element impl {
+    type: simulation
+}
+
+class impl important
+style normal_req fill:#eeeeee
+normal_req:::flagged
+
+impl - satisfies -> critical_req
+impl - satisfies -> normal_req
+critical_req - refines -> normal_req

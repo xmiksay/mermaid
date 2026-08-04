@@ -1,0 +1,7 @@
+---
+title: Semicolons and inline edge labels
+---
+flowchart LR
+    A[Start] -- init --> B[Ready]; B -- validate --> C{OK?}
+    C -. retry .-> A
+    C -- done --> D[Finish]

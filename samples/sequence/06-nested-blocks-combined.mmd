@@ -1,0 +1,14 @@
+---
+title: Nested alt inside loop
+---
+sequenceDiagram
+    participant Worker
+    participant Queue
+    loop every poll
+        Worker->>Queue: Poll
+        alt has message
+            Queue-->>Worker: Message
+        else empty
+            Queue-->>Worker: None
+        end
+    end

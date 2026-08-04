@@ -1,0 +1,12 @@
+gitGraph
+    commit id: "base"
+    branch feature
+    checkout feature
+    commit id: "f1"
+    checkout main
+    commit id: "m1"
+    merge feature id: "merge1"
+    checkout feature
+    commit id: "f2"
+    checkout main
+    cherry-pick id: "merge1" parent: "m1" tag: "hotfix-1.2"

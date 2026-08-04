@@ -1,0 +1,27 @@
+stateDiagram-v2
+    [*] --> Player
+    state Player {
+        [*] --> [H]
+        [H] --> Stopped
+        Stopped --> Playing : play
+        Playing --> Paused : pause
+        Paused --> Playing : resume
+        Playing --> Stopped : stop
+    }
+    Player --> Off : power off
+    Off --> [H] : power on, resume last
+
+    [*] --> Session
+    state Session {
+        [*] --> [H*]
+        [H*] --> Editing
+        state Editing {
+            [*] --> Draft
+            Draft --> Review : submit
+            Review --> Draft : reject
+        }
+        Editing --> Locked : timeout
+        Locked --> Editing : unlock
+    }
+    Session --> Closed : close
+    Closed --> [H*] : reopen at same nested step

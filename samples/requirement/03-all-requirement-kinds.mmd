@@ -1,0 +1,48 @@
+requirementDiagram
+
+requirement base_req {
+    id: 1
+    text: generic requirement
+    risk: low
+    verifymethod: inspection
+}
+
+functionalRequirement func_req {
+    id: 2
+    text: system shall authenticate users
+    risk: medium
+    verifymethod: test
+}
+
+interfaceRequirement iface_req {
+    id: 3
+    text: system shall expose a REST API
+    risk: low
+    verifymethod: demonstration
+}
+
+performanceRequirement perf_req {
+    id: 4
+    text: response time under 200ms
+    risk: high
+    verifymethod: analysis
+}
+
+physicalRequirement phys_req {
+    id: 5
+    text: device shall fit in a 1U rack
+    risk: low
+    verifymethod: inspection
+}
+
+designConstraint design_req {
+    id: 6
+    text: must use approved component list
+    risk: medium
+    verifymethod: inspection
+}
+
+base_req - contains -> func_req
+func_req - contains -> iface_req
+func_req - contains -> perf_req
+design_req - contains -> phys_req

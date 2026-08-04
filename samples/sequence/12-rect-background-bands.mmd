@@ -1,0 +1,15 @@
+---
+title: Rect background band
+---
+sequenceDiagram
+    participant Client
+    participant Server
+    rect rgb(200, 220, 255)
+        alt cache hit
+            Client->>Server: Lookup
+            Server-->>Client: Cached value
+        else cache miss
+            Client->>Server: Lookup
+            Server-->>Client: Fresh value
+        end
+    end

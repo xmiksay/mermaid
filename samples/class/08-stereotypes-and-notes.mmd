@@ -1,0 +1,18 @@
+classDiagram
+    class Shape {
+        <<interface>>
+        +area() double
+    }
+    class Drawable {
+        <<abstract>>
+        +draw()
+    }
+    class Circle {
+        +double radius
+        +area() double
+        +draw()
+    }
+    Shape <|.. Circle
+    Drawable <|-- Circle
+    note "Shapes must implement area() before rendering"
+    note for Circle "radius must be positive"

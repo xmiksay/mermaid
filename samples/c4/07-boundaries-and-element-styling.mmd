@@ -1,0 +1,13 @@
+C4Context
+    title Styled boundaries
+    Enterprise_Boundary(enterprise, "Acme Corp") {
+        System_Boundary(division, "Retail Division") {
+            System(pos, "POS System", "In-store checkout")
+        }
+        System(hq, "HQ Systems", "Back office")
+    }
+    System_Ext(bank, "Bank", "Payment processor")
+    Rel(pos, bank, "Authorizes payment")
+    Rel(hq, pos, "Configures")
+    UpdateElementStyle(pos, $bgColor="#2a9d8f", $fontColor="#ffffff", $borderColor="#264653")
+    UpdateBoundaryStyle(division, $bgColor="#fff3cd", $borderColor="#cc9900")

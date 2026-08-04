@@ -1,0 +1,8 @@
+architecture-beta
+    group api(cloud)[API]
+    service gateway(server)[Gateway] in api
+    service cache(disk)[Cache] in api
+    service db(database)[Database] in api
+
+    gateway:R -- L:cache
+    gateway:B -- T:db

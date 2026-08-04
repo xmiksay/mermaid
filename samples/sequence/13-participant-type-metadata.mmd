@@ -1,0 +1,7 @@
+sequenceDiagram
+    title: Participant metadata
+    participant Legacy
+    participant Order@{ "type": "database" }
+    participant Gateway@{ "type": "boundary" }
+    Legacy->>Order: Save
+    Order->>Gateway: Route

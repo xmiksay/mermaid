@@ -50,13 +50,15 @@ src/
 │   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
 examples/render_user.rs        small one-shot example
-examples/gen-doc-diagrams.rs   regenerates assets/gallery/<stem>.md (the rustdoc gallery)
+examples/gen-doc-diagrams.rs   regenerates assets/gallery/**/*.md (gallery + index)
 tests/integration.rs           end-to-end tests; writes samples to target/test-samples/
-samples/                       one `.mmd` per diagram kind, shared by benches + gallery
-assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry,
-                               embedded into rustdoc via src/lib.rs
-gallery_build.rs               shared `SAMPLES` list + section helper, `include!`'d into
-                               examples/gen-doc-diagrams.rs and tests/integration.rs
+samples/                       primary `<kind>.mmd` per kind + secondary `<kind>/NN-slug.mmd`,
+                               shared by benches + gallery
+assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry; primaries
+                               embed into rustdoc via src/lib.rs, secondaries don't
+assets/gallery/README.md       browsable index of every sample, grouped by kind
+gallery_build.rs               shared `SAMPLES` list + section/index helpers, `include!`'d
+                               into examples/gen-doc-diagrams.rs and tests/integration.rs
 ```
 
 Cargo manifest: single `[package]`. Crate is published to crates.io as
@@ -66,22 +68,50 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 
 `gallery_build.rs` is not a module — it is `include!`'d verbatim into both
 `examples/gen-doc-diagrams.rs` and `tests/integration.rs`, so its `SAMPLES`
-list (one `(stem, source)` per diagram kind) and `gallery_section()` helper are
-shared. `cargo run --example gen-doc-diagrams` regenerates one
-`assets/gallery/<stem>.md` per `SAMPLES` entry (23 files), rewriting only the
-files whose content changed and printing each rewrite — so `git status` after a
-regen shows exactly which diagrams a change affected. `src/lib.rs` embeds them
-into the crate rustdoc with one `#![doc = include_str!("../assets/gallery/<stem>.md")]`
-per stem in `SAMPLES` order (`#![doc]` attributes concatenate in order). The
-`doc_gallery_up_to_date` integration test names the stale stem if any committed
-file drifts from the samples.
+list (one `(title, stem, source)` 3-tuple per sample) and `gallery_section()`
+helper are shared. `cargo run --example gen-doc-diagrams` regenerates one
+`assets/gallery/<stem>.md` per `SAMPLES` entry, rewriting only the files whose
+content changed and printing each rewrite — so `git status` after a regen
+shows exactly which diagrams a change affected.
 
-The split (one file per diagram, `assets/gallery/*.md`) keeps parallel
+**Hybrid primary/secondary scheme.** Every diagram kind has exactly one
+**primary** sample: a flat `samples/<kind>.mmd` → `assets/gallery/<kind>.md`
+pair (stem has no `/`, `is_primary(stem)`). A kind may additionally have any
+number of **secondary** samples living under a per-kind subdirectory,
+numbered from `02`: `samples/<kind>/02-some-slug.mmd` →
+`assets/gallery/<kind>/02-some-slug.md` (stem is `<kind>/NN-slug`,
+`kind_of(stem)` strips back to `<kind>`). Both kinds of entries are plain
+`SAMPLES` 3-tuples — no structural difference, just a stem convention plus
+the `kind_of`/`is_primary` helpers that read it.
+
+**Only the primaries reach rustdoc.** `src/lib.rs` embeds exactly the 23
+primary stems into the crate rustdoc with one
+`#![doc = include_str!("../assets/gallery/<stem>.md")]` per stem, in
+`SAMPLES` order (`#![doc]` attributes concatenate in order). This is
+deliberate and does not grow as secondaries are added: both `ci.yml` and
+`docs.yml` build that page with `cargo doc --no-deps --lib -D warnings` on
+every push, and every extra embedded sample would slow that build. Secondary
+samples exist only as render-fixtures (covered by `every_sample_renders`) and
+as entries in the browsable index below — never as new `#![doc]` lines.
+
+**Browsable index.** `gallery_index()` builds `assets/gallery/README.md`: one
+`## <kind title>` heading per kind (first-appearance order, reusing that
+kind's primary title string), followed by a link-only list — primary first
+(labeled "Basic"), then secondaries in stem order, each linking to its own
+`{stem}.md` relative to `assets/gallery/`. No images are re-embedded there,
+to avoid recreating the same doc-bloat problem one level up. It's generated
+by the same `gen-doc-diagrams` run and checked by the
+`gallery_index_up_to_date` integration test, mirroring
+`doc_gallery_up_to_date`'s pattern. The top-level `README.md` links to it.
+
+The split (one file per sample, `assets/gallery/**/*.md`) keeps parallel
 renderer PRs from conflicting on a shared base64 blob: a PR touching one
-diagram regenerates exactly one gallery file. `.gitattributes` marks
-`assets/gallery/*.md linguist-generated=true` so the blobs stay collapsed in
-GitHub diffs. Changing `SAMPLES` itself (add/remove/reorder a stem) fans out to
-the `lib.rs` include lines, so treat it as a serial-window change.
+diagram regenerates exactly that diagram's gallery file(s). `.gitattributes`
+marks `assets/gallery/**/*.md linguist-generated=true` so the blobs stay
+collapsed in GitHub diffs, primaries and secondaries alike. Changing
+`SAMPLES`' primary entries (add/remove/reorder a primary stem) fans out to
+the `lib.rs` include lines, so treat that as a serial-window change; adding a
+secondary entry never touches `lib.rs`.
 
 ## Benches & integration samples
 
@@ -91,20 +121,15 @@ Two groups: `parse/<kind>` (parse only)
 and `render/<kind>` (parse + render to SVG). Sized inputs use realistic
 non-trivial examples (typically 10-30 lines).
 
-Integration tests write one sample SVG per diagram kind to
-`target/test-samples/<stem>.svg`, one stem per `SAMPLES` entry in
-`gallery_build.rs`:
-- `pie.svg`, `sequence.svg`
-- `flowchart.svg`, `state.svg`
-- `class.svg`, `er.svg`
-- `gantt.svg`, `journey.svg`
-- `timeline.svg`, `sankey.svg`
-- `quadrant.svg`, `xychart.svg`
-- `radar.svg`, `packet.svg`
-- `mindmap.svg`, `gitgraph.svg`
-- `requirement.svg`, `c4.svg`
-- `block.svg`, `architecture.svg`
-- `kanban.svg`, `treemap.svg`, `zenuml.svg`
+Integration tests write one sample SVG to `target/test-samples/<stem>.svg`
+per `SAMPLES` entry in `gallery_build.rs` — one per primary diagram kind
+(`pie.svg`, `sequence.svg`, `flowchart.svg`, `state.svg`, `class.svg`,
+`er.svg`, `gantt.svg`, `journey.svg`, `timeline.svg`, `sankey.svg`,
+`quadrant.svg`, `xychart.svg`, `radar.svg`, `packet.svg`, `mindmap.svg`,
+`gitgraph.svg`, `requirement.svg`, `c4.svg`, `block.svg`,
+`architecture.svg`, `kanban.svg`, `treemap.svg`, `zenuml.svg`), plus one
+nested `<kind>/NN-slug.svg` per secondary sample (e.g.
+`flowchart/02-nested-subgraphs.svg`).
 
 ## Themes — internal contract
 

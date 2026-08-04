@@ -1,0 +1,15 @@
+requirementDiagram
+
+requirement "My Req" {
+    id: 1
+    text: the quoted requirement
+    risk: high
+    verifymethod: test
+}
+
+element "My El" {
+    type: simulation
+    docref: "user-guide.md"
+}
+
+"My El" - satisfies -> "My Req"

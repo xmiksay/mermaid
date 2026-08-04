@@ -1,0 +1,11 @@
+stateDiagram-v2
+    direction LR
+    [*] --> Received
+    state Pipeline {
+        [*] --> Validated
+        Validated --> Transformed : normalize
+        Transformed --> Persisted : write
+        Persisted --> [*]
+    }
+    Received --> Pipeline
+    Pipeline --> [*] : ack

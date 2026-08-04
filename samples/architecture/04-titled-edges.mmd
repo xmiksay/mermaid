@@ -1,0 +1,7 @@
+architecture-beta
+    service client(server)[Client]
+    service api(server)[API]
+    service queue(queue)[Queue]
+
+    client:R -[Requests]- L:api
+    api:R -[Publishes]- L:queue

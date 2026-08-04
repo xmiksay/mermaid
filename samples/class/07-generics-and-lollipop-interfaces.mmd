@@ -1,0 +1,14 @@
+classDiagram
+    class Repository~T~ {
+        +findById(id) T
+        +save(item T)
+    }
+    class UserRepository {
+        +List~User~ findAll()
+    }
+    class Cache~List~String~~ {
+        +get() List~String~
+    }
+    Repository~T~ <|-- UserRepository
+    UserRepository ()-- Client
+    Client --() Repository~T~

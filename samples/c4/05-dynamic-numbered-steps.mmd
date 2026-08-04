@@ -1,0 +1,10 @@
+C4Dynamic
+    title Checkout flow
+    Person(customer, "Customer")
+    Container(web, "Web App", "React")
+    Container(api, "API", "Rust/Axum")
+    ContainerDb(db, "Database", "PostgreSQL")
+    RelIndex(1, customer, web, "Submits checkout")
+    RelIndex(2, web, api, "POST /checkout")
+    RelIndex(3, api, db, "Insert order")
+    RelIndex(4, api, web, "Order confirmation")

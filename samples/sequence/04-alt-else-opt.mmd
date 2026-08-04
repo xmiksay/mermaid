@@ -1,0 +1,15 @@
+---
+title: Alt and opt
+---
+sequenceDiagram
+    participant Client
+    participant Server
+    Client->>Server: Request
+    alt is authorized
+        Server-->>Client: 200 OK
+    else is forbidden
+        Server-->>Client: 403 Forbidden
+    end
+    opt caching enabled
+        Server->>Server: Store in cache
+    end

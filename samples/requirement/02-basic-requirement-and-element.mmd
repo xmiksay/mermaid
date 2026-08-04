@@ -1,0 +1,14 @@
+requirementDiagram
+
+requirement login_req {
+    id: 1
+    text: users must be able to log in
+    risk: medium
+    verifymethod: test
+}
+
+element auth_service {
+    type: simulation
+}
+
+auth_service - satisfies -> login_req

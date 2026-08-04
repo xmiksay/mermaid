@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> Order
+    state Order {
+        [*] --> Placed
+        Placed --> Paid : payment received
+        Paid --> Shipped : dispatch
+        Shipped --> [*]
+    }
+    Order --> [*] : closed

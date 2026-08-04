@@ -1,0 +1,7 @@
+gantt
+    dateFormat YYYY-MM-DD
+    section Release
+    Build  : build1, 2026-09-01, 3d
+    Deploy : deploy1, after build1, 2d
+    click build1 href "https://example.com/build"
+    click deploy1 call showDeployInfo()

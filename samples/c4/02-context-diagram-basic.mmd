@@ -1,0 +1,7 @@
+C4Context
+    title Basic system context
+    Person(user, "End User", "Uses the product")
+    System(app, "Product App", "Core application")
+    System_Ext(email, "Email Provider", "Sends notifications")
+    Rel(user, app, "Uses")
+    Rel(app, email, "Sends email via", "SMTP")

@@ -1,0 +1,11 @@
+C4Component
+    title Component view of the API container
+    Container_Boundary(api, "API Container") {
+        Component(controller, "Order Controller", "Axum handler", "Accepts order requests")
+        Component(service, "Order Service", "Rust module", "Order business logic")
+        Component(repo, "Order Repository", "SeaORM", "Persists orders")
+    }
+    ContainerDb(db, "Database", "PostgreSQL", "Order data")
+    Rel(controller, service, "Calls")
+    Rel(service, repo, "Uses")
+    Rel(repo, db, "Reads/writes", "SQL")

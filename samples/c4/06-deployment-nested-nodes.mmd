@@ -1,0 +1,11 @@
+C4Deployment
+    title Deployment topology
+    Deployment_Node(dc, "Data Center", "On-prem") {
+        Node_L(rack1, "Rack 1", "Web tier") {
+            Container(web1, "Web App", "React", "Instance A")
+        }
+        Node_R(rack2, "Rack 2", "Data tier") {
+            ContainerDb(db1, "Database", "PostgreSQL", "Primary")
+        }
+    }
+    Rel(web1, db1, "Reads/writes", "SQL")

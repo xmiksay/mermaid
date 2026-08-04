@@ -1,0 +1,18 @@
+classDiagram
+    class Car
+    class Engine
+    class Wheel
+    class Driver
+    class Service
+    class Logger
+    class Report
+    class Printer
+    class Cable
+    class Plug
+    Car *-- Engine
+    Car o-- Wheel
+    Driver --> Car
+    Service ..> Logger
+    Report ..|> Printer
+    Cable -- Plug
+    Service .. Report
