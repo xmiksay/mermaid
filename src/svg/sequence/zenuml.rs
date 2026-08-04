@@ -20,17 +20,29 @@ const FRAME_HEADER_H: f64 = 22.0;
 const FRAME_HEADER_GAP: f64 = 22.0;
 /// Width of the left icon column inside a stereotype/actor participant box.
 const ICON_W: f64 = 26.0;
+/// Width of the left icon column for `@Boundary`, whose glyph (a vertical bar
+/// joined to a circle by a short stem, drawn with radius 8 and an 8px stem —
+/// see `draw_glyph_shape`) is wider than the other stereotypes' circle-only
+/// icons: it needs 16px of clearance from its own center, not just the 13px
+/// `ICON_W` gives, or the bar pokes out past the box's left edge.
+const BOUNDARY_ICON_W: f64 = 38.0;
+
+/// The left icon column width for a participant `kind`, or `0.0` for a plain
+/// participant (no icon).
+fn icon_col_w(kind: ParticipantKind) -> f64 {
+    match kind {
+        ParticipantKind::Participant => 0.0,
+        ParticipantKind::Boundary => BOUNDARY_ICON_W,
+        _ => ICON_W,
+    }
+}
 
 /// A ZenUML participant box's `(width, height)`. It reuses the sequence
 /// `actor_size` measurement and reserves a left icon column for the
 /// stereotype/actor glyph (which sits beside the name, not above it).
 fn participant_size(label: &str, kind: ParticipantKind, font_size: f64) -> (f64, f64) {
     let (w, h) = actor_size(label, font_size);
-    if matches!(kind, ParticipantKind::Participant) {
-        (w, h)
-    } else {
-        (w + ICON_W, h)
-    }
+    (w + icon_col_w(kind), h)
 }
 
 pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
@@ -298,12 +310,13 @@ fn draw_participant(
             theme.bg
         ),
     );
+    let icon_w = icon_col_w(kind);
     let name_cx = if matches!(kind, ParticipantKind::Participant) {
         cx
     } else {
         // Icon on the left, name centered in the space to its right.
-        draw_participant_icon(svg, left + ICON_W / 2.0, top + h / 2.0, kind, theme);
-        left + ICON_W + (w - ICON_W) / 2.0
+        draw_participant_icon(svg, left + icon_w / 2.0, top + h / 2.0, kind, theme);
+        left + icon_w + (w - icon_w) / 2.0
     };
     draw_box_name(svg, name_cx, top, h, label, theme);
 }
@@ -444,6 +457,40 @@ mod tests {
         assert!(svg.contains(">Login flow<"), "title rendered");
         // Not the centered sequence title (which would be bold 18px).
         assert!(!svg.contains("font-size=\"18\""));
+    }
+
+    #[test]
+    fn boundary_bar_fits_inside_the_box() {
+        // Page is @Boundary: its glyph is a vertical bar joined to a circle by
+        // a short stem. The bar previously sat 3px left of the box's own
+        // border (bar_x = box_x - 3), poking outside it. Verify the bar's x
+        // never falls left of the box it's drawn in.
+        let svg = render(&build(SAMPLE), &Theme::default());
+        let box_marker = "fill=\"#fff\" stroke=\"#666\" stroke-width=\"1\" rx=\"2\"";
+        let rect_start = svg
+            .match_indices(box_marker)
+            .nth(1)
+            .map(|(i, _)| i)
+            .expect("second participant box (Page)");
+        let rect_tag_start = svg[..rect_start].rfind("<rect x=\"").unwrap();
+        let box_x: f64 = svg[rect_tag_start + "<rect x=\"".len()..]
+            .split('"')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let line_marker = "<line x1=\"";
+        let line_start = svg[rect_start..].find(line_marker).unwrap() + rect_start;
+        let bar_x: f64 = svg[line_start + line_marker.len()..]
+            .split('"')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            bar_x >= box_x,
+            "boundary glyph bar (x={bar_x}) pokes out past the box's left edge (x={box_x})"
+        );
     }
 
     #[test]
