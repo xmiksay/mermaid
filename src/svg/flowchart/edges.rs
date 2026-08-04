@@ -46,6 +46,57 @@ pub(super) fn endpoint_clip(
     })
 }
 
+/// An edge's resolved clip-target endpoints plus its unclipped waypoint
+/// polyline.
+pub(super) type EdgeGeometry = (EndClip, EndClip, Vec<(f64, f64)>);
+
+/// Resolves one edge's clip-target endpoints and its unclipped waypoint
+/// polyline (the routed layout points, or a straight fallback between
+/// endpoint centers). Shared by the flowchart renderer's canvas-sizing
+/// measurement pass and its real drawing pass so both compute geometry
+/// identically.
+pub(super) fn resolve_edge_geometry(
+    fedge: &FlowEdge,
+    id_to_u32: &HashMap<String, NodeId>,
+    nodes: &[FlowNode],
+    node_sizes: &[(f64, f64)],
+    pos: &HashMap<NodeId, (f64, f64)>,
+    boxes: &HashMap<String, (f64, f64, f64, f64)>,
+    edge_pts: &HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
+) -> Option<EdgeGeometry> {
+    let start = endpoint_clip(&fedge.from, id_to_u32, nodes, node_sizes, pos, boxes)?;
+    let end = endpoint_clip(&fedge.to, id_to_u32, nodes, node_sizes, pos, boxes)?;
+    let pts: Vec<(f64, f64)> = match (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) {
+        (Some(&u), Some(&v)) => match edge_pts.get(&(u, v)) {
+            Some(p) if p.len() >= 2 => p.clone(),
+            _ => vec![start.center, end.center],
+        },
+        _ => vec![start.center, end.center],
+    };
+    Some((start, end, pts))
+}
+
+/// Clips a waypoint polyline's first/last segment to the shape boundary of
+/// each endpoint, without drawing anything — the geometry half of
+/// [`draw_edge`], reused by the measurement pass to size the canvas before
+/// any SVG is emitted.
+pub(super) fn clip_edge_polyline(
+    pts: &[(f64, f64)],
+    start: &EndClip,
+    end: &EndClip,
+) -> Vec<(f64, f64)> {
+    let n = pts.len();
+    let first = clip_end(pts[1], start);
+    let last = clip_end(pts[n - 2], end);
+    let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(n);
+    clipped.push(first);
+    for p in &pts[1..n - 1] {
+        clipped.push(*p);
+    }
+    clipped.push(last);
+    clipped
+}
+
 fn is_horizontal(d: FlowDirection) -> bool {
     matches!(d, FlowDirection::LeftRight | FlowDirection::RightLeft)
 }
@@ -133,16 +184,7 @@ pub(super) fn draw_edge(
     if edge.line == EdgeLine::Invisible {
         return Vec::new();
     }
-    let n = pts.len();
-    let first = clip_end(pts[1], start);
-    let last = clip_end(pts[n - 2], end);
-
-    let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(n);
-    clipped.push(first);
-    for p in &pts[1..n - 1] {
-        clipped.push(*p);
-    }
-    clipped.push(last);
+    let clipped = clip_edge_polyline(pts, start, end);
 
     let d = match curve {
         EdgeCurve::Linear => curve_linear_path(&clipped),

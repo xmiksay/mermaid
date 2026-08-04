@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::parse::{FlowDirection, FlowchartDiagram};
+use crate::parse::{EdgeLine, FlowDirection, FlowchartDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::SvgBuilder;
@@ -102,23 +102,94 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
 
     apply_local_directions(d, dir, &id_to_u32, &mut pos, &mut edge_pts);
 
-    let boxes = compute_subgraph_boxes(d, &id_to_u32, &pos, &node_sizes);
+    let mut boxes = compute_subgraph_boxes(d, &id_to_u32, &pos, &node_sizes);
 
-    // Canvas: expand the global extent to include any locally moved nodes and
-    // subgraph frames so nothing is clipped by the viewport.
-    let mut max_x = 0.0_f64;
-    let mut max_y = 0.0_f64;
+    // Canvas sizing is a measure-then-shift pass: a subgraph's local
+    // `direction` can transpose its members to sit left of/above everything
+    // else, and a routed edge's label can land to the right of every node, so
+    // the true extent isn't known until nodes, subgraph frames (with their own
+    // `SUBGRAPH_PAD`) and edge labels have all been resolved. Gather every
+    // extent first, then shift the whole drawing so its minimum lands exactly
+    // at `CANVAS_PAD` before the canvas is created — this is what keeps
+    // negative-coordinate content (issue: subgraph/label clipping) from ever
+    // reaching the SVG.
+    let measured_slots: Vec<super::label_layout::LabelSlot> = d
+        .edges
+        .iter()
+        .filter(|e| e.line != EdgeLine::Invisible)
+        .filter_map(|fedge| {
+            let (start, end, pts) = resolve_edge_geometry(
+                fedge,
+                &id_to_u32,
+                &d.nodes,
+                &node_sizes,
+                &pos,
+                &boxes,
+                &edge_pts,
+            )?;
+            let label = fedge.label.as_ref()?;
+            let clipped = clip_edge_polyline(&pts, &start, &end);
+            if clipped.is_empty() {
+                return None;
+            }
+            let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+            Some(super::label_layout::LabelSlot {
+                polyline: clipped,
+                size: (w, 18.0),
+            })
+        })
+        .collect();
+    let measured_label_pos = super::label_layout::layout_edge_labels(&measured_slots);
+
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
     for (u, &(x, y)) in &pos {
         let (w, h) = node_sizes[*u as usize];
+        min_x = min_x.min(x - w / 2.0);
         max_x = max_x.max(x + w / 2.0);
+        min_y = min_y.min(y - h / 2.0);
         max_y = max_y.max(y + h / 2.0);
     }
-    for &(_, _, bx1, by1) in boxes.values() {
-        max_x = max_x.max(bx1 + SUBGRAPH_PAD);
-        max_y = max_y.max(by1 + SUBGRAPH_PAD);
+    for &(bx0, by0, bx1, by1) in boxes.values() {
+        min_x = min_x.min(bx0);
+        max_x = max_x.max(bx1);
+        min_y = min_y.min(by0);
+        max_y = max_y.max(by1);
     }
-    let mut width = max_x + CANVAS_PAD;
-    let height = max_y + CANVAS_PAD;
+    for (slot, &(cx, cy)) in measured_slots.iter().zip(&measured_label_pos) {
+        let (w, h) = slot.size;
+        min_x = min_x.min(cx - w / 2.0);
+        max_x = max_x.max(cx + w / 2.0);
+        min_y = min_y.min(cy - h / 2.0);
+        max_y = max_y.max(cy + h / 2.0);
+    }
+
+    // Normalize so the measured minimum sits exactly at the canvas padding —
+    // a no-op shift when nothing overhangs, since `pos` is already offset by
+    // `CANVAS_PAD` via `transform`.
+    let shift_x = CANVAS_PAD - min_x;
+    let shift_y = (CANVAS_PAD + title_h) - min_y;
+    for v in pos.values_mut() {
+        v.0 += shift_x;
+        v.1 += shift_y;
+    }
+    for pts in edge_pts.values_mut() {
+        for p in pts.iter_mut() {
+            p.0 += shift_x;
+            p.1 += shift_y;
+        }
+    }
+    for b in boxes.values_mut() {
+        b.0 += shift_x;
+        b.1 += shift_y;
+        b.2 += shift_x;
+        b.3 += shift_y;
+    }
+
+    let mut width = (max_x + shift_x) + CANVAS_PAD;
+    let height = (max_y + shift_y) + CANVAS_PAD;
 
     // A long title can be wider than the graph itself; grow the canvas to fit.
     if let Some(t) = &d.title {
@@ -159,21 +230,16 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             .or(d.default_interpolate)
             .or(d.config_curve)
             .unwrap_or_default();
-        let (Some(start), Some(end)) = (
-            endpoint_clip(&fedge.from, &id_to_u32, &d.nodes, &node_sizes, &pos, &boxes),
-            endpoint_clip(&fedge.to, &id_to_u32, &d.nodes, &node_sizes, &pos, &boxes),
+        let Some((start, end, pts)) = resolve_edge_geometry(
+            fedge,
+            &id_to_u32,
+            &d.nodes,
+            &node_sizes,
+            &pos,
+            &boxes,
+            &edge_pts,
         ) else {
             continue;
-        };
-        // Real node→node edges keep their routed polyline; an endpoint that is
-        // a subgraph cluster has no layout route, so draw a straight connector
-        // clipped to the cluster box.
-        let pts: Vec<(f64, f64)> = match (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) {
-            (Some(&u), Some(&v)) => match edge_pts.get(&(u, v)) {
-                Some(p) if p.len() >= 2 => p.clone(),
-                _ => vec![start.center, end.center],
-            },
-            _ => vec![start.center, end.center],
         };
         let clipped = draw_edge(
             &mut svg,

@@ -506,6 +506,97 @@ fn link_style_interpolate_linear_removes_curve() {
     assert!(!any_bezier_path(&linear));
 }
 
+/// True if any drawn number in `svg` (an attribute value or a path waypoint)
+/// is negative — meaning some content landed left of/above the viewBox's
+/// `0 0` origin and would be clipped.
+fn has_negative_coordinate(svg: &str) -> bool {
+    let bytes = svg.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'-' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
+}
+
+/// The SVG's `viewBox` width and height.
+fn viewbox_size(svg: &str) -> (f64, f64) {
+    let start = svg.find("viewBox=\"").unwrap() + "viewBox=\"".len();
+    let end = start + svg[start..].find('"').unwrap();
+    let nums: Vec<f64> = svg[start..end]
+        .split_whitespace()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    (nums[2], nums[3])
+}
+
+/// True if every edge-label background rect (the theme's `flow_label_bg`
+/// fill) sits fully inside a `width`×`height` canvas.
+fn all_label_rects_within_bounds(svg: &str, width: f64, height: f64) -> bool {
+    svg.match_indices("fill=\"#e8e8e8\"").all(|(i, _)| {
+        let rect_open = svg[..i].rfind("<rect ").unwrap();
+        let tag = &svg[rect_open..i];
+        let grab = |attr: &str| -> f64 {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse().unwrap()
+        };
+        let (x, y, w, h) = (
+            grab("x=\""),
+            grab("y=\""),
+            grab("width=\""),
+            grab("height=\""),
+        );
+        x >= -0.01 && y >= -0.01 && x + w <= width + 0.01 && y + h <= height + 0.01
+    })
+}
+
+#[test]
+fn subgraph_with_local_direction_stays_within_canvas() {
+    // #368: a subgraph whose local `direction` differs from the diagram's
+    // global one can transpose its members further left than any other
+    // node's left edge; the canvas's left offset must expand to cover the
+    // subgraph frame (with its own padding) too, or the frame/label/nodes
+    // clip at x=0.
+    let src = "flowchart TD\n\
+               Intake --> Router\n\
+               Router --> Retry1\n\
+               Router --> Step1\n\
+               subgraph Fallback\n\
+               direction LR\n\
+               Retry1 --> Retry2\n\
+               end\n\
+               subgraph Pipeline\n\
+               direction LR\n\
+               Step1 --> Step2 --> Step3\n\
+               end\n\
+               Step3 --> Archive\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    assert!(
+        !has_negative_coordinate(&svg),
+        "content rendered outside the canvas (negative coordinate found)"
+    );
+}
+
+#[test]
+fn back_edge_label_stays_within_canvas_on_the_right() {
+    // #368: a routed back-edge (e.g. `Retry? --> Start`) curves around to the
+    // right of every node in the sugiyama layout; its label must expand the
+    // canvas width, not just node right edges, or the label's opaque
+    // background/text clip at the canvas's right edge.
+    let src = "flowchart TD\n\
+               Start{Start} -->|yes| A{Continue?}\n\
+               Start -->|no| Stop[Stop]\n\
+               A -->|yes| B{Retry?}\n\
+               A -->|no| End1[Done]\n\
+               B -->|yes| Start\n\
+               B -->|no| End2[Abort]\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    let (width, height) = viewbox_size(&svg);
+    assert!(
+        all_label_rects_within_bounds(&svg, width, height),
+        "an edge label rendered outside the canvas"
+    );
+}
+
 #[test]
 fn edge_attr_curve_step_is_honored() {
     // `curve: step` renders the multi-rank skip edge as orthogonal right-angle
