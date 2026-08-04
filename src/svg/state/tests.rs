@@ -163,6 +163,9 @@ fn parallel_regions_stacked_with_divider() {
 fn opposite_transitions_render_distinctly() {
     // Regression for #241: `Idle --> Running` and `Running --> Idle` used to
     // collapse onto one segment, hiding the second label under the first.
+    // Now caught by the general pairwise label overlap-avoidance pass
+    // (`src/svg/label_layout.rs`), which nudges any two colliding labels
+    // apart — not just a hand-coded opposite-pair special case.
     let d = build("stateDiagram-v2\nIdle --> Running : start\nRunning --> Idle : stop\n");
     let svg = render(&d, &Theme::default());
     // Two arrowheads, one per direction.
@@ -201,8 +204,10 @@ fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
 #[test]
 fn opposite_pair_label_backgrounds_do_not_overlap() {
     // Regression for #312: the opaque background of one opposite-pair label
-    // occluded the other ("sta… stop"). Each label is staggered along its
-    // own arc, so the two background rects must be disjoint.
+    // occluded the other ("sta… stop"). The general pairwise overlap pass
+    // (`label_layout::layout_edge_labels`) detects the collision and nudges
+    // each label along its own arc, so the two background rects must be
+    // disjoint — this is no longer a state-specific special case.
     let d = build("stateDiagram-v2\nIdle --> Running : start\nRunning --> Idle : stop\n");
     let svg = render(&d, &Theme::default());
     let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "start");

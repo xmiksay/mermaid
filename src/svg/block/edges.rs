@@ -94,19 +94,22 @@ pub(super) fn arrow_path(a: BlockArrow, x: f64, y: f64, w: f64, h: f64) -> Strin
     d
 }
 
+/// Draws the edge's line/markers and returns its clipped 2-point segment
+/// (empty for an invisible link), so the caller can collect a label slot and
+/// resolve every label's position in one pass after the edges loop.
 pub(super) fn draw_edge(
     e: &BlockEdge,
     nodes: &BTreeMap<String, Geom>,
     svg: &mut SvgBuilder,
     theme: &Theme,
-) {
+) -> Vec<(f64, f64)> {
     // An invisible link only shapes layout — draw nothing.
     if e.style == BlockLinkStyle::Invisible {
-        return;
+        return Vec::new();
     }
     let stroke = &theme.flow_edge_stroke;
     let (Some(a), Some(b)) = (nodes.get(&e.from), nodes.get(&e.to)) else {
-        return;
+        return Vec::new();
     };
     // Clip both ends to the node boundaries so the arrowhead sits on the edge.
     let (ax, ay) = clip((b.cx, b.cy), a);
@@ -134,10 +137,7 @@ pub(super) fn draw_edge(
         by,
         &format!("stroke=\"{stroke}\" stroke-width=\"{width}\"{dash}{marker}"),
     );
-    if let Some(label) = &e.label {
-        let mid = ((ax + bx) / 2.0, (ay + by) / 2.0);
-        crate::svg::label::draw_edge_label(svg, mid, label, theme);
-    }
+    vec![(ax, ay), (bx, by)]
 }
 
 /// SVG `<marker>` id for an edge end, or `None` for a plain end (`---`).

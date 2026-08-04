@@ -29,10 +29,6 @@ const PSEUDO_R: f64 = 10.0; // start/end radius
 const CANVAS_PAD: f64 = 24.0;
 const CHOICE_W: f64 = 60.0;
 const CHOICE_H: f64 = 40.0;
-/// Arc-length by which an opposite-pair transition's label is nudged toward its
-/// own source, so the two labels of the pair clear each other's opaque
-/// background (#312).
-const LABEL_STAGGER: f64 = 15.0;
 
 pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     if d.states.is_empty() {
@@ -174,21 +170,13 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     // Cluster frames first (under nodes/edges) so labels stay legible.
     draw_composites(&mut svg, d, &boxes, &dividers, theme);
 
-    // Opposite-pair transitions (`A --> B` alongside `B --> A`) bow onto
-    // separate curves, but their labels still land at the shared midpoint y and
-    // one's opaque background occludes the other (#312). Detect the pairs so the
-    // label of each is nudged back along its own arc toward its source.
-    let reversed_pairs: HashSet<(&str, &str)> = d
-        .transitions
-        .iter()
-        .filter(|t| {
-            d.transitions
-                .iter()
-                .any(|o| o.from == t.to && o.to == t.from)
-        })
-        .map(|t| (t.from.as_str(), t.to.as_str()))
-        .collect();
-
+    // Transitions: draw every path first, collecting each labeled one's
+    // clipped polyline, then resolve all label positions in one pass so two
+    // unrelated transitions (including an opposite pair, `A --> B` alongside
+    // `B --> A`, whose curves bow apart but whose labels would otherwise
+    // still land at the same midpoint) don't occlude one another (#312).
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for tr in &d.transitions {
         let (Some(start), Some(end)) = (
             endpoint_clip(&tr.from, &id_to_u32, &d.states, &sizes, &pos, &boxes),
@@ -216,15 +204,21 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
             },
             _ => vec![start.center, end.center],
         };
-        // For an opposite pair, pull the label back toward this edge's own
-        // source; the two edges run in opposite directions, so their labels
-        // separate along the shared axis and stop overlapping.
-        let label_offset = if reversed_pairs.contains(&(tr.from.as_str(), tr.to.as_str())) {
-            -LABEL_STAGGER
-        } else {
-            0.0
-        };
-        draw_transition(&mut svg, &pts, tr, &start, &end, label_offset, theme);
+        let clipped = draw_transition(&mut svg, &pts, &start, &end, theme);
+        if let Some(label) = &tr.label {
+            if !clipped.is_empty() {
+                let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+                label_slots.push(super::label_layout::LabelSlot {
+                    polyline: clipped,
+                    size: (w, 18.0),
+                });
+                labels.push(label);
+            }
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        crate::svg::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     for (i, state) in d.states.iter().enumerate() {

@@ -82,6 +82,25 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
     (`msg.from`, the participant activated when it earlier received a message).
     Deactivating the *sender* (not the receiver) is what closes John's band in
     the canonical `Alice->>+John` / `John-->>-Alice` example.
+- Sequence message labels draw with **no background rect by default**
+  (upstream Mermaid.js has none either) — `draw_message`'s cross-lifeline
+  branch (`src/svg/sequence/messages.rs`) only draws one when the opt-in
+  `config.sequence.messageLabelBackground` knob (bool, default `false`) is
+  set on `SequenceDiagram.message_label_background`, wired the same way as
+  every other per-diagram config gap (a `meta.config` lookup in
+  `parse_with_meta`). When set, the rect uses the shared `edge_label_bg`
+  helper (`theme.flow_label_bg`) and the text re-baselines to sit centered in
+  it, matching `draw_edge_label`'s convention; when unset the output is
+  byte-identical to before the flag existed. This is a deliberate deviation
+  from upstream fidelity, gated off by default so it never surprises a
+  faithful render. Independent of the flag, every message's label position is
+  resolved through the shared `label_layout::layout_edge_labels` pass (see
+  [the general edge-label overlap avoidance section](../architecture.md) for
+  the mechanism) — a no-op for Sequence today since `MSG_STEP` already keeps
+  message rows on distinct y-coordinates, but wired for consistency with the
+  other renderers. The self-message (loop-back) branch is untouched: its
+  label sits beside the loop box, not on a lifeline edge, so it keeps its own
+  fixed offset regardless of the flag.
 - Sequence `title` accepts both the space form (`title Demo`) and the legacy
   colon form (`title: Demo`, upstream lexer `"title:"\s…`); both set
   `SequenceDiagram.title`.

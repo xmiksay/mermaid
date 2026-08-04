@@ -129,6 +129,78 @@ fn render_single_relation(kind: ReqRelationKind) -> String {
     render(&d, &Theme::default())
 }
 
+/// Bounds `(x0, y0, x1, y1)` of the light-gray relation label background rect
+/// drawn directly before the given label text.
+fn label_bg_box(svg: &str, label: &str) -> (f64, f64, f64, f64) {
+    let text = svg.find(&format!(">{label}<")).unwrap();
+    let rect_open = svg[..text].rfind("<rect ").unwrap();
+    let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+    let tag = &svg[rect_open..rect_end];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    let (x, y, w, h) = (
+        grab("x=\""),
+        grab("y=\""),
+        grab("width=\""),
+        grab("height=\""),
+    );
+    (x, y, x + w, y + h)
+}
+
+#[test]
+fn non_opposite_pair_labels_do_not_overlap() {
+    // Two unrelated relations sharing the same endpoints (a -satisfies-> b
+    // and a -verifies-> b — not a reversed pair) route along the *same*
+    // clipped polyline, so their natural midpoints are identical; without the
+    // general overlap-avoidance pass their light-gray label backgrounds would
+    // occlude one another.
+    let d = RequirementDiagram {
+        requirements: vec![
+            Requirement {
+                kind: RequirementKind::Requirement,
+                name: "a".into(),
+                id: None,
+                text: None,
+                risk: None,
+                verifymethod: None,
+            },
+            Requirement {
+                kind: RequirementKind::Requirement,
+                name: "b".into(),
+                id: None,
+                text: None,
+                risk: None,
+                verifymethod: None,
+            },
+        ],
+        elements: vec![],
+        relations: vec![
+            ReqRelation {
+                from: "a".into(),
+                to: "b".into(),
+                kind: ReqRelationKind::Satisfies,
+            },
+            ReqRelation {
+                from: "a".into(),
+                to: "b".into(),
+                kind: ReqRelationKind::Verifies,
+            },
+        ],
+        ..Default::default()
+    };
+    let svg = render(&d, &Theme::default());
+    let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "&lt;&lt;satisfies&gt;&gt;");
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "&lt;&lt;verifies&gt;&gt;");
+    let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+    assert!(
+        !overlap,
+        "label backgrounds overlap: satisfies ({ax0},{ay0},{ax1},{ay1}) vs verifies ({bx0},{by0},{bx1},{by1})",
+    );
+}
+
 #[test]
 fn relation_stroke_style_table_matches_upstream() {
     use ReqRelationKind::*;

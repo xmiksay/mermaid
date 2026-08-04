@@ -8,6 +8,7 @@ use crate::parse::{C4RelStyle, C4Relation};
 use super::super::builder::{fnum, SvgBuilder};
 use super::super::geometry::{clip_rect, polyline_midpoint};
 use super::super::label::edge_label_bg;
+use super::super::label_layout::rect_overlap_area;
 use super::super::metrics::text_width;
 use super::super::theme::Theme;
 use super::C4_LINE;
@@ -173,17 +174,6 @@ fn label_overlap(
         .sum()
 }
 
-/// Overlap area of two `(x, y, w, h)` rects, 0 if they don't intersect.
-fn rect_overlap_area(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> f64 {
-    let x_overlap = (a.0 + a.2).min(b.0 + b.2) - a.0.max(b.0);
-    let y_overlap = (a.1 + a.3).min(b.1 + b.3) - a.1.max(b.1);
-    if x_overlap > 0.0 && y_overlap > 0.0 {
-        x_overlap * y_overlap
-    } else {
-        0.0
-    }
-}
-
 fn truncate(s: &str, n: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= n {
@@ -227,21 +217,5 @@ mod tests {
         let obstacle = (-100.0, -10.0, 300.0, 20.0);
         let (mx, my) = find_clear_label_point((0.0, 0.0), (100.0, 0.0), 20.0, None, &[obstacle]);
         assert!(mx.is_finite() && my.is_finite());
-    }
-
-    #[test]
-    fn rect_overlap_area_zero_for_disjoint_rects() {
-        assert_eq!(
-            rect_overlap_area((0.0, 0.0, 10.0, 10.0), (20.0, 20.0, 10.0, 10.0)),
-            0.0
-        );
-    }
-
-    #[test]
-    fn rect_overlap_area_positive_for_overlapping_rects() {
-        assert_eq!(
-            rect_overlap_area((0.0, 0.0, 10.0, 10.0), (5.0, 5.0, 10.0, 10.0)),
-            25.0
-        );
     }
 }

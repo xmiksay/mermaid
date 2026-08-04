@@ -6,6 +6,17 @@ use crate::parse::{ArrowKind, NotePosition};
 
 use super::*;
 
+/// Draws a message arrow (self-loop or cross-lifeline) and its label.
+///
+/// `label_pos` is the shared overlap-avoidance pass's resolved position for
+/// this message's label — only consulted by the cross-lifeline branch (a
+/// self-message's label sits beside its loop-back box, not on a lifeline
+/// edge, so it keeps its own fixed offset regardless of `label_pos`).
+/// `message_label_background` gates an opaque background rect behind a
+/// cross-lifeline label (`config.sequence.messageLabelBackground`, off by
+/// default — upstream Mermaid.js has no such box); when `false`, output is
+/// byte-identical to before this option existed.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_message(
     svg: &mut SvgBuilder,
     x1: f64,
@@ -14,6 +25,8 @@ pub(super) fn draw_message(
     arrow: ArrowKind,
     text: &str,
     theme: &Theme,
+    message_label_background: bool,
+    label_pos: (f64, f64),
 ) {
     let fg = theme.signal_text();
     let arrow_stroke = &theme.arrow_stroke;
@@ -67,13 +80,27 @@ pub(super) fn draw_message(
         &format!("stroke=\"{arrow_stroke}\" stroke-width=\"1.5\"{dash_attr}{markers}"),
     );
     if !text.is_empty() {
-        let mid = (x1 + x2) / 2.0;
-        svg.text(
-            mid,
-            y - TEXT_OFFSET,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
-            text,
-        );
+        let (mx, my) = label_pos;
+        if message_label_background {
+            let w = super::super::metrics::text_width(text, 7.0, 12.0) + 8.0;
+            super::super::label::edge_label_bg(svg, mx, my, w, 18.0, theme);
+            svg.text(
+                mx,
+                my + 4.0,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+                text,
+            );
+        } else {
+            // Byte-identical to before this option existed: `label_pos` is a
+            // strict no-op here (message rows are already spaced apart by
+            // `MSG_STEP`), so `my` always equals `y`.
+            svg.text(
+                mx,
+                my - TEXT_OFFSET,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"12\""),
+                text,
+            );
+        }
     }
 }
 
@@ -292,6 +319,59 @@ mod tests {
             crate::parse::Diagram::Sequence(d) => d,
             _ => panic!("not sequence"),
         }
+    }
+
+    #[test]
+    fn message_label_has_background_rect() {
+        let theme = Theme::default();
+        // Default (flag unset, `false`): byte-identical to before this option
+        // existed — no background rect behind the message label.
+        let plain = build("sequenceDiagram\nA->>B: hi\n");
+        assert!(!plain.message_label_background);
+        let svg_plain = render(&plain, &theme);
+        assert!(!svg_plain.contains(&format!("fill=\"{}\" stroke=\"none\"", theme.flow_label_bg)));
+        assert!(svg_plain.contains(">hi<"));
+
+        // Flag on: an opaque background rect is drawn before the label.
+        let mut on = build("sequenceDiagram\nA->>B: hi\n");
+        on.message_label_background = true;
+        let svg_on = render(&on, &theme);
+        let rect = svg_on.find(&format!("fill=\"{}\" stroke=\"none\"", theme.flow_label_bg));
+        let text = svg_on.find(">hi<");
+        assert!(rect.is_some(), "expected a background rect");
+        assert!(rect < text, "background must come before the label text");
+    }
+
+    #[test]
+    fn message_labels_do_not_overlap() {
+        // Documents the invariant the shared overlap pass wires up for
+        // Sequence: `MSG_STEP` already keeps message rows distinct, so two
+        // labeled messages' rects must never collide, flag on or off.
+        let mut d = build("sequenceDiagram\nA->>B: first message\nB->>A: second message\n");
+        for background in [false, true] {
+            d.message_label_background = background;
+            let svg = render(&d, &Theme::default());
+            let first = label_text_pos(&svg, "first message");
+            let second = label_text_pos(&svg, "second message");
+            assert!(
+                (first.1 - second.1).abs() > 1.0,
+                "message labels share a row: {first:?} vs {second:?} (background={background})",
+            );
+        }
+    }
+
+    /// `(x, y)` of the `text-anchor=middle` label text for `id`.
+    fn label_text_pos(svg: &str, id: &str) -> (f64, f64) {
+        let needle = format!(">{id}</text>");
+        let end = svg.find(&needle).unwrap_or_else(|| panic!("no label {id}"));
+        let open = svg[..end].rfind("<text ").unwrap();
+        let tag = &svg[open..end];
+        let grab = |attr: &str| {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse::<f64>().unwrap()
+        };
+        (grab("x=\""), grab("y=\""))
     }
 
     #[test]

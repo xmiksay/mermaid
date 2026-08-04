@@ -82,6 +82,11 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
+    // Draw every relation's path first, collecting each labeled one's clipped
+    // polyline, then resolve all label positions in one pass so two unrelated
+    // relations whose labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.left), id_to_u32.get(&rel.right)) else {
             continue;
@@ -93,7 +98,19 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
+        let clipped = draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
+        if !rel.label.is_empty() && !clipped.is_empty() {
+            let w = super::metrics::text_width(&rel.label, 7.0, theme.font_size) + 8.0;
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: clipped,
+                size: (w, 18.0),
+            });
+            labels.push(&rel.label);
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        super::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     for (i, e) in d.entities.iter().enumerate() {

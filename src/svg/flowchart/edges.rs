@@ -9,7 +9,7 @@ use crate::parse::{
 use crate::sugiyama::NodeId;
 
 use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, SvgBuilder};
-use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint};
+use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus};
 use crate::svg::style::ResolvedStyle;
 use crate::svg::theme::Theme;
 
@@ -113,6 +113,11 @@ pub(super) fn apply_local_directions(
 
 // ---- edge drawing ----------------------------------------------------------
 
+/// Draws the edge's path and returns its clipped polyline (empty for an
+/// invisible link), so the caller can collect a [`LabelSlot`] for any labeled
+/// edge and resolve every label's position in one pass after the edges loop.
+///
+/// [`LabelSlot`]: crate::svg::label_layout::LabelSlot
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_edge(
     svg: &mut SvgBuilder,
@@ -123,10 +128,10 @@ pub(super) fn draw_edge(
     start: &EndClip,
     end: &EndClip,
     theme: &Theme,
-) {
+) -> Vec<(f64, f64)> {
     // Invisible links (`~~~`) only shape the layout; they draw nothing.
     if edge.line == EdgeLine::Invisible {
-        return;
+        return Vec::new();
     }
     let n = pts.len();
     let first = clip_end(pts[1], start);
@@ -188,10 +193,7 @@ pub(super) fn draw_edge(
         svg.path(&d, &attrs);
     }
 
-    if let Some(label) = &edge.label {
-        let mid = polyline_midpoint(&clipped);
-        crate::svg::label::draw_edge_label(svg, mid, label, theme);
-    }
+    clipped
 }
 
 /// Upstream Mermaid renders every edge through `curveBasis`, so even a

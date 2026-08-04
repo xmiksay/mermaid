@@ -1,26 +1,27 @@
 //! Transition rendering: the curved connector between two states, its label,
 //! and clipping each end to the boundary of the shape it touches.
 
-use crate::parse::{StateKind, StateTransition};
+use crate::parse::StateKind;
 use crate::svg::builder::{curve_basis_path, SvgBuilder};
-use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus, polyline_midpoint_offset};
+use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus};
 use crate::svg::theme::Theme;
 
 use super::{StateEndClip, CHOICE_H, CHOICE_W, PSEUDO_R};
 
+/// Draws the transition's path and returns its clipped polyline, so the
+/// caller can collect a label slot (if any) and resolve every transition
+/// label's position in one pass after the loop.
 pub(super) fn draw_transition(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
-    tr: &StateTransition,
     start: &StateEndClip,
     end: &StateEndClip,
-    label_offset: f64,
     theme: &Theme,
-) {
+) -> Vec<(f64, f64)> {
     let flow_edge_stroke = &theme.flow_edge_stroke;
     let n = pts.len();
     if n < 2 {
-        return;
+        return Vec::new();
     }
 
     let first = clip_end(pts[1], start);
@@ -41,10 +42,7 @@ pub(super) fn draw_transition(
              marker-end=\"url(#state-arrow)\""
         ),
     );
-    if let Some(label) = &tr.label {
-        let mid = polyline_midpoint_offset(&clipped, label_offset);
-        crate::svg::label::draw_edge_label(svg, mid, label, theme);
-    }
+    clipped
 }
 
 fn clip_end(from: (f64, f64), clip: &StateEndClip) -> (f64, f64) {

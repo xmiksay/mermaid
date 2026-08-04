@@ -200,8 +200,10 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   `font_size`, `use_max_width` (top-level *or* the per-diagram
   `<diagram>.useMaxWidth` key — upstream's schema only defines it per diagram,
   via `per_diagram_use_max_width`), `look`/`layout`/`security_level` (parsed, not
-  yet honored), `ticket_base_url`, `value_format`, `git_graph.*`. Closing a
-  per-diagram config gap is a `meta.config` lookup, not new scanning.
+  yet honored), `ticket_base_url`, `value_format`, `git_graph.*`,
+  `sequence_message_label_background` (`config.sequence.messageLabelBackground`
+  — see [sequence.md](architecture/sequence.md)). Closing a per-diagram config
+  gap is a `meta.config` lookup, not new scanning.
 - **Rendering is `parse_with_meta` → `render_body` (per-diagram match) →
   `decorate::apply`.** `theme_from_meta` builds the effective theme: a preamble
   `theme` overrides the caller's, then `themeVariables`/`fontFamily`/`fontSize`/
@@ -266,11 +268,37 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   and the labels no longer overlap. All graph-shaped kinds benefit for free.
   The `BOW` only parts the curves sideways, though; the two labels still land at
   the shared midpoint *along* the axis, so with #260's opaque backgrounds one
-  still occludes the other (#312). The state renderer therefore detects the pair
-  (a matching `(to, from)` transition) and, via `polyline_midpoint_offset`,
-  nudges each label `LABEL_STAGGER` arc-length back toward its own source — the
-  two edges run opposite ways, so their labels separate along the shared axis
-  and the backgrounds clear.
+  still occludes the other (#312) — the general pairwise label-overlap pass
+  below (`label_layout::layout_edge_labels`) is what actually separates them.
+- **General edge-label overlap avoidance** (`src/svg/label_layout.rs`,
+  `pub(super)`, shared by every graph-shaped renderer — Flowchart, State,
+  Class, ER, Block, Requirement, Architecture — plus Sequence): each renderer
+  draws its edges in a two-pass shape — draw every path first, collecting a
+  `LabelSlot { polyline, size }` per labeled edge in the same order they were
+  routed, then call `layout_edge_labels(&slots)` once for the whole diagram and
+  draw every label at its resolved position. The algorithm starts each label at
+  its polyline's arc-length midpoint (`geometry::polyline_midpoint`) and, for up
+  to 4 passes, scans every pair `(i, j)` in that same order: if their current
+  label rects overlap (`rect_overlap_area`, the same `(x, y, w, h)` overlap test
+  C4's `find_clear_label_point` uses), it nudges `j`'s label back toward its own
+  source by one `LABEL_STAGGER_STEP` (`polyline_midpoint_offset`), clamped to
+  `min(4 steps, 40% of that edge's arc length)` so a short edge gives up
+  gracefully instead of sliding a label off its end; if `j` has no room left it
+  tries nudging `i` forward under the same clamp; if neither can move, both are
+  left as-is and the scan continues (one stuck pair never blocks another). This
+  generalizes the state renderer's original opposite-pair-only stagger (#312) —
+  which it has since replaced entirely — to any two colliding labels, including
+  unrelated edges that merely happen to land near each other; it is a heuristic,
+  not a globally optimal placement for a 3-or-more-way cluster, and is a strict
+  no-op (every label at its natural midpoint) when nothing collides. Requirement
+  keeps its own custom label background (a light-gray patch, not the shared
+  `edge_label_bg`) and only takes the resolved *position* from the shared pass;
+  Architecture has no visible label background at all (upstream has none there
+  either) but still builds a `LabelSlot` with an *estimated* rect purely for the
+  collision math. `layout_edge_labels`'s output only ever feeds a label's draw
+  position — never a renderer's canvas bounding-box computation. C4's own
+  `rect_overlap_area` was deduplicated into this module; C4's heavier
+  `find_clear_label_point` node-avoidance search is unrelated and untouched.
 - Label line breaks: `split_label_lines()` in `src/svg/builder/text.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked

@@ -56,6 +56,18 @@ pub(super) fn polyline_midpoint(pts: &[(f64, f64)]) -> (f64, f64) {
     polyline_midpoint_offset(pts, 0.0)
 }
 
+/// Total arc-length of a polyline — used by [`super::label_layout`] to bound
+/// how far a colliding label may be nudged along its own edge.
+pub(super) fn polyline_length(pts: &[(f64, f64)]) -> f64 {
+    pts.windows(2)
+        .map(|w| {
+            let dx = w[1].0 - w[0].0;
+            let dy = w[1].1 - w[0].1;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}
+
 /// Like [`polyline_midpoint`], but shifts the returned point `offset` units of
 /// arc-length along the polyline away from its midpoint — negative pulls toward
 /// the start, positive toward the end (clamped to the polyline). Used to pull

@@ -47,6 +47,43 @@ fn classdef_style_and_edge_label() {
     assert!(!svg.contains(">hot<"));
 }
 
+/// Bounds `(x0, y0, x1, y1)` of the opaque background rect drawn directly
+/// before the `text-anchor=middle` label for `id`.
+fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
+    let text = svg.find(&format!(">{id}</text>")).unwrap();
+    let rect_open = svg[..text].rfind("<rect ").unwrap();
+    let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+    let tag = &svg[rect_open..rect_end];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    let (x, y, w, h) = (
+        grab("x=\""),
+        grab("y=\""),
+        grab("width=\""),
+        grab("height=\""),
+    );
+    (x, y, x + w, y + h)
+}
+
+#[test]
+fn non_opposite_pair_labels_do_not_overlap() {
+    // Two unrelated edges (a->d, b->c — not a reversed pair) whose natural
+    // midpoints land close together; without the general overlap-avoidance
+    // pass their opaque label backgrounds would occlude one another.
+    let src = "block-beta\ncolumns 5\na space space b\nspace c d space\na -- \"path one\" --> d\nb -- \"path two\" --> c\n";
+    let svg = render_from(src);
+    let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "path one");
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "path two");
+    let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+    assert!(
+        !overlap,
+        "label backgrounds overlap: path one ({ax0},{ay0},{ax1},{ay1}) vs path two ({bx0},{by0},{bx1},{by1})",
+    );
+}
+
 #[test]
 fn block_arrow_renders_path() {
     let svg = render_from("block-beta\n  a<[\"go\"]>(right)\n");

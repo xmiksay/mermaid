@@ -143,7 +143,11 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     // Subgraph frames (drawn first so they sit under nodes/edges).
     draw_subgraphs(&mut svg, d, &boxes, theme);
 
-    // Edges.
+    // Edges: draw every path first, collecting each labeled edge's clipped
+    // polyline, then resolve all label positions in one pass so two unrelated
+    // edges whose labels would collide land apart instead of overlapping.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for (ei, fedge) in d.edges.iter().enumerate() {
         let edge_style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
         // Curve precedence: per-edge `@{ curve }`, then `linkStyle N interpolate`,
@@ -171,7 +175,7 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             },
             _ => vec![start.center, end.center],
         };
-        draw_edge(
+        let clipped = draw_edge(
             &mut svg,
             &pts,
             fedge,
@@ -181,6 +185,20 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
             &end,
             theme,
         );
+        if let Some(label) = &fedge.label {
+            if !clipped.is_empty() {
+                let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+                label_slots.push(super::label_layout::LabelSlot {
+                    polyline: clipped,
+                    size: (w, 18.0),
+                });
+                labels.push(label);
+            }
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        crate::svg::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     // Nodes.

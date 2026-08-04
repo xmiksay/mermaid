@@ -11,7 +11,6 @@ use crate::parse::ArchitectureDiagram;
 use crate::sugiyama::NodeId;
 
 use super::builder::SvgBuilder;
-use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 mod draw;
@@ -234,6 +233,13 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         );
     }
 
+    // Draw every edge's path first, collecting each labeled one's clipped
+    // polyline plus an *estimated* virtual rect (no background is drawn here —
+    // upstream's architecture diagrams have none — the rect exists purely for
+    // the shared collision math), then resolve all label positions in one
+    // pass so two unrelated edges whose labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut edge_titles: Vec<&str> = Vec::new();
     for e in &d.edges {
         // An endpoint may be a service/junction (`centers`) or a group box.
         let resolve = |id: &String| centers.get(id).or_else(|| group_boxes.get(id));
@@ -274,14 +280,22 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         );
 
         if let Some(title) = &e.label {
-            let (mx, my) = polyline_midpoint(&pts);
-            svg.text(
-                mx,
-                my - 3.0,
-                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
-                title,
-            );
+            let w = super::metrics::text_width(title, 7.0, theme.font_size) + 8.0;
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: pts,
+                size: (w, 14.0),
+            });
+            edge_titles.push(title);
         }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for ((mx, my), title) in label_positions.into_iter().zip(edge_titles) {
+        svg.text(
+            mx,
+            my - 3.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+            title,
+        );
     }
 
     for p in &placed_services {

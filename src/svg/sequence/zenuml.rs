@@ -148,7 +148,18 @@ pub(super) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
                         Some(n) => num(n),
                         None => msg.text.clone(),
                     };
-                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &label, theme);
+                    let label_pos = ((x1 + x2) / 2.0, ev.y);
+                    draw_message(
+                        &mut svg,
+                        x1,
+                        x2,
+                        ev.y,
+                        msg.arrow,
+                        &label,
+                        theme,
+                        d.message_label_background,
+                        label_pos,
+                    );
                 }
             }
             EventKind::Note(note) => draw_note(&mut svg, note, ev.y, &x_of, theme),

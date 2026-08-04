@@ -6,7 +6,7 @@ use crate::parse::{Cardinality, ErRelation};
 use crate::sugiyama::NodeId;
 
 use crate::svg::builder::{curve_basis_path, SvgBuilder};
-use crate::svg::geometry::{clip_rect, polyline_midpoint};
+use crate::svg::geometry::clip_rect;
 use crate::svg::theme::Theme;
 
 pub(super) const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
@@ -22,6 +22,10 @@ const CARD_CIRCLE_R: f64 = 5.0; // radius of the optional-"zero" circle
                                 // instead of merging into the foot as a "Ø" blob.
 const ZERO_MORE_CIRCLE_D: f64 = FOOT_DEPTH + CARD_CIRCLE_R; // 23.0
 
+/// Draws the relation's path and cardinality glyphs, returning its clipped
+/// polyline (empty if the router underflowed) so the caller can collect a
+/// label slot and resolve every relation label's position in one pass after
+/// the loop.
 pub(super) fn draw_relation(
     svg: &mut SvgBuilder,
     pts: &[(f64, f64)],
@@ -29,7 +33,7 @@ pub(super) fn draw_relation(
     sizes: &[(f64, f64)],
     id_to_u32: &HashMap<String, NodeId>,
     theme: &Theme,
-) {
+) -> Vec<(f64, f64)> {
     let flow_edge_stroke = &theme.flow_edge_stroke;
     let src = id_to_u32[&rel.left] as usize;
     let dst = id_to_u32[&rel.right] as usize;
@@ -38,7 +42,7 @@ pub(super) fn draw_relation(
     // invariant so a future regression clips nothing instead of panicking on
     // `pts[1]` / `pts[n - 2]` (the latter underflows `usize`).
     if n < 2 {
-        return;
+        return Vec::new();
     }
     let first = clip_rect(pts[1], pts[0], sizes[src]);
     let last = clip_rect(pts[n - 2], pts[n - 1], sizes[dst]);
@@ -67,10 +71,7 @@ pub(super) fn draw_relation(
     draw_cardinality(svg, clipped[0], clipped[1], rel.left_card, theme);
     draw_cardinality(svg, clipped[n - 1], clipped[n - 2], rel.right_card, theme);
 
-    if !rel.label.is_empty() {
-        let mid = polyline_midpoint(&clipped);
-        crate::svg::label::draw_edge_label(svg, mid, &rel.label, theme);
-    }
+    clipped
 }
 
 /// Draw a Crow's Foot glyph at `anchor`, oriented by the direction toward `away`.

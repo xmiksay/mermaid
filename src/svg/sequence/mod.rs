@@ -212,14 +212,52 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         }
     }
 
+    // Message labels: collect a straight 2-point slot for every cross-lifeline
+    // labeled message (a self-message's label sits beside its loop-back box,
+    // not on a lifeline edge, so it is excluded here), then resolve every
+    // label's position in one pass. `MSG_STEP` already keeps message rows
+    // distinct, so this is a no-op today — wired for consistency with the
+    // other renderers and as a safety net against future layout changes.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut slot_of: HashMap<usize, usize> = HashMap::new();
+    for (i, ev) in events.iter().enumerate() {
+        if let EventKind::Message { msg, .. } = &ev.kind {
+            if let (Some(&x1), Some(&x2)) = (x_of.get(&msg.from), x_of.get(&msg.to)) {
+                if (x1 - x2).abs() >= 1e-6 && !msg.text.is_empty() {
+                    let w = crate::svg::metrics::text_width(&msg.text, 7.0, 12.0) + 8.0;
+                    slot_of.insert(i, label_slots.len());
+                    label_slots.push(super::label_layout::LabelSlot {
+                        polyline: vec![(x1, ev.y), (x2, ev.y)],
+                        size: (w, 18.0),
+                    });
+                }
+            }
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+
     // Events
-    for ev in &events {
+    for (i, ev) in events.iter().enumerate() {
         match &ev.kind {
             EventKind::Message { msg, number } => {
                 let x1 = x_of.get(&msg.from);
                 let x2 = x_of.get(&msg.to);
                 if let (Some(&x1), Some(&x2)) = (x1, x2) {
-                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &msg.text, theme);
+                    let label_pos = slot_of
+                        .get(&i)
+                        .map(|&si| label_positions[si])
+                        .unwrap_or(((x1 + x2) / 2.0, ev.y));
+                    draw_message(
+                        &mut svg,
+                        x1,
+                        x2,
+                        ev.y,
+                        msg.arrow,
+                        &msg.text,
+                        theme,
+                        d.message_label_background,
+                        label_pos,
+                    );
                     if let Some(n) = number {
                         // Autonumber draws a filled circle badge on the arrow
                         // origin (upstream) rather than a `"1. "` text prefix.

@@ -26,6 +26,9 @@ pub(super) fn derive_typed_fields(meta: &mut DiagramMeta) {
     meta.timeline_disable_multicolor = get("timeline.disableMulticolor")
         .as_deref()
         .and_then(parse_flag);
+    meta.sequence_message_label_background = get("sequence.messageLabelBackground")
+        .as_deref()
+        .and_then(parse_flag);
     meta.sankey_show_values = get("sankey.showValues").as_deref().and_then(parse_flag);
     meta.sankey_prefix = get("sankey.prefix");
     meta.sankey_suffix = get("sankey.suffix");

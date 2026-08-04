@@ -7,9 +7,12 @@ use crate::parse::{ClassRelation, ClassRelationKind};
 use crate::sugiyama::NodeId;
 
 use super::super::builder::{curve_basis_path, SvgBuilder};
-use super::super::geometry::{clip_rect, polyline_midpoint};
+use super::super::geometry::clip_rect;
 use super::super::theme::Theme;
 
+/// Draws the relation's path/markers/cardinality glyphs, returning its
+/// clipped polyline so the caller can collect a label slot (if any) and
+/// resolve every relation label's position in one pass after the loop.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_relation(
     svg: &mut SvgBuilder,
@@ -18,7 +21,7 @@ pub(super) fn draw_relation(
     sizes: &[(f64, f64)],
     id_to_u32: &HashMap<String, NodeId>,
     theme: &Theme,
-) {
+) -> Vec<(f64, f64)> {
     let flow_edge_stroke = &theme.flow_edge_stroke;
     let src = id_to_u32[&rel.from] as usize;
     let dst = id_to_u32[&rel.to] as usize;
@@ -76,10 +79,7 @@ pub(super) fn draw_relation(
         draw_card(svg, clipped[n - 1], clipped[n - 2], card, theme);
     }
 
-    if let Some(label) = &rel.label {
-        let mid = polyline_midpoint(&clipped);
-        crate::svg::label::draw_edge_label(svg, mid, label, theme);
-    }
+    clipped
 }
 
 /// Draw a small multiplicity label near an edge endpoint. `end` is the point on
@@ -180,6 +180,44 @@ mod tests {
             Diagram::Class(c) => c,
             _ => panic!("not class"),
         }
+    }
+
+    /// Bounds `(x0, y0, x1, y1)` of the opaque background rect drawn directly
+    /// before the `text-anchor=middle` label for `id`.
+    fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
+        let text = svg.find(&format!(">{id}</text>")).unwrap();
+        let rect_open = svg[..text].rfind("<rect ").unwrap();
+        let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+        let tag = &svg[rect_open..rect_end];
+        let grab = |attr: &str| {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse::<f64>().unwrap()
+        };
+        let (x, y, w, h) = (
+            grab("x=\""),
+            grab("y=\""),
+            grab("width=\""),
+            grab("height=\""),
+        );
+        (x, y, x + w, y + h)
+    }
+
+    #[test]
+    fn non_opposite_pair_labels_do_not_overlap() {
+        // Two unrelated relations (A->X, B->X — not a reversed pair) whose
+        // natural midpoints land at the same row; without the general
+        // overlap-avoidance pass their opaque label backgrounds would occlude
+        // one another.
+        let d = build("classDiagram\nA --> X : alpha label here\nB --> X : beta label here\n");
+        let svg = render(&d, &Theme::default());
+        let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "alpha label here");
+        let (bx0, by0, bx1, by1) = label_bg_box(&svg, "beta label here");
+        let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+        assert!(
+            !overlap,
+            "label backgrounds overlap: alpha ({ax0},{ay0},{ax1},{ay1}) vs beta ({bx0},{by0},{bx1},{by1})",
+        );
     }
 
     #[test]

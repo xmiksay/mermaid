@@ -94,6 +94,23 @@ fn flowchart_config_curve_reaches_diagram() {
 }
 
 #[test]
+fn sequence_message_label_background_config_reaches_diagram() {
+    let src = "%%{init: {\"sequence\": {\"messageLabelBackground\": true}}}%%\nsequenceDiagram\nA->>B: hi\n";
+    let (d, _) = parse_with_meta(src).unwrap();
+    let Diagram::Sequence(s) = d else {
+        panic!("expected sequence diagram")
+    };
+    assert!(s.message_label_background);
+
+    // Unset: stays the byte-identical default.
+    let (d, _) = parse_with_meta("sequenceDiagram\nA->>B: hi\n").unwrap();
+    let Diagram::Sequence(s) = d else {
+        panic!("expected sequence diagram")
+    };
+    assert!(!s.message_label_background);
+}
+
+#[test]
 fn pie_config_reaches_diagram() {
     let src = "%%{init: {\"pie\": {\"textPosition\": 0.2, \"donutHole\": 0.5, \"legendPosition\": \"bottom\"}}}%%\npie\n\"A\": 1\n";
     let (d, _) = parse_with_meta(src).unwrap();

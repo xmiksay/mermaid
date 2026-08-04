@@ -143,11 +143,30 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     for l in &laid {
         draw(l, &mut svg, theme, &d.class_defs);
     }
-    // Draw edges last so they sit on top.
+    // Draw edges last so they sit on top: every path first, collecting each
+    // labeled edge's clipped 2-point segment, then resolve all label
+    // positions in one pass so two unrelated edges whose labels would
+    // collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for l in &laid {
         if let BlockItem::Edge(e) = &l.item {
-            draw_edge(e, &nodes, &mut svg, theme);
+            let clipped = draw_edge(e, &nodes, &mut svg, theme);
+            if let Some(label) = &e.label {
+                if !clipped.is_empty() {
+                    let w = super::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+                    label_slots.push(super::label_layout::LabelSlot {
+                        polyline: clipped,
+                        size: (w, 18.0),
+                    });
+                    labels.push(label);
+                }
+            }
         }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        super::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     svg.finish()
