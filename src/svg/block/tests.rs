@@ -85,6 +85,64 @@ fn non_opposite_pair_labels_do_not_overlap() {
 }
 
 #[test]
+fn adjacent_cell_edge_labels_clear_neighboring_boxes_and_each_other() {
+    // block/07 sample repro: two labeled edges back-to-back in the same row
+    // (a--b, b--c) plus a labeled vertical edge (c-f) in a tightly packed
+    // grid — the default 8px cell gap leaves no room for a label between
+    // adjacent cells, so the grid gap must widen to fit the widest label.
+    let src = "block-beta\n  columns 3\n  a b c\n  d e f\n  a -- \"solid label\" --> b\n  b -. \"dotted label\" -.-> c\n  c == \"thick label\" ==> f\n";
+    let svg = render_from(src);
+    let a = label_bg_box(&svg, "solid label");
+    let b = label_bg_box(&svg, "dotted label");
+    let c = label_bg_box(&svg, "thick label");
+    let overlaps = |r1: (f64, f64, f64, f64), r2: (f64, f64, f64, f64)| {
+        r1.0 < r2.2 && r2.0 < r1.2 && r1.1 < r2.3 && r2.1 < r1.3
+    };
+    assert!(!overlaps(a, b), "solid/dotted labels overlap: {a:?} {b:?}");
+    assert!(!overlaps(a, c), "solid/thick labels overlap: {a:?} {c:?}");
+    assert!(!overlaps(b, c), "dotted/thick labels overlap: {b:?} {c:?}");
+}
+
+#[test]
+fn tail_only_reversed_arrow_has_no_ghost_blocks() {
+    // Bug #1 downstream check: a bare `<--` (two dashes, no head char) isn't
+    // valid upstream syntax and correctly falls through to block tokenizing,
+    // but the valid three-dash form `<---` must parse as a real edge with a
+    // tail marker and no head, not spawn ghost blocks for its own tokens.
+    let src = "block-beta\n  columns 3\n  a b c\n  d e f\n  g h i\n  d <--- e\n";
+    let svg = render_from(src);
+    // No ghost blocks for the connector tokens.
+    assert!(!svg.contains(">&lt;---<"));
+    assert!(!svg.contains(">---<"));
+    // marker-start (tail arrowhead), no marker-end (headless).
+    assert!(svg.contains("marker-start=\"url(#blockarrow)\""));
+    let d = crate::parse::parse(src).unwrap();
+    let crate::parse::Diagram::Block(d) = d else {
+        panic!("expected block");
+    };
+    let edges: Vec<_> = d
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            crate::parse::BlockItem::Edge(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].from, "d");
+    assert_eq!(edges[0].to, "e");
+    assert_eq!(edges[0].head, crate::parse::EdgeHead::None);
+    assert_eq!(edges[0].tail, crate::parse::EdgeHead::Arrow);
+    // Still a clean 3x3 grid — 9 leaf blocks, no extras from the edge line.
+    let blocks = d
+        .items
+        .iter()
+        .filter(|i| matches!(i, BlockItem::Block(_)))
+        .count();
+    assert_eq!(blocks, 9);
+}
+
+#[test]
 fn block_arrow_renders_path() {
     let svg = render_from("block-beta\n  a<[\"go\"]>(right)\n");
     assert!(svg.contains("<path"));
@@ -123,8 +181,17 @@ fn composite_children_keep_natural_size() {
         crate::parse::Diagram::Block(d) => d,
         _ => unreachable!(),
     };
-    let (cw, ch) = cell_dims(&d.items, Theme::default().font_size);
-    let (laid, _, _) = layout_items(&d.items, 3, PAD, PAD, cw, ch, Theme::default().font_size);
+    let (cw, ch) = cell_dims(&d.items, Theme::default().font_size, super::GAP);
+    let (laid, _, _) = layout_items(
+        &d.items,
+        3,
+        PAD,
+        PAD,
+        cw,
+        ch,
+        Theme::default().font_size,
+        super::GAP,
+    );
     let group = laid
         .iter()
         .find(|l| matches!(l.item, BlockItem::Group(_)))

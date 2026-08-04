@@ -7,32 +7,36 @@ use crate::svg::markup::strip_tags;
 use crate::svg::metrics::text_width;
 
 use super::draw::circle_diameter;
-use super::{Laid, Transform, CELL_H, CHAR_W, GAP, GROUP_PAD, MIN_CELL_W, PAD_X};
+use super::{Laid, Transform, CELL_H, CHAR_W, GROUP_PAD, MIN_CELL_W, PAD_X};
 
 /// Uniform grid cell size for a diagram. Columns share one width — the widest
 /// label's hug box (text + `PAD_X`), divided down for multi-span blocks so a
 /// `d["Wide"]:2` never forces every column wide. Rows share [`CELL_H`].
-pub(super) fn cell_dims(items: &[BlockItem], font_size: f64) -> (f64, f64) {
-    fn walk(items: &[BlockItem], font_size: f64, w: &mut f64) {
+/// `gap` is the (possibly label-widened, see [`super::label_gap`]) grid gap
+/// this diagram is laid out with, so a multi-span block's per-column need
+/// accounts for the same inner gaps [`layout_items`] will actually place.
+pub(super) fn cell_dims(items: &[BlockItem], font_size: f64, gap: f64) -> (f64, f64) {
+    fn walk(items: &[BlockItem], font_size: f64, gap: f64, w: &mut f64) {
         for it in items {
             match it {
                 BlockItem::Block(b) => {
                     let span = b.span.max(1) as f64;
                     let nat = text_width(&strip_tags(&b.label), CHAR_W, font_size) + PAD_X * 2.0;
                     // Per-column need once the block's own inner gaps are removed.
-                    let per_col = (nat - (span - 1.0) * GAP) / span;
+                    let per_col = (nat - (span - 1.0) * gap) / span;
                     *w = w.max(per_col);
                 }
-                BlockItem::Group(g) => walk(&g.items, font_size, w),
+                BlockItem::Group(g) => walk(&g.items, font_size, gap, w),
                 _ => {}
             }
         }
     }
     let mut w = MIN_CELL_W;
-    walk(items, font_size, &mut w);
+    walk(items, font_size, gap, &mut w);
     (w, CELL_H)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn layout_items(
     items: &[BlockItem],
     cols: usize,
@@ -41,6 +45,7 @@ pub(super) fn layout_items(
     cw: f64,
     ch: f64,
     font_size: f64,
+    gap: f64,
 ) -> (Vec<Laid>, f64, f64) {
     let mut laid = Vec::new();
     let mut col = 0usize;
@@ -53,7 +58,7 @@ pub(super) fn layout_items(
     macro_rules! wrap_row {
         () => {{
             col = 0;
-            row_y += row_h + GAP;
+            row_y += row_h + gap;
             row_h = 0.0;
         }};
     }
@@ -65,8 +70,8 @@ pub(super) fn layout_items(
                 if col + span > cols && col != 0 {
                     wrap_row!();
                 }
-                let x = x0 + col as f64 * (cw + GAP);
-                let w = span as f64 * cw + (span - 1) as f64 * GAP;
+                let x = x0 + col as f64 * (cw + gap);
+                let w = span as f64 * cw + (span - 1) as f64 * gap;
                 // Circle/double-circle can need more than the uniform row
                 // height to fit their own label — grow this cell's height so
                 // the row reserves enough space and the next row doesn't
@@ -122,16 +127,17 @@ pub(super) fn layout_items(
                     cw,
                     ch,
                     font_size,
+                    gap,
                 );
                 let inner_w = content_w + GROUP_PAD * 2.0;
                 let inner_h = content_h + GROUP_PAD * 2.0;
-                let need = ((inner_w + GAP) / (cw + GAP)).ceil() as usize;
+                let need = ((inner_w + gap) / (cw + gap)).ceil() as usize;
                 let span = need.max(g.span.max(1));
                 if col + span > cols && col != 0 {
                     wrap_row!();
                 }
-                let x = x0 + col as f64 * (cw + GAP);
-                let w = (span as f64 * cw + (span - 1) as f64 * GAP).max(inner_w);
+                let x = x0 + col as f64 * (cw + gap);
+                let w = (span as f64 * cw + (span - 1) as f64 * gap).max(inner_w);
                 let h = inner_h;
                 // Children keep their own frame at natural scale, centered in the
                 // container with the inner pad above.
@@ -167,7 +173,7 @@ pub(super) fn layout_items(
         }
     }
     if max_x == 0.0 {
-        max_x = cols as f64 * cw + (cols - 1) as f64 * GAP;
+        max_x = cols as f64 * cw + (cols - 1) as f64 * gap;
     }
     if max_y == 0.0 {
         max_y = ch;

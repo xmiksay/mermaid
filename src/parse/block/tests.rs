@@ -214,6 +214,58 @@ fn tail_marked_links() {
 }
 
 #[test]
+fn tail_marker_on_thick_and_dotted_links() {
+    // Upstream's block lexer allows an `[xo<]?` tail on the thick (`==+`) and
+    // dotted (`-?\.+-`) LINK regexes too, not just solid `--+` — a headless
+    // tail-only thick link needs a third `=` (mirroring `<---`'s third `-`),
+    // while dotted's trailing head char is optional so `<-.-` already has one.
+    let d =
+        parse("block-beta\n  a b c d\n  a <=== b\n  b <==> c\n  c <-.- d\n  d <-.-> a\n").unwrap();
+    let edges: Vec<_> = d
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            BlockItem::Edge(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edges.len(), 4);
+    assert_eq!(
+        (edges[0].style, edges[0].tail, edges[0].head),
+        (BlockLinkStyle::Thick, EdgeHead::Arrow, EdgeHead::None)
+    );
+    assert_eq!(
+        (edges[1].style, edges[1].tail, edges[1].head),
+        (BlockLinkStyle::Thick, EdgeHead::Arrow, EdgeHead::Arrow)
+    );
+    assert_eq!(
+        (edges[2].style, edges[2].tail, edges[2].head),
+        (BlockLinkStyle::Dotted, EdgeHead::Arrow, EdgeHead::None)
+    );
+    assert_eq!(
+        (edges[3].style, edges[3].tail, edges[3].head),
+        (BlockLinkStyle::Dotted, EdgeHead::Arrow, EdgeHead::Arrow)
+    );
+}
+
+#[test]
+fn bare_two_dash_tail_only_is_not_a_link() {
+    // `<--` (tail + exactly two dashes, no head char) is *not* valid upstream
+    // syntax — the solid LINK regex `[xo<]?--+[-xo>]` requires a mandatory
+    // char after the dashes (`>`/`x`/`o`/filler `-`), so a headless reversed
+    // link needs a third dash (`<---`, covered by `tail_marked_links`).
+    // Confirms the line falls through to ordinary block-row tokenizing
+    // instead of being misread as an edge.
+    let d = parse("block-beta\n  columns 3\n  x y z\n  d <-- e\n").unwrap();
+    let edges: Vec<_> = d
+        .items
+        .iter()
+        .filter(|i| matches!(i, BlockItem::Edge(_)))
+        .collect();
+    assert!(edges.is_empty());
+}
+
+#[test]
 fn columns_auto_packs_one_row() {
     let d = parse("block-beta\n  columns auto\n  a b c d\n").unwrap();
     assert_eq!(d.columns, Some(4));
