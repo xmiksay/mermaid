@@ -26,6 +26,45 @@ struct RelLine {
     p1: (f64, f64),
 }
 
+/// Minimum visual gap to leave between two reversed-pair labels once both are
+/// placed along their shared connector.
+const REL_LABEL_CLEARANCE: f64 = 10.0;
+
+/// The on-canvas width of a relation's label background — mirrors the `lw`
+/// computation in [`draw_one_rel`], capped at the same truncation length.
+fn label_footprint_width(label: &str) -> f64 {
+    text_width(&truncate(label, 36), 8.0, 10.0) + 6.0
+}
+
+/// The row/column gap the element grid needs so a reversed-pair relation
+/// (`A->B` alongside `B->A`, e.g. a `Rel_U`/`Rel_D` pair between the same two
+/// elements) has room for both labels laid out along their short connector
+/// with a clear gap between them, rather than just touching. Two elements
+/// connected only by non-reversed relations (or unlabeled ones) don't need
+/// any extra room, so this returns `0.0` and the grid keeps its default
+/// spacing — the same "widen only when needed" pattern used for ER's
+/// `layer_gap` (#399). Sized off the labels' combined *width* rather than
+/// height: two diagonally-adjacent elements (a common outcome of the row-flow
+/// wrap) connect with a short diagonal segment, and it's the wide label
+/// backgrounds — not their 14px height — that need the room.
+pub(super) fn min_reversed_pair_gap(rels: &[C4Relation]) -> f64 {
+    let mut extra = 0.0_f64;
+    for (i, a) in rels.iter().enumerate() {
+        if a.label.is_empty() {
+            continue;
+        }
+        for b in &rels[i + 1..] {
+            if b.label.is_empty() || a.from != b.to || a.to != b.from {
+                continue;
+            }
+            let wa = label_footprint_width(&a.label);
+            let wb = label_footprint_width(&b.label);
+            extra = extra.max(wa + wb + REL_LABEL_CLEARANCE);
+        }
+    }
+    extra
+}
+
 /// Draw every relation in `rels`. Relations are resolved in source order, and
 /// each one's placed label rect(s) become an obstacle for every relation
 /// drawn after it — the same mechanism the upstream `#312` opposite-pair
@@ -145,12 +184,21 @@ fn draw_one_rel(
     // the label land on its fill (#366). Every other relation's already-placed
     // label is an obstacle too, so two relations between the same pair (or
     // any other pair that lands its label at the same spot) don't stack their
-    // labels on top of each other (#381).
+    // labels on top of each other (#381). Placed labels are inflated by
+    // `LABEL_CLEARANCE` so `find_clear_label_point`'s "first zero-overlap
+    // point" search settles for a visible gap instead of a merely-touching
+    // one — literal non-overlap is enough for a node's opaque fill, but two
+    // adjacent labels reading as touching still looks like one long word
+    // (#399).
     let obstacles: Vec<(f64, f64, f64, f64)> = pos
         .iter()
         .filter(|(id, _)| **id != r.from && **id != r.to)
         .map(|(_, &rect)| rect)
-        .chain(placed_labels.iter().copied())
+        .chain(
+            placed_labels
+                .iter()
+                .map(|&rect| inflate(rect, LABEL_CLEARANCE)),
+        )
         .collect();
     let (mut mx, mut my) = find_clear_label_point(p_first, p_last, lw, tw, &obstacles, other_lines);
     if let Some(s) = ov {
@@ -242,9 +290,28 @@ fn find_clear_label_point(
     best
 }
 
+/// A few pixels of breathing room a label's background must keep clear of
+/// another relation's routed line — `segment_rect_overlap` alone only
+/// catches a literal intersection, which still lets a line pass close enough
+/// to a label to read as touching (#399). Inflating the rect by this margin
+/// before the crossing-length check makes "clear" mean a visually
+/// comfortable gap, not just zero overlap.
+const LINE_CLEARANCE: f64 = 4.0;
+
+/// Same idea as [`LINE_CLEARANCE`] but for two labels sitting next to each
+/// other: an already-placed label is inflated by this much before it's added
+/// to the next relation's obstacle list, so a reversed-pair label search
+/// stops at a visible gap rather than the first merely-touching spot (#399).
+const LABEL_CLEARANCE: f64 = 6.0;
+
+fn inflate(rect: (f64, f64, f64, f64), m: f64) -> (f64, f64, f64, f64) {
+    (rect.0 - m, rect.1 - m, rect.2 + 2.0 * m, rect.3 + 2.0 * m)
+}
+
 /// Total overlap between the label's background rect(s), centered at
 /// `(mx, my)`, and every rect in `obstacles`, plus the crossing length of
-/// every segment in `line_obstacles` that runs through them.
+/// every segment in `line_obstacles` that runs through them (each rect
+/// inflated by [`LINE_CLEARANCE`] first, so a near-miss counts too).
 fn label_overlap(
     mx: f64,
     my: f64,
@@ -267,7 +334,7 @@ fn label_overlap(
         .flat_map(|rect| {
             line_obstacles
                 .iter()
-                .map(move |(p0, p1)| segment_rect_overlap(*p0, *p1, *rect))
+                .map(move |(p0, p1)| segment_rect_overlap(*p0, *p1, inflate(*rect, LINE_CLEARANCE)))
         })
         .sum();
     rect_overlap + line_overlap

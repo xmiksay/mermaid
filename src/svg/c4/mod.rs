@@ -34,7 +34,7 @@ mod shapes;
 #[cfg(test)]
 mod tests;
 
-use rel::draw_rels;
+use rel::{draw_rels, min_reversed_pair_gap};
 use shapes::{draw_element, resolve_element_style};
 
 const PAD: f64 = 32.0;
@@ -85,8 +85,21 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
     // are overridable via `UpdateLayoutConfig` (see #14).
     let shape_in_row = d.layout.shape_in_row.unwrap_or(SHAPE_IN_ROW).max(1);
     let boundary_in_row = d.layout.boundary_in_row.unwrap_or(BOUNDARY_IN_ROW).max(1);
-    let (nodes, _cw, _ch) =
-        flow_layout(&d.elements, shape_in_row, boundary_in_row, theme.font_size);
+    // A reversed-pair relation (e.g. `Rel_U`/`Rel_D` between the same two
+    // elements) draws both labels stacked on their shared connector — widen
+    // the row/column gap so there's room for both plus a clear gap, but only
+    // when the diagram actually has such a pair (#399).
+    let extra_gap = min_reversed_pair_gap(&d.relations);
+    let v_gap = V_GAP.max(extra_gap);
+    let h_gap = H_GAP.max(extra_gap);
+    let (nodes, _cw, _ch) = flow_layout(
+        &d.elements,
+        shape_in_row,
+        boundary_in_row,
+        theme.font_size,
+        v_gap,
+        h_gap,
+    );
     place_absolute(
         &nodes,
         origin_x,
@@ -184,13 +197,21 @@ fn flow_layout(
     shape_in_row: usize,
     boundary_in_row: usize,
     font_size: f64,
+    v_gap: f64,
+    h_gap: f64,
 ) -> (Vec<LayoutNode>, f64, f64) {
     let mut nodes: Vec<LayoutNode> = items
         .iter()
         .map(|item| {
             if item.boundary_kind.is_some() {
-                let (mut kids, cw, ch) =
-                    flow_layout(&item.members, shape_in_row, boundary_in_row, font_size);
+                let (mut kids, cw, ch) = flow_layout(
+                    &item.members,
+                    shape_in_row,
+                    boundary_in_row,
+                    font_size,
+                    v_gap,
+                    h_gap,
+                );
                 let dx = BOUNDARY_PAD;
                 let dy = BOUNDARY_PAD + BOUNDARY_HDR;
                 for k in &mut kids {
@@ -242,15 +263,15 @@ fn flow_layout(
         let outgrows_width = !node.is_boundary && col > 0 && x + node.w > SHAPE_ROW_WIDTH_LIMIT;
         if col >= per_row || outgrows_width {
             x = 0.0;
-            y += row_h + V_GAP;
+            y += row_h + v_gap;
             row_h = 0.0;
             col = 0;
         }
         node.x = x;
         node.y = y;
-        x += node.w + H_GAP;
+        x += node.w + h_gap;
         row_h = row_h.max(node.h);
-        total_w = total_w.max(x - H_GAP);
+        total_w = total_w.max(x - h_gap);
         col += 1;
     }
     let total_h = y + row_h;
