@@ -34,7 +34,7 @@ mod shapes;
 #[cfg(test)]
 mod tests;
 
-use rel::draw_rel;
+use rel::draw_rels;
 use shapes::{draw_element, resolve_element_style};
 
 const PAD: f64 = 32.0;
@@ -145,10 +145,7 @@ pub(crate) fn render(d: &C4Diagram, theme: &Theme) -> String {
         draw_element(el, &style, *x, *y, *w, *h, &mut svg, theme);
     }
 
-    for r in &d.relations {
-        let ov = rel_styles.get(&(r.from.as_str(), r.to.as_str())).copied();
-        draw_rel(r, ov, &pos, &mut svg, theme);
-    }
+    draw_rels(&d.relations, &rel_styles, &pos, &mut svg, theme);
 
     svg.finish()
 }

@@ -47,6 +47,58 @@ fn rect_at(center: (f64, f64), size: (f64, f64)) -> (f64, f64, f64, f64) {
     )
 }
 
+/// Length of the portion of segment `p0`–`p1` that falls inside `rect` (`0.0`
+/// if the segment never enters it) — a Liang–Barsky clip against the rect's
+/// four half-planes. Lets a renderer treat *another* edge's routed line as an
+/// obstacle for label placement, the same way [`rect_overlap_area`] treats a
+/// node or another label as one (C4 #382: a diagonal relation's line must not
+/// visually run behind an unrelated relation's label).
+pub(super) fn segment_rect_overlap(
+    p0: (f64, f64),
+    p1: (f64, f64),
+    rect: (f64, f64, f64, f64),
+) -> f64 {
+    let (rx, ry, rw, rh) = rect;
+    let dx = p1.0 - p0.0;
+    let dy = p1.1 - p0.1;
+    let mut t0 = 0.0_f64;
+    let mut t1 = 1.0_f64;
+    let edges = [
+        (-dx, p0.0 - rx),
+        (dx, rx + rw - p0.0),
+        (-dy, p0.1 - ry),
+        (dy, ry + rh - p0.1),
+    ];
+    for (p, q) in edges {
+        if p.abs() < 1e-9 {
+            if q < 0.0 {
+                return 0.0;
+            }
+            continue;
+        }
+        let r = q / p;
+        if p < 0.0 {
+            if r > t1 {
+                return 0.0;
+            }
+            if r > t0 {
+                t0 = r;
+            }
+        } else {
+            if r < t0 {
+                return 0.0;
+            }
+            if r < t1 {
+                t1 = r;
+            }
+        }
+    }
+    if t0 > t1 {
+        return 0.0;
+    }
+    (t1 - t0) * (dx * dx + dy * dy).sqrt()
+}
+
 /// Resolve a draw position for each of `slots`, nudging any pair whose label
 /// rects would overlap apart along their own edges.
 ///
@@ -191,6 +243,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn segment_rect_overlap_zero_when_segment_misses_rect() {
+        assert_eq!(
+            segment_rect_overlap((0.0, 0.0), (100.0, 0.0), (0.0, 50.0, 10.0, 10.0)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn segment_rect_overlap_positive_when_segment_crosses_rect() {
+        // A diagonal line straight through a 20x20 square centered at the
+        // origin clips to the square's own diagonal, length 20*sqrt(2).
+        let overlap =
+            segment_rect_overlap((-50.0, -50.0), (50.0, 50.0), (-10.0, -10.0, 20.0, 20.0));
+        assert!((overlap - 20.0 * std::f64::consts::SQRT_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn segment_rect_overlap_zero_for_parallel_segment_outside_rect() {
+        assert_eq!(
+            segment_rect_overlap((0.0, 100.0), (50.0, 100.0), (0.0, 0.0, 10.0, 10.0)),
+            0.0
+        );
     }
 
     #[test]
