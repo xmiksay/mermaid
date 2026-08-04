@@ -120,11 +120,20 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 
     let mut boxes = compute_composite_boxes(d, &id_to_u32, &pos, &sizes);
 
-    // Canvas extent from node boundaries and cluster frames. A frame reserves
-    // header room above its members for the title, so its top/left can fall
-    // above/left of the topmost node — measure both corners of every box and
-    // shift everything back into a positive CANVAS_PAD margin so the title band
-    // is not clipped by the viewBox top edge (issue #242).
+    // Note boxes are text-measured (width depends on content), so their real
+    // extent has to be computed up front — same two-pass "measure, then size"
+    // as node/composite bounds below — instead of assuming fixed padding.
+    let note_boxes: Vec<(f64, f64, f64, f64)> = d
+        .notes
+        .iter()
+        .filter_map(|note| note_box(note, &id_to_u32, &sizes, &pos, &boxes, theme))
+        .collect();
+
+    // Canvas extent from node boundaries, cluster frames, and note boxes. A
+    // frame reserves header room above its members for the title, so its
+    // top/left can fall above/left of the topmost node — measure every
+    // corner and shift everything back into a positive CANVAS_PAD margin so
+    // nothing is clipped by the viewBox edges (issue #242).
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = 0.0_f64;
@@ -136,7 +145,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         max_x = max_x.max(x + w / 2.0);
         max_y = max_y.max(y + h / 2.0);
     }
-    for &(bx0, by0, bx1, by1) in boxes.values() {
+    for &(bx0, by0, bx1, by1) in boxes.values().chain(note_boxes.iter()) {
         min_x = min_x.min(bx0);
         min_y = min_y.min(by0);
         max_x = max_x.max(bx1);

@@ -227,3 +227,110 @@ fn pseudo_states_visible_on_dark_theme() {
     assert!(svg.contains("fill=\"#E0E0E0\""));
     assert!(!svg.contains("#333"));
 }
+
+/// `(width, height)` from the root `<svg>` element's `viewBox`.
+fn view_box(svg: &str) -> (f64, f64) {
+    let s = svg.find("viewBox=\"").unwrap() + "viewBox=\"".len();
+    let e = s + svg[s..].find('"').unwrap();
+    let mut parts = svg[s..e]
+        .split_whitespace()
+        .map(|p| p.parse::<f64>().unwrap());
+    let (_x0, _y0) = (parts.next().unwrap(), parts.next().unwrap());
+    (parts.next().unwrap(), parts.next().unwrap())
+}
+
+/// Bounds `(x0, y0, x1, y1)` of the note rect (`fill="#FFF5AD"`).
+fn note_rect(svg: &str) -> (f64, f64, f64, f64) {
+    let key = "fill=\"#FFF5AD\"";
+    let kpos = svg.find(key).expect("no note box");
+    let open = svg[..kpos].rfind("<rect ").unwrap();
+    let tag = &svg[open..kpos];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    let (x, y, w, h) = (
+        grab("x=\""),
+        grab("y=\""),
+        grab("width=\""),
+        grab("height=\""),
+    );
+    (x, y, x + w, y + h)
+}
+
+/// Bounds of every composite frame's border rect (`fill="none"`, `rx="5"`),
+/// in draw order — nested composites are pushed onto `d.composites` inner
+/// first, so `rects[0]` is the innermost frame here. Scans `<rect ` tags
+/// forward only (never searches backward from a later element, e.g. a
+/// transition's `fill="none"` path, which could otherwise re-match an
+/// already-visited rect and loop without `start` ever advancing).
+fn all_frame_border_rects(svg: &str) -> Vec<(f64, f64, f64, f64)> {
+    let mut rects = Vec::new();
+    let mut start = 0;
+    while let Some(rel) = svg[start..].find("<rect ") {
+        let open = start + rel;
+        let close = open + svg[open..].find("/>").unwrap();
+        let tag = &svg[open..close];
+        start = close + 2;
+        if tag.contains("fill=\"none\"") && tag.contains("rx=\"5\"") {
+            let grab = |attr: &str| {
+                let s = tag.find(attr).unwrap() + attr.len();
+                let e = s + tag[s..].find('"').unwrap();
+                tag[s..e].parse::<f64>().unwrap()
+            };
+            let (x, y, w, h) = (
+                grab("x=\""),
+                grab("y=\""),
+                grab("width=\""),
+                grab("height=\""),
+            );
+            rects.push((x, y, x + w, y + h));
+        }
+    }
+    rects
+}
+
+#[test]
+fn note_box_does_not_crop_at_canvas_edges() {
+    // Regression: `note left of`/`note right of` boxes are sized from their
+    // (potentially long) text and positioned off the target state, so a note
+    // near the diagram's edge can extend past the canvas the node-only sizing
+    // pass computed. The canvas must grow/shift so the whole note fits.
+    let d = build(
+        "stateDiagram-v2\n[*] --> A\n\
+         note left of A: this note's text is deliberately long enough that its measured box would spill past the left edge of a canvas sized from node positions alone\n",
+    );
+    let svg = render(&d, &Theme::default());
+    let (width, height) = view_box(&svg);
+    let (nx0, ny0, nx1, ny1) = note_rect(&svg);
+    assert!(nx0 >= 0.0, "note left edge {nx0} clipped by canvas");
+    assert!(ny0 >= 0.0, "note top edge {ny0} clipped by canvas");
+    assert!(
+        nx1 <= width,
+        "note right edge {nx1} exceeds canvas width {width}"
+    );
+    assert!(
+        ny1 <= height,
+        "note bottom edge {ny1} exceeds canvas height {height}"
+    );
+}
+
+#[test]
+fn nested_composite_title_band_clears_parent_title_band() {
+    // Regression: when a composite's very first (topmost) child is itself a
+    // composite, the outer frame's box used to be measured straight through
+    // to the deepest leaf states, so the inner frame's title band landed
+    // right at the outer frame's own title band instead of below it.
+    let d = build("stateDiagram-v2\nstate Outer {\nstate Inner {\n[*] --> A\n}\n}\n");
+    let svg = render(&d, &Theme::default());
+    let rects = all_frame_border_rects(&svg);
+    assert_eq!(rects.len(), 2, "expected inner + outer composite frames");
+    let (_, inner_y, _, _) = rects[0];
+    let (_, outer_y, _, _) = rects[1];
+    assert!(
+        inner_y - outer_y >= 20.0,
+        "inner frame top {inner_y} too close to outer frame top {outer_y}; \
+         nested title bands would overlap",
+    );
+}

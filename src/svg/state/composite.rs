@@ -52,9 +52,14 @@ pub(super) fn endpoint_clip(
     })
 }
 
-/// Screen-space bounding box `(x0, y0, x1, y1)` of every composite, keyed by id.
-/// A box spans all member states gathered recursively through nested composites,
-/// with room above for the title.
+/// Screen-space bounding box `(x0, y0, x1, y1)` of every composite, keyed by
+/// id. Computed bottom-up (nested composites first): a composite's box comes
+/// from its own IMMEDIATE region members, and a member that is itself a
+/// composite contributes its already-computed frame box wholesale rather than
+/// its descendant states directly. That way each nesting level's own title
+/// band reserves its own headroom instead of being swallowed by an ancestor
+/// measuring straight through to the deepest leaf states (#see nested title
+/// band overlap).
 pub(super) fn compute_composite_boxes(
     d: &StateDiagram,
     id_to_u32: &HashMap<String, NodeId>,
@@ -63,51 +68,65 @@ pub(super) fn compute_composite_boxes(
 ) -> HashMap<String, (f64, f64, f64, f64)> {
     let by_id: HashMap<&str, &CompositeState> =
         d.composites.iter().map(|c| (c.id.as_str(), c)).collect();
-    let mut boxes = HashMap::new();
+    let mut boxes: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
     for comp in &d.composites {
-        let mut members: Vec<&str> = Vec::new();
-        collect_member_ids(comp, &by_id, &mut members);
-        let mut min_x = f64::INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
-        for id in &members {
-            let Some(&u) = id_to_u32.get(*id) else {
-                continue;
-            };
-            let Some(&(cx, cy)) = pos.get(&u) else {
-                continue;
-            };
-            let (w, h) = sizes[u as usize];
-            min_x = min_x.min(cx - w / 2.0);
-            max_x = max_x.max(cx + w / 2.0);
-            min_y = min_y.min(cy - h / 2.0);
-            max_y = max_y.max(cy + h / 2.0);
-        }
-        if !min_x.is_finite() {
-            continue;
-        }
-        boxes.insert(
-            comp.id.clone(),
-            (
-                min_x - FRAME_PAD,
-                min_y - FRAME_PAD - FRAME_HEADER,
-                max_x + FRAME_PAD,
-                max_y + FRAME_PAD,
-            ),
-        );
+        composite_box(comp, &by_id, id_to_u32, pos, sizes, &mut boxes);
     }
     boxes
 }
 
-fn collect_member_ids<'a>(
-    comp: &'a CompositeState,
-    by_id: &HashMap<&str, &'a CompositeState>,
-    out: &mut Vec<&'a str>,
-) {
-    for region in &comp.regions {
-        collect_region_member_ids(region, by_id, out);
+/// Compute (and memoize into `boxes`) one composite's frame box, recursing
+/// into a nested composite child so its box is available before it is folded
+/// into the parent's extent.
+fn composite_box(
+    comp: &CompositeState,
+    by_id: &HashMap<&str, &CompositeState>,
+    id_to_u32: &HashMap<String, NodeId>,
+    pos: &HashMap<NodeId, (f64, f64)>,
+    sizes: &[(f64, f64)],
+    boxes: &mut HashMap<String, (f64, f64, f64, f64)>,
+) -> Option<(f64, f64, f64, f64)> {
+    if let Some(&b) = boxes.get(&comp.id) {
+        return Some(b);
     }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for region in &comp.regions {
+        for child in region {
+            if let Some(&child_comp) = by_id.get(child.as_str()) {
+                let Some((x0, y0, x1, y1)) =
+                    composite_box(child_comp, by_id, id_to_u32, pos, sizes, boxes)
+                else {
+                    continue;
+                };
+                min_x = min_x.min(x0);
+                min_y = min_y.min(y0);
+                max_x = max_x.max(x1);
+                max_y = max_y.max(y1);
+            } else if let Some(&u) = id_to_u32.get(child.as_str()) {
+                if let Some(&(cx, cy)) = pos.get(&u) {
+                    let (w, h) = sizes[u as usize];
+                    min_x = min_x.min(cx - w / 2.0);
+                    max_x = max_x.max(cx + w / 2.0);
+                    min_y = min_y.min(cy - h / 2.0);
+                    max_y = max_y.max(cy + h / 2.0);
+                }
+            }
+        }
+    }
+    if !min_x.is_finite() {
+        return None;
+    }
+    let b = (
+        min_x - FRAME_PAD,
+        min_y - FRAME_PAD - FRAME_HEADER,
+        max_x + FRAME_PAD,
+        max_y + FRAME_PAD,
+    );
+    boxes.insert(comp.id.clone(), b);
+    Some(b)
 }
 
 /// Ids of every state reachable from one region, descending into nested
@@ -284,16 +303,18 @@ pub(super) fn draw_composites(
     }
 }
 
-pub(super) fn draw_state_note(
-    svg: &mut SvgBuilder,
+/// Screen-space bounding box `(x0, y0, x1, y1)` a state note would occupy,
+/// computed independently of drawing so canvas sizing can see the real
+/// (text-dependent) extent before the `SvgBuilder` exists — the same
+/// measure-then-size two-pass pattern used for node/composite bounds.
+pub(super) fn note_box(
     note: &StateNote,
     id_to_u32: &HashMap<String, NodeId>,
     sizes: &[(f64, f64)],
     pos: &HashMap<NodeId, (f64, f64)>,
     boxes: &HashMap<String, (f64, f64, f64, f64)>,
     theme: &Theme,
-) {
-    let fg = &theme.fg;
+) -> Option<(f64, f64, f64, f64)> {
     let laid_out = id_to_u32
         .get(&note.target)
         .and_then(|u| pos.get(u).map(|p| (*u, *p)));
@@ -303,7 +324,7 @@ pub(super) fn draw_state_note(
     } else if let Some(&(x0, y0, x1, y1)) = boxes.get(&note.target) {
         ((x0 + x1) / 2.0, (y0 + y1) / 2.0, x1 - x0, y1 - y0)
     } else {
-        return;
+        return None;
     };
     let nw = (crate::svg::metrics::text_width(&note.text, 7.0, theme.font_size) + 20.0).max(80.0);
     let nh = 32.0;
@@ -312,6 +333,23 @@ pub(super) fn draw_state_note(
         NotePosition::LeftOf => (cx - w / 2.0 - 14.0 - nw, cy - nh / 2.0),
         NotePosition::Over => (cx - nw / 2.0, cy - h / 2.0 - nh - 8.0),
     };
+    Some((nx, ny, nx + nw, ny + nh))
+}
+
+pub(super) fn draw_state_note(
+    svg: &mut SvgBuilder,
+    note: &StateNote,
+    id_to_u32: &HashMap<String, NodeId>,
+    sizes: &[(f64, f64)],
+    pos: &HashMap<NodeId, (f64, f64)>,
+    boxes: &HashMap<String, (f64, f64, f64, f64)>,
+    theme: &Theme,
+) {
+    let Some((nx, ny, nx1, ny1)) = note_box(note, id_to_u32, sizes, pos, boxes, theme) else {
+        return;
+    };
+    let fg = &theme.fg;
+    let (nw, nh) = (nx1 - nx, ny1 - ny);
     svg.rect(
         nx,
         ny,
