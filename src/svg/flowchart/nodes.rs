@@ -268,28 +268,42 @@ pub(super) fn collect_node_ids<'a>(
 }
 
 /// Screen-space bounding box `(x0, y0, x1, y1)` of every subgraph, including the
-/// space for its title, keyed by subgraph id. A box spans all member nodes
-/// gathered recursively through nested children.
+/// space for its title, keyed by subgraph id.
+///
+/// Computed bottom-up (deepest nesting first, via [`subgraph_depths`]): a
+/// subgraph's box pads around the union of its *direct* member nodes' bounds
+/// and its already-padded direct child subgraphs' boxes. Padding once per
+/// nesting level this way guarantees a child's frame is always inset from its
+/// parent's by at least `SUBGRAPH_PAD`, regardless of which node is extremal —
+/// flattening straight through to leaf nodes and padding once from that
+/// flattened set (the previous approach) could make a shared extremal
+/// descendant put both an inner and outer frame's edge at the exact same
+/// coordinate, touching with no visible gap.
 pub(super) fn compute_subgraph_boxes(
     d: &FlowchartDiagram,
     id_to_u32: &HashMap<String, crate::sugiyama::NodeId>,
     pos: &HashMap<crate::sugiyama::NodeId, (f64, f64)>,
     node_sizes: &[(f64, f64)],
 ) -> HashMap<String, (f64, f64, f64, f64)> {
-    let mut sub_idx_by_id: HashMap<&str, usize> = HashMap::new();
-    for (i, s) in d.subgraphs.iter().enumerate() {
-        sub_idx_by_id.insert(s.id.as_str(), i);
-    }
-    let mut boxes = HashMap::new();
-    for sub in &d.subgraphs {
-        let mut ids: Vec<&str> = Vec::new();
-        collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
+    let sub_idx_by_id: HashMap<&str, usize> = d
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let depths = super::edges::subgraph_depths(d, &sub_idx_by_id);
+    let mut order: Vec<usize> = (0..d.subgraphs.len()).collect();
+    order.sort_by(|&a, &b| depths[b].cmp(&depths[a]));
+
+    let mut boxes: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
+    for i in order {
+        let sub = &d.subgraphs[i];
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
-        for id in &ids {
-            let Some(&u) = id_to_u32.get(*id) else {
+        for id in &sub.node_ids {
+            let Some(&u) = id_to_u32.get(id.as_str()) else {
                 continue;
             };
             let (cx, cy) = pos[&u];
@@ -298,6 +312,14 @@ pub(super) fn compute_subgraph_boxes(
             max_x = max_x.max(cx + w / 2.0);
             min_y = min_y.min(cy - h / 2.0);
             max_y = max_y.max(cy + h / 2.0);
+        }
+        for child_id in &sub.child_subgraph_ids {
+            if let Some(&(cx0, cy0, cx1, cy1)) = boxes.get(child_id.as_str()) {
+                min_x = min_x.min(cx0);
+                max_x = max_x.max(cx1);
+                min_y = min_y.min(cy0);
+                max_y = max_y.max(cy1);
+            }
         }
         if !min_x.is_finite() {
             continue;
