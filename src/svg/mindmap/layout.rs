@@ -1,7 +1,7 @@
 //! Radial tree layout: place each node at the centre of its angular sector and
 //! frame the whole subtree into positive space.
 
-use crate::parse::MindmapNode;
+use crate::parse::{MindmapNode, MindmapShape};
 
 use crate::svg::builder::{split_label_lines, LABEL_LINE_H};
 use crate::svg::markup::strip_tags;
@@ -150,6 +150,14 @@ pub(super) fn shift(laid: &mut Laid, dx: f64, dy: f64) {
 pub(super) fn bounds(laid: &Laid) -> (f64, f64, f64, f64) {
     let (hw, hh) = if laid.depth == 0 {
         (laid.r, laid.r)
+    } else if laid.node.shape == MindmapShape::Circle {
+        // A circle node is drawn with radius `max(w, h) / 2` (see
+        // `draw::draw_shape`), which reaches further vertically than a plain
+        // `h / 2` box half-height whenever the label makes it wider than
+        // tall — using the box half-extents here undercounted that reach and
+        // let a large circle's edge get clipped by the canvas.
+        let r = (laid.w / 2.0).max(laid.h / 2.0);
+        (r, r)
     } else {
         (laid.w / 2.0, laid.h / 2.0)
     };
