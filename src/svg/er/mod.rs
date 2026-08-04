@@ -13,7 +13,7 @@ mod entity;
 mod relation;
 
 use entity::{draw_entity, entity_size};
-use relation::draw_relation;
+use relation::{draw_relation, CARD_MAX_REACH};
 
 const CANVAS_PAD: f64 = 24.0;
 
@@ -61,7 +61,23 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         edges,
         node_size: node_size_su,
     };
-    let layout = layout_with(&g, &LayoutConfig::default()).unwrap_or_default();
+    // A relation label sits centered on its edge, between the cardinality
+    // glyphs at each end (#398). The default layer gap alone doesn't reserve
+    // room for both the glyph reach *and* the label width, so tightly packed
+    // entities (e.g. `direction LR` chains) render the label overlapping the
+    // crow's-foot glyphs. Widen the gap between layers to fit the widest
+    // labeled relation's glyph clearance + label, never narrower than default.
+    let max_label_w = d
+        .relations
+        .iter()
+        .filter(|r| !r.label.is_empty())
+        .map(|r| super::metrics::text_width(&r.label, 7.0, theme.font_size) + 8.0)
+        .fold(0.0_f64, f64::max);
+    let layout_cfg = LayoutConfig {
+        layer_gap: (CARD_MAX_REACH * 2.0 + max_label_w).max(LayoutConfig::default().layer_gap),
+        ..LayoutConfig::default()
+    };
+    let layout = layout_with(&g, &layout_cfg).unwrap_or_default();
     let (raw_w, raw_h) = (layout.width, layout.height);
     let (canvas_w, canvas_h) = match dir {
         FlowDirection::TopDown | FlowDirection::BottomTop => (raw_w, raw_h),

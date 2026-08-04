@@ -22,6 +22,12 @@ const CARD_CIRCLE_R: f64 = 5.0; // radius of the optional-"zero" circle
                                 // instead of merging into the foot as a "Ø" blob.
 const ZERO_MORE_CIRCLE_D: f64 = FOOT_DEPTH + CARD_CIRCLE_R; // 23.0
 
+/// Farthest any cardinality glyph reaches from the entity boundary along the
+/// edge — the zero-or-more circle's far edge is the widest case. The layout
+/// needs at least this much clearance at *each* end of a relation before a
+/// centered label has room to sit without overlapping the glyph (#398).
+pub(super) const CARD_MAX_REACH: f64 = ZERO_MORE_CIRCLE_D + CARD_CIRCLE_R; // 28.0
+
 /// Draws the relation's path and cardinality glyphs, returning its clipped
 /// polyline (empty if the router underflowed) so the caller can collect a
 /// label slot and resolve every relation label's position in one pass after
