@@ -124,7 +124,7 @@ fn composite_children_keep_natural_size() {
         _ => unreachable!(),
     };
     let (cw, ch) = cell_dims(&d.items, Theme::default().font_size);
-    let (laid, _, _) = layout_items(&d.items, 3, PAD, PAD, cw, ch);
+    let (laid, _, _) = layout_items(&d.items, 3, PAD, PAD, cw, ch, Theme::default().font_size);
     let group = laid
         .iter()
         .find(|l| matches!(l.item, BlockItem::Group(_)))

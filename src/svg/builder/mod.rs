@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
-use super::markup::{parse_lines, Span};
+use super::markup::{fenced_markdown, parse_lines, parse_markdown_lines, Span};
 use super::theme::Theme;
 
 mod curves;
@@ -128,10 +128,18 @@ impl SvgBuilder {
     }
 
     pub fn text(&mut self, x: f64, y: f64, attrs: &str, content: &str) {
-        let lines = split_label_lines(content);
-        // Parse all lines together so an inline tag opened before a `<br>`
-        // still styles the text after it (#187).
-        let parsed: Vec<Vec<Span>> = parse_lines(&lines);
+        // A markdown-string label's backtick fence wraps the *whole* label,
+        // not each individually split display line — a multi-line fenced
+        // string (`` `**Bold**\nsecond line` ``) must be recognized against
+        // the raw content before it's split, or the fence characters land on
+        // the first/last line only and never match per-line.
+        let parsed: Vec<Vec<Span>> = if let Some(inner) = fenced_markdown(content) {
+            parse_markdown_lines(&split_label_lines(inner))
+        } else {
+            // Parse all lines together so an inline tag opened before a `<br>`
+            // still styles the text after it (#187).
+            parse_lines(&split_label_lines(content))
+        };
         // Fast path: a single line of plain text stays a bare <text>, so
         // tag-free labels render byte-identically to before inline HTML support.
         if parsed.len() == 1 && parsed[0].len() == 1 && parsed[0][0].is_plain() {
@@ -151,7 +159,7 @@ impl SvgBuilder {
         // style inline, <a href> wraps a link). Line spacing tracks the font
         // size so stacked lines don't crowd/overlap once `--font-size` grows.
         let line_h = LABEL_LINE_H * super::metrics::font_scale(self.font_size);
-        let first_dy = -((lines.len() as f64 - 1.0) * line_h) / 2.0;
+        let first_dy = -((parsed.len() as f64 - 1.0) * line_h) / 2.0;
         let mut spans = String::new();
         for (li, line_spans) in parsed.iter().enumerate() {
             for (si, span) in line_spans.iter().enumerate() {

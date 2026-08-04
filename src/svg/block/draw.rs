@@ -7,11 +7,13 @@ use crate::parse::ast::Style;
 use crate::parse::{Block, BlockItem, BlockShape};
 
 use crate::svg::builder::{fnum, SvgBuilder};
+use crate::svg::markup::strip_tags;
+use crate::svg::metrics::text_width;
 use crate::svg::style::resolve_style;
 use crate::svg::theme::Theme;
 
 use super::edges::arrow_path;
-use super::Laid;
+use super::{Laid, CHAR_W, PAD_X};
 
 pub(super) fn draw(
     l: &Laid,
@@ -91,7 +93,7 @@ fn draw_block(
             );
         }
         BlockShape::Circle => {
-            let r = w.min(h) / 2.0;
+            let r = circle_diameter(&b.label, h, theme.font_size) / 2.0;
             svg.circle(cx, cy, r, &attrs);
         }
         BlockShape::Rhombus => {
@@ -138,7 +140,11 @@ fn draw_block(
             );
         }
         BlockShape::DoubleCircle => {
-            let r = w.min(h) / 2.0;
+            // Outer radius is derived the same way as the single circle; the
+            // inner ring's 4px inset eats into that padding rather than the
+            // label's own text, so it never touches the text (#259 sizing,
+            // extended to the double ring).
+            let r = circle_diameter(&b.label, h, theme.font_size) / 2.0;
             svg.circle(cx, cy, r, &attrs);
             svg.circle(cx, cy, r - 4.0, &attrs);
         }
@@ -171,6 +177,16 @@ fn draw_block(
         &format!("text-anchor=\"middle\" fill=\"{label_fill}\" font-size=\"13\""),
         &b.label,
     );
+}
+
+/// Circle/double-circle diameter, sized to the label's own measured width
+/// rather than the shared grid cell box (which is wide enough for every
+/// shape in the row, not just this circle's text) — floored at the row
+/// height so a short label still gets a legible circle. Also used by layout
+/// to grow the row when a circle's diameter exceeds the uniform cell height.
+pub(super) fn circle_diameter(label: &str, h: f64, font_size: f64) -> f64 {
+    let text_w = text_width(&strip_tags(label), CHAR_W, font_size) + PAD_X * 2.0;
+    text_w.max(h)
 }
 
 /// Parallelogram path. `right` leans `/ /` (top pushed right), else `\ \`.

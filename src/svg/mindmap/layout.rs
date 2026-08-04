@@ -3,9 +3,13 @@
 
 use crate::parse::MindmapNode;
 
+use crate::svg::builder::{split_label_lines, LABEL_LINE_H};
+use crate::svg::markup::strip_tags;
 use crate::svg::metrics::{text_width, BASE_FONT_SIZE};
 
-use super::{Laid, CHILD_SPREAD, ICON_GAP, ICON_SIZE, NODE_H, NODE_PAD_X, RING_GAP, TEXT_PX};
+use super::{
+    Laid, CHILD_SPREAD, ICON_GAP, ICON_SIZE, NODE_H, NODE_MARGIN, NODE_PAD_X, RING_GAP, TEXT_PX,
+};
 
 /// Label font size (px) at `depth`, scaling `base` down for deeper rings so the
 /// root and first ring read largest — upstream sizes node type by depth.
@@ -27,6 +31,16 @@ fn leaves(n: &MindmapNode) -> usize {
     }
 }
 
+/// Widest display line's measured width, honoring the same `\n`/`<br>`
+/// splitting the renderer uses so a wrapped multi-line label doesn't get
+/// measured as one long run (the label sizing bug behind #two-line overlap).
+fn widest_line_width(text: &str, font_size: f64) -> f64 {
+    split_label_lines(text)
+        .iter()
+        .map(|l| text_width(&strip_tags(l), TEXT_PX, font_size))
+        .fold(0.0_f64, f64::max)
+}
+
 fn node_size(n: &MindmapNode, font_size: f64) -> (f64, f64) {
     let icon_w = if n.icon.is_some() {
         ICON_SIZE + ICON_GAP
@@ -34,16 +48,31 @@ fn node_size(n: &MindmapNode, font_size: f64) -> (f64, f64) {
         0.0
     };
     let scale = font_size / BASE_FONT_SIZE;
-    let tw = text_width(&n.text, TEXT_PX, font_size);
+    let lines = split_label_lines(&n.text).len().max(1);
+    let tw = widest_line_width(&n.text, font_size);
     let w = (tw + NODE_PAD_X * 2.0 + icon_w).max(48.0 * scale);
-    (w, NODE_H * scale)
+    let h = (NODE_H + (lines as f64 - 1.0) * LABEL_LINE_H) * scale;
+    (w, h)
+}
+
+/// Conservative "reach" from a node's centre to its farthest edge, safe for
+/// any angle: the root is a true circle (its radius is exact in every
+/// direction); every other node is an axis-aligned box, whose half-diagonal
+/// bounds its edge distance regardless of which way it's approached from.
+fn node_reach(w: f64, h: f64) -> f64 {
+    (w * w + h * h).sqrt() / 2.0
 }
 
 /// Build the laid-out subtree for `n`, placing it at the centre of the angular
-/// sector `[a0, a1)` at radius `depth * RING_GAP` and recursing on its children.
-/// Children of a non-root node are packed into a [`CHILD_SPREAD`]-narrowed cone
-/// centred on the parent's angle so each subtree stays compact around its
-/// branch node instead of sprawling across the full inherited sector.
+/// sector `[a0, a1)` at radius `max(depth * RING_GAP, parent_reach + margin +
+/// own_reach)` and recursing on its children. The `RING_GAP` step is only a
+/// floor: a node whose own measured size (or its parent's) needs more room
+/// than that pushes further out, so a wide/tall label never lands on top of
+/// its parent (`parent_reach` is the parent's own centre-to-edge distance,
+/// `0.0` for the initial call at the root). Children of a non-root node are
+/// packed into a [`CHILD_SPREAD`]-narrowed cone centred on the parent's angle
+/// so each subtree stays compact around its branch node instead of sprawling
+/// across the full inherited sector.
 pub(super) fn build(
     n: &MindmapNode,
     depth: usize,
@@ -51,17 +80,24 @@ pub(super) fn build(
     a0: f64,
     a1: f64,
     base_font: f64,
+    parent_reach: f64,
 ) -> Laid {
     let angle = (a0 + a1) / 2.0;
     let font = depth_font(base_font, depth);
     let (w, h) = node_size(n, font);
-    let r = depth as f64 * RING_GAP;
-    let (x, y) = (r * angle.cos(), r * angle.sin());
     let root_r = if depth == 0 {
-        (text_width(&n.text, TEXT_PX, font) / 2.0 + NODE_PAD_X + 6.0).max(28.0)
+        (widest_line_width(&n.text, font) / 2.0 + NODE_PAD_X + 6.0).max(28.0)
     } else {
         0.0
     };
+    let own_reach = if depth == 0 { root_r } else { node_reach(w, h) };
+    let r = if depth == 0 {
+        0.0
+    } else {
+        (depth as f64 * RING_GAP).max(parent_reach + NODE_MARGIN + own_reach)
+    };
+    let (x, y) = (r * angle.cos(), r * angle.sin());
+    let reach = r + own_reach;
 
     // Root children fan around the full circle; deeper children hug their
     // parent's radial line within a narrowed cone.
@@ -84,6 +120,7 @@ pub(super) fn build(
             cursor,
             cursor + span,
             base_font,
+            reach,
         ));
         cursor += span;
     }

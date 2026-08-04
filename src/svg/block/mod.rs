@@ -87,7 +87,15 @@ struct Laid {
 
 pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     let (cw, ch) = cell_dims(&d.items, theme.font_size);
-    let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD, cw, ch);
+    let (laid, total_w, total_h) = layout_items(
+        &d.items,
+        d.columns.unwrap_or(3),
+        PAD,
+        PAD,
+        cw,
+        ch,
+        theme.font_size,
+    );
     let width = PAD * 2.0 + total_w;
     let height = PAD * 2.0 + total_h;
     let mut svg = SvgBuilder::new(width.max(120.0), height.max(60.0)).theme(theme);

@@ -50,7 +50,7 @@ fn radial_layout_fans_children_around_root() {
         classes: vec![],
         children: vec![leaf("A"), leaf("B"), leaf("C"), leaf("D")],
     };
-    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
     // The root sits at the origin; every child sits on the first ring.
     assert_eq!((laid.x, laid.y), (0.0, 0.0));
     for c in &laid.children {
@@ -75,7 +75,7 @@ fn descendants_inherit_branch_section() {
         _ => panic!("not mindmap"),
     };
     let root = d.root.clone().unwrap();
-    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
     let branch = &laid.children[0];
     assert_eq!(branch.section, 0);
     assert_eq!(branch.children[0].section, 0);

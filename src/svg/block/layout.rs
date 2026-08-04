@@ -1,11 +1,12 @@
 //! block-beta grid layout: uniform cell sizing (`cell_dims`) and the recursive
 //! column-flow placement (`layout_items`) that hugs composite groups.
 
-use crate::parse::BlockItem;
+use crate::parse::{BlockItem, BlockShape};
 
 use crate::svg::markup::strip_tags;
 use crate::svg::metrics::text_width;
 
+use super::draw::circle_diameter;
 use super::{Laid, Transform, CELL_H, CHAR_W, GAP, GROUP_PAD, MIN_CELL_W, PAD_X};
 
 /// Uniform grid cell size for a diagram. Columns share one width — the widest
@@ -39,6 +40,7 @@ pub(super) fn layout_items(
     y0: f64,
     cw: f64,
     ch: f64,
+    font_size: f64,
 ) -> (Vec<Laid>, f64, f64) {
     let mut laid = Vec::new();
     let mut col = 0usize;
@@ -65,16 +67,25 @@ pub(super) fn layout_items(
                 }
                 let x = x0 + col as f64 * (cw + GAP);
                 let w = span as f64 * cw + (span - 1) as f64 * GAP;
+                // Circle/double-circle can need more than the uniform row
+                // height to fit their own label — grow this cell's height so
+                // the row reserves enough space and the next row doesn't
+                // overlap it (bug: circle sizing used to be capped at `ch`).
+                let h = if matches!(b.shape, BlockShape::Circle | BlockShape::DoubleCircle) {
+                    circle_diameter(&b.label, ch, font_size)
+                } else {
+                    ch
+                };
                 laid.push(Laid {
                     item: item.clone(),
                     x,
                     y: row_y,
                     w,
-                    h: ch,
+                    h,
                     children: Vec::new(),
                     child_tf: None,
                 });
-                row_h = row_h.max(ch);
+                row_h = row_h.max(h);
                 col += span;
                 if col >= cols {
                     wrap_row!();
@@ -103,8 +114,15 @@ pub(super) fn layout_items(
                 // size (#310, correcting #259's over-compaction). It then claims
                 // as many whole grid columns as it needs, so a sibling wraps
                 // rather than overlapping it.
-                let (child_laid, content_w, content_h) =
-                    layout_items(&g.items, g.columns.unwrap_or(cols), 0.0, 0.0, cw, ch);
+                let (child_laid, content_w, content_h) = layout_items(
+                    &g.items,
+                    g.columns.unwrap_or(cols),
+                    0.0,
+                    0.0,
+                    cw,
+                    ch,
+                    font_size,
+                );
                 let inner_w = content_w + GROUP_PAD * 2.0;
                 let inner_h = content_h + GROUP_PAD * 2.0;
                 let need = ((inner_w + GAP) / (cw + GAP)).ceil() as usize;
