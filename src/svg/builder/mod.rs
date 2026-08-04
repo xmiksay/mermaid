@@ -127,6 +127,18 @@ impl SvgBuilder {
         );
     }
 
+    pub fn ellipse(&mut self, cx: f64, cy: f64, rx: f64, ry: f64, attrs: &str) {
+        let _ = write!(
+            self.body,
+            "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {}/>",
+            fnum(cx),
+            fnum(cy),
+            fnum(rx),
+            fnum(ry),
+            attrs
+        );
+    }
+
     pub fn text(&mut self, x: f64, y: f64, attrs: &str, content: &str) {
         // A markdown-string label's backtick fence wraps the *whole* label,
         // not each individually split display line — a multi-line fenced

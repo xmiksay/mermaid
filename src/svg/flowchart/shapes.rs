@@ -343,10 +343,22 @@ pub(super) fn cylinder(svg: &mut SvgBuilder, x: f64, y: f64, w: f64, h: f64, fil
     let ry = 8.0;
     let top_y = y + ry;
     let bot_y = y + h - ry;
+    // The top cap is a native <ellipse> rather than two path arcs: the arc
+    // endpoints would be exactly `2*rx` apart (the full major-axis diameter),
+    // a degenerate case where different SVG engines can rasterize the two
+    // half-arcs as slightly non-coincident curves, leaving a faint seam.
+    svg.ellipse(x + rx, top_y, rx, ry, fill_attr);
+    // Body: straight sides + bottom cap, sharing the same fill so it reads
+    // as one seamless cylinder with the ellipse above. Its top edge sits
+    // exactly on the ellipse's equator (its widest point, width `w`), so
+    // there's no gap or overlap between the two pieces. Deliberately left
+    // unclosed (no trailing `Z`): SVG fill auto-closes an open subpath with
+    // a straight line, but stroke does not, so the top edge is filled but
+    // not stroked — a stroked line there would cut a visible chord straight
+    // through the middle of the ellipse above it.
     svg.path(
         &format!(
-            "M{x0} {top_y} A{rx} {ry} 0 0 0 {x1} {top_y} A{rx} {ry} 0 0 0 {x0} {top_y} \
-             L{x0} {bot_y} A{rx} {ry} 0 0 0 {x1} {bot_y} L{x1} {top_y} Z",
+            "M{x0} {top_y} L{x0} {bot_y} A{rx} {ry} 0 0 0 {x1} {bot_y} L{x1} {top_y}",
             x0 = fnum(x),
             x1 = fnum(x + w),
             top_y = fnum(top_y),
