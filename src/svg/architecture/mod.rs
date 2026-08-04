@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::parse::ArchitectureDiagram;
+use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::NodeId;
 
 use super::builder::SvgBuilder;
@@ -93,6 +93,29 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     let mut group_y = PAD;
     let mut max_x: f64 = PAD;
 
+    // A titled edge draws its label centered in the gap between the two
+    // icons it connects, with no background rect (upstream architecture
+    // diagrams never draw one). The default H_GAP/V_GAP (40px) is barely
+    // wider than a short label, so two closely packed service icons routinely
+    // render the label overlapping one or both neighboring tiles (#405, same
+    // class of bug as the ER crow's-foot label fix). Widen whichever gap a
+    // labeled edge actually spans to fit the widest label along that axis,
+    // never narrower than the default.
+    let max_label_w = |horizontal: bool| {
+        d.edges
+            .iter()
+            .filter(|e| {
+                let horiz = matches!(e.from_side, ArchSide::Left | ArchSide::Right)
+                    && matches!(e.to_side, ArchSide::Left | ArchSide::Right);
+                horiz == horizontal
+            })
+            .filter_map(|e| e.label.as_deref())
+            .map(|label| super::metrics::text_width(label, 7.0, theme.font_size) + 8.0)
+            .fold(0.0_f64, f64::max)
+    };
+    let h_gap = max_label_w(true).max(H_GAP);
+    let v_gap = max_label_w(false).max(V_GAP);
+
     for parent in &group_order {
         let ids = by_parent.get(parent).cloned().unwrap_or_default();
         if ids.is_empty() {
@@ -140,8 +163,8 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             .map(|(i, id)| {
                 let n = i as NodeId;
                 let &(c, r) = grid.get(id).unwrap_or(&(0, 0));
-                let cx = col_rank[&c] as f64 * (SERVICE_W + H_GAP) + SERVICE_W / 2.0;
-                let cy = row_rank[&r] as f64 * (SERVICE_H + V_GAP) + SERVICE_H / 2.0;
+                let cx = col_rank[&c] as f64 * (SERVICE_W + h_gap) + SERVICE_W / 2.0;
+                let cy = row_rank[&r] as f64 * (SERVICE_H + v_gap) + SERVICE_H / 2.0;
                 (n, (cx, cy))
             })
             .collect();
