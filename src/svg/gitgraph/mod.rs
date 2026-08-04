@@ -20,7 +20,7 @@ const PAD: f64 = 30.0;
 const COMMIT_R: f64 = 10.0;
 const COMMIT_GAP: f64 = 50.0;
 const LANE_GAP: f64 = 50.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 /// Thick branch trunk / join line weight (upstream `.arrow` stroke-width).
 const LINE_W: f64 = 8.0;
 /// Corner radius of a rounded right-angle branch/merge join.

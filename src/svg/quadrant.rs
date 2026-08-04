@@ -8,7 +8,7 @@ use super::theme::Theme;
 
 const PAD: f64 = 40.0;
 const SIZE: f64 = 500.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 /// Default scatter-point radius when neither the point nor config sets one.
 const POINT_RADIUS: f64 = 5.0;
 

@@ -26,7 +26,7 @@ pub(super) const MIN_H: f64 = 40.0;
 const CANVAS_PAD: f64 = 24.0;
 pub(super) const SUBGRAPH_PAD: f64 = 16.0;
 /// Vertical space reserved above the graph for a frontmatter title.
-const TITLE_BAND: f64 = 34.0;
+const TITLE_BAND: f64 = 46.0;
 
 pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     if d.nodes.is_empty() {

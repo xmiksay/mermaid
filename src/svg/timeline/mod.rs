@@ -10,7 +10,7 @@ use super::builder::{SvgBuilder, LABEL_LINE_H};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 const SECTION_H: f64 = 40.0;
 const SECTION_GAP: f64 = 10.0;
 const PERIOD_H: f64 = 44.0;

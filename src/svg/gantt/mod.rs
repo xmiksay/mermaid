@@ -24,6 +24,10 @@ const BAR_H: f64 = 20.0;
 const ROW_GAP: f64 = 12.0;
 const ROW_H: f64 = BAR_H + ROW_GAP;
 const HEADER_H: f64 = 56.0;
+/// Extra breathing room reserved between the title and the chart body, only
+/// when a title is present — `HEADER_H` itself stays fixed so titleless
+/// charts are unaffected.
+const TITLE_EXTRA_GAP: f64 = 12.0;
 const AXIS_H: f64 = 26.0;
 const PAD: f64 = 16.0;
 const TIME_COL_MIN_W: f64 = 480.0;
@@ -98,7 +102,13 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         &ticks,
     );
     let width = (content_right + PAD).max(label_gutter + time_col_w + PAD * 2.0);
-    let height = HEADER_H + AXIS_H + body_h + PAD * 2.0;
+    let title_h = if d.title.is_some() {
+        TITLE_EXTRA_GAP
+    } else {
+        0.0
+    };
+    let header_h = HEADER_H + title_h;
+    let height = header_h + AXIS_H + body_h + PAD * 2.0;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
@@ -115,9 +125,9 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
     // to the top. `body_top` is where the task rows begin, `axis_y` the top of
     // the axis band (below the rows in the default layout).
     let (body_top, axis_y) = if d.top_axis {
-        (HEADER_H + AXIS_H, HEADER_H)
+        (header_h + AXIS_H, header_h)
     } else {
-        (HEADER_H, HEADER_H + body_h)
+        (header_h, header_h + body_h)
     };
     let body_bottom = body_top + body_h;
 

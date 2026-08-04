@@ -38,7 +38,7 @@ use rel::draw_rel;
 use shapes::{draw_element, resolve_element_style};
 
 const PAD: f64 = 32.0;
-const TITLE_GAP: f64 = 44.0;
+const TITLE_GAP: f64 = 56.0;
 
 const BOX_W: f64 = 220.0;
 const BOX_H: f64 = 130.0;

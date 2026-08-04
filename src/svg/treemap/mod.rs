@@ -21,7 +21,7 @@ use draw::draw_node;
 use squarify::squarify;
 
 const PAD: f64 = 24.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 const CHART_W: f64 = 640.0;
 const CHART_H: f64 = 420.0;
 const HEADER_H: f64 = 22.0;

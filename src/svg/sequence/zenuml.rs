@@ -17,7 +17,7 @@ const FRAME_INSET: f64 = 8.0;
 /// Height of the top-left title tab.
 const FRAME_HEADER_H: f64 = 22.0;
 /// Gap between the title tab and the participant row.
-const FRAME_HEADER_GAP: f64 = 10.0;
+const FRAME_HEADER_GAP: f64 = 22.0;
 /// Width of the left icon column inside a stereotype/actor participant box.
 const ICON_W: f64 = 26.0;
 

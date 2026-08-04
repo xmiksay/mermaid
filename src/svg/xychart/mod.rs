@@ -16,7 +16,7 @@ use legend::{draw_legend, draw_point_label};
 use ticks::nice_ticks;
 
 const PAD: f64 = 40.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 const AXIS_LEFT: f64 = 60.0;
 const AXIS_BOTTOM: f64 = 50.0;
 const CHART_W: f64 = 600.0;
