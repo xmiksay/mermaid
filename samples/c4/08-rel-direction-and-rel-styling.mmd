@@ -1,0 +1,13 @@
+C4Context
+    title Relation direction and styling
+    Person(user, "User")
+    System(top, "Top Service")
+    System(bottom, "Bottom Service")
+    System(left, "Left Service")
+    System(right, "Right Service")
+    Rel_U(bottom, top, "Escalates to")
+    Rel_D(top, bottom, "Delegates to")
+    Rel_L(right, left, "Requests from")
+    Rel_R(left, right, "Replies to")
+    Rel_Back(user, top, "Notified by")
+    UpdateRelStyle(user, top, $textColor="#d90429", $lineColor="#d90429", $offsetY="-10")

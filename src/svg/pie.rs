@@ -13,7 +13,7 @@ const RADIUS: f64 = 185.0;
 /// Margin between the pie and the canvas edge (upstream's `- 40`).
 const PAD: f64 = 40.0;
 /// Vertical band reserved above the pie for the title.
-const TITLE_GAP: f64 = 40.0;
+const TITLE_GAP: f64 = 52.0;
 /// Title font size (upstream `pieTitleTextSize` 25px, regular weight).
 const TITLE_SIZE: f64 = 25.0;
 /// Slice/outer-circle stroke width (upstream `pieStrokeWidth` 2px).
@@ -447,7 +447,7 @@ mod tests {
         // No config → full wedges from the centre (donutHole 0, textPosition
         // 0.75, right legend). Centre = (PAD + RADIUS, PAD + TITLE_GAP + RADIUS).
         let svg = render(&pie(vec![("A", 1.0), ("B", 1.0)]), &Theme::default());
-        assert!(svg.contains("M225 265L"), "full wedge apex at the centre");
+        assert!(svg.contains("M225 277L"), "full wedge apex at the centre");
         assert!(!svg.contains("A92.5 92.5"), "no donut hole by default");
     }
 

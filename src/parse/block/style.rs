@@ -201,9 +201,10 @@ pub(super) fn parse_edge(line: &str) -> Option<BlockEdge> {
 
 /// Match a link operator starting at byte `i`, returning `(end, tail, style,
 /// head)` where `end` is the byte index just past the operator. `boundary` says
-/// whether a leading `x`/`o`/`<` may act as a tail marker (solid links only,
-/// mirroring the upstream `[xo<]?--+[-xo>]` pattern; thick/dotted carry no
-/// tail).
+/// whether a leading `x`/`o`/`<` may act as a tail marker — solid, thick, and
+/// dotted links all carry an optional tail upstream (`[xo<]?--+[-xo>]`,
+/// `[xo<]?==+[=xo>]`, `[xo<]?-?\.+-[xo>]?`); only the invisible `~~~` core has
+/// no tail.
 fn match_link(
     b: &[u8],
     i: usize,
@@ -218,7 +219,7 @@ fn match_link(
         };
         if let Some(tail) = tail {
             if let Some((end, style, head)) = match_core(b, i + 1) {
-                if style == BlockLinkStyle::Solid {
+                if style != BlockLinkStyle::Invisible {
                     return Some((end, tail, style, head));
                 }
             }

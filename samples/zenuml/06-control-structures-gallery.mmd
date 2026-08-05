@@ -1,0 +1,25 @@
+zenuml
+    title Control structures
+    if (ok) {
+        A.proceed()
+    } else if (retry) {
+        A.retry()
+    } else {
+        A.abort()
+    }
+    while (more) {
+        A.next()
+    }
+    opt (flagged) {
+        A.mark()
+    }
+    par {
+        A.taskOne()
+    }
+    try {
+        A.risky()
+    } catch (e) {
+        A.recover()
+    } finally {
+        A.cleanup()
+    }

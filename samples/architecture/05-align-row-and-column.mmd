@@ -1,0 +1,22 @@
+architecture-beta
+    group cluster(cloud)[Cluster]
+    service n1(server)[Node 1] in cluster
+    service n2(server)[Node 2] in cluster
+    service n3(server)[Node 3] in cluster
+    service lb(server)[Load balancer] in cluster
+
+    lb:B -- T:n1
+    lb:B -- T:n2
+    lb:B -- T:n3
+
+    align row n1 n2 n3
+
+    group pipeline(cloud)[Pipeline]
+    service p1(server)[Stage 1] in pipeline
+    service p2(server)[Stage 2] in pipeline
+    service p3(server)[Stage 3] in pipeline
+
+    p1:B -- T:p2
+    p2:B -- T:p3
+
+    align column p1 p2 p3

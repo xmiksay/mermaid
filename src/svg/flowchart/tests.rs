@@ -8,6 +8,43 @@ fn parse_flow(s: &str) -> FlowchartDiagram {
     }
 }
 
+/// Bounds `(x0, y0, x1, y1)` of the opaque background rect drawn directly
+/// before the `text-anchor=middle` label for `id`.
+fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
+    let text = svg.find(&format!(">{id}</text>")).unwrap();
+    let rect_open = svg[..text].rfind("<rect ").unwrap();
+    let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+    let tag = &svg[rect_open..rect_end];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    let (x, y, w, h) = (
+        grab("x=\""),
+        grab("y=\""),
+        grab("width=\""),
+        grab("height=\""),
+    );
+    (x, y, x + w, y + h)
+}
+
+#[test]
+fn non_opposite_pair_labels_do_not_overlap() {
+    // Two unrelated edges (A->X, B->X — not a reversed pair) whose natural
+    // midpoints land at the same row; without the general overlap-avoidance
+    // pass their opaque label backgrounds would occlude one another.
+    let d = parse_flow("flowchart TD\nA -->|alpha label here| X\nB -->|beta label here| X\n");
+    let svg = render(&d, &Theme::default());
+    let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "alpha label here");
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "beta label here");
+    let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+    assert!(
+        !overlap,
+        "label backgrounds overlap: alpha ({ax0},{ay0},{ax1},{ay1}) vs beta ({bx0},{by0},{bx1},{by1})",
+    );
+}
+
 #[test]
 fn renders_basic_td() {
     let svg = render(
@@ -467,6 +504,127 @@ fn link_style_interpolate_linear_removes_curve() {
         &Theme::default(),
     );
     assert!(!any_bezier_path(&linear));
+}
+
+/// True if any drawn number in `svg` (an attribute value or a path waypoint)
+/// is negative — meaning some content landed left of/above the viewBox's
+/// `0 0` origin and would be clipped.
+fn has_negative_coordinate(svg: &str) -> bool {
+    let bytes = svg.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'-' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
+}
+
+/// The SVG's `viewBox` width and height.
+fn viewbox_size(svg: &str) -> (f64, f64) {
+    let start = svg.find("viewBox=\"").unwrap() + "viewBox=\"".len();
+    let end = start + svg[start..].find('"').unwrap();
+    let nums: Vec<f64> = svg[start..end]
+        .split_whitespace()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    (nums[2], nums[3])
+}
+
+/// True if every edge-label background rect (the theme's `flow_label_bg`
+/// fill) sits fully inside a `width`×`height` canvas.
+fn all_label_rects_within_bounds(svg: &str, width: f64, height: f64) -> bool {
+    svg.match_indices("fill=\"#e8e8e8\"").all(|(i, _)| {
+        let rect_open = svg[..i].rfind("<rect ").unwrap();
+        let tag = &svg[rect_open..i];
+        let grab = |attr: &str| -> f64 {
+            let s = tag.find(attr).unwrap() + attr.len();
+            let e = s + tag[s..].find('"').unwrap();
+            tag[s..e].parse().unwrap()
+        };
+        let (x, y, w, h) = (
+            grab("x=\""),
+            grab("y=\""),
+            grab("width=\""),
+            grab("height=\""),
+        );
+        x >= -0.01 && y >= -0.01 && x + w <= width + 0.01 && y + h <= height + 0.01
+    })
+}
+
+#[test]
+fn subgraph_with_local_direction_stays_within_canvas() {
+    // #368: a subgraph whose local `direction` differs from the diagram's
+    // global one can transpose its members further left than any other
+    // node's left edge; the canvas's left offset must expand to cover the
+    // subgraph frame (with its own padding) too, or the frame/label/nodes
+    // clip at x=0.
+    let src = "flowchart TD\n\
+               Intake --> Router\n\
+               Router --> Retry1\n\
+               Router --> Step1\n\
+               subgraph Fallback\n\
+               direction LR\n\
+               Retry1 --> Retry2\n\
+               end\n\
+               subgraph Pipeline\n\
+               direction LR\n\
+               Step1 --> Step2 --> Step3\n\
+               end\n\
+               Step3 --> Archive\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    assert!(
+        !has_negative_coordinate(&svg),
+        "content rendered outside the canvas (negative coordinate found)"
+    );
+}
+
+#[test]
+fn nested_subgraph_transposed_by_outer_local_direction_stays_within_outer_frame() {
+    // An outer subgraph's local `direction` (differing from the diagram's
+    // global one) must rigidly carry every recursively-nested descendant
+    // node along when it transposes, not just its own direct members —
+    // otherwise the outer frame (sized from recursive membership) and the
+    // inner subgraph's actual node positions (previously moved only if a
+    // direct member) disagree, leaving the inner subgraph's nodes outside
+    // the outer frame it's supposed to be nested inside.
+    let src = "flowchart TD\n\
+               subgraph Backend\n\
+               direction LR\n\
+               Auth --> Users\n\
+               subgraph Storage\n\
+               direction TB\n\
+               Users --> Cache\n\
+               Cache --> DB\n\
+               end\n\
+               end\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "Backend");
+    for id in ["Auth", "Users", "Cache", "DB"] {
+        let (cx, cy) = label_center(&svg, id);
+        assert!(
+            cx >= bx0 && cx <= bx1 && cy >= by0 && cy <= by1,
+            "{id} at ({cx}, {cy}) falls outside Backend's frame ({bx0}, {by0})-({bx1}, {by1})"
+        );
+    }
+}
+
+#[test]
+fn back_edge_label_stays_within_canvas_on_the_right() {
+    // #368: a routed back-edge (e.g. `Retry? --> Start`) curves around to the
+    // right of every node in the sugiyama layout; its label must expand the
+    // canvas width, not just node right edges, or the label's opaque
+    // background/text clip at the canvas's right edge.
+    let src = "flowchart TD\n\
+               Start{Start} -->|yes| A{Continue?}\n\
+               Start -->|no| Stop[Stop]\n\
+               A -->|yes| B{Retry?}\n\
+               A -->|no| End1[Done]\n\
+               B -->|yes| Start\n\
+               B -->|no| End2[Abort]\n";
+    let svg = render(&parse_flow(src), &Theme::default());
+    let (width, height) = viewbox_size(&svg);
+    assert!(
+        all_label_rects_within_bounds(&svg, width, height),
+        "an edge label rendered outside the canvas"
+    );
 }
 
 #[test]

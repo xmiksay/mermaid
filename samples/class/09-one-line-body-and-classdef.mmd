@@ -1,0 +1,10 @@
+classDiagram
+    class Duck { +swim() }
+    class Bird {
+        +String name
+        +fly()
+    }
+    Duck --|> Bird
+    classDef aquatic fill:#d0f0fd,stroke:#0077b6
+    class Duck aquatic
+    style Bird fill:#fef3c7,stroke:#d97706

@@ -146,7 +146,7 @@ fn label_does_not_land_on_an_unrelated_node() {
     // to Mainframe — and its label — pass directly over Internet Banking.
     // The label must dodge it instead of rendering on its fill.
     let elements = context_sample().elements;
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0);
+    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0, V_GAP, H_GAP);
     let mut pos = HashMap::new();
     let mut boundaries = Vec::new();
     let mut leaves = Vec::new();

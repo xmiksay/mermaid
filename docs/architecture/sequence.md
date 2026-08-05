@@ -10,7 +10,14 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   `stroke-dasharray="2 2"` in `theme.actor_stroke`, tab drawn as a beveled
   `<path>`, guard/condition text centered in black; `else`/`and` dividers reuse
   the same dotted stroke); the operator title (`alt`/`loop`/…) in the tab is
-  **regular weight** (upstream's `.labelText`), not bold (#329); `break` reuses
+  **regular weight** (upstream's `.labelText`), not bold (#329). The guard
+  label's centering assumes the frame clears the tab, which a frame scoped to
+  a single participant (e.g. a self-message inside `opt`) does not —
+  `block_label_placement` (`src/svg/sequence/blocks/frames.rs`) measures the
+  label's width against the tab's right edge and falls back to placing it
+  just after the tab instead of centered when they'd collide; the
+  canvas-width pre-pass (`block_label_right_overhang`) measures every block's
+  placement the same way so that fallback is never cropped. `break` reuses
   the frame with a `break` title; `rect <color>` draws a
   colored background band behind its items via a separate `draw_rect_bands`
   pass (paired `RectOpen`/`RectClose` events, LIFO stack, default fill
@@ -82,6 +89,25 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
     (`msg.from`, the participant activated when it earlier received a message).
     Deactivating the *sender* (not the receiver) is what closes John's band in
     the canonical `Alice->>+John` / `John-->>-Alice` example.
+- Sequence message labels draw with **no background rect by default**
+  (upstream Mermaid.js has none either) — `draw_message`'s cross-lifeline
+  branch (`src/svg/sequence/messages.rs`) only draws one when the opt-in
+  `config.sequence.messageLabelBackground` knob (bool, default `false`) is
+  set on `SequenceDiagram.message_label_background`, wired the same way as
+  every other per-diagram config gap (a `meta.config` lookup in
+  `parse_with_meta`). When set, the rect uses the shared `edge_label_bg`
+  helper (`theme.flow_label_bg`) and the text re-baselines to sit centered in
+  it, matching `draw_edge_label`'s convention; when unset the output is
+  byte-identical to before the flag existed. This is a deliberate deviation
+  from upstream fidelity, gated off by default so it never surprises a
+  faithful render. Independent of the flag, every message's label position is
+  resolved through the shared `label_layout::layout_edge_labels` pass (see
+  [the general edge-label overlap avoidance section](../architecture.md) for
+  the mechanism) — a no-op for Sequence today since `MSG_STEP` already keeps
+  message rows on distinct y-coordinates, but wired for consistency with the
+  other renderers. The self-message (loop-back) branch is untouched: its
+  label sits beside the loop box, not on a lifeline edge, so it keeps its own
+  fixed offset regardless of the flag.
 - Sequence `title` accepts both the space form (`title Demo`) and the legacy
   colon form (`title: Demo`, upstream lexer `"title:"\s…`); both set
   `SequenceDiagram.title`.
@@ -108,7 +134,14 @@ Parser: `src/parse/sequence/` · Renderer: `src/svg/sequence/`.
   `NOTE_SIDE_W`), wraps the text to the interior via `wrap_note_text` (honoring
   existing `<br>`/`\n` breaks first), and grows the box height with the line
   count. The layout pass reserves that computed height, so a multi-line note
-  pushes later events down.
+  pushes later events down. A `left of`/`right of` note's fixed-width box is
+  anchored off its participant's lifeline, not measured into the participant
+  layout, so it can extend past the outermost participant on either side; the
+  canvas-sizing step in `render` (`src/svg/sequence/mod.rs`) walks every
+  `Note` event's `note_geometry` after the layout pass (participant `x_of` is
+  final by then) and folds the widest overhang into the canvas — shifting
+  every participant right to clear a left-edge crop, growing the width to
+  clear a right-edge one.
 - Sequence `box <color> <label>` groups participants: `SequenceBox` carries an
   optional `color` (parsed in `split_box_color` — hex, `rgb()/rgba()`, or a
   named CSS color; else the whole string is the label) plus the member

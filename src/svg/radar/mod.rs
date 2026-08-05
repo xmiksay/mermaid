@@ -8,7 +8,7 @@ use super::builder::{fnum, SvgBuilder};
 use super::theme::Theme;
 
 const PAD: f64 = 30.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 const RADIUS: f64 = 190.0;
 /// Room reserved around the rings for the axis labels (each side).
 const LABEL_PAD: f64 = 40.0;

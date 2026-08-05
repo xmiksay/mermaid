@@ -1,0 +1,10 @@
+stateDiagram-v2
+    state "Waiting for payment confirmation" as WaitPay
+    state "Payment confirmed, preparing shipment" as Prep
+    [*] --> WaitPay
+    WaitPay --> Prep : webhook received
+    WaitPay --> Cancelled : timeout
+    Prep --> Shipped : package handed to carrier
+    Prep --> WaitPay : payment failed, retry
+    Shipped --> [*]
+    Cancelled --> [*]

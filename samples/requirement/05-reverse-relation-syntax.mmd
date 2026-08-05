@@ -1,0 +1,22 @@
+requirementDiagram
+
+requirement parent_req {
+    id: 1
+    text: parent requirement
+    risk: low
+    verifymethod: inspection
+}
+
+requirement child_req {
+    id: 2
+    text: child requirement
+    risk: low
+    verifymethod: inspection
+}
+
+element impl {
+    type: simulation
+}
+
+child_req <- contains - parent_req
+parent_req <- satisfies - impl

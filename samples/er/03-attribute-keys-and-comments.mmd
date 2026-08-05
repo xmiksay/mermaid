@@ -1,0 +1,16 @@
+erDiagram
+    STUDENT {
+        int id PK
+        string name
+    }
+    COURSE {
+        int id PK
+        string title
+    }
+    ENROLLMENT {
+        int student_id PK, FK
+        int course_id PK, FK
+        date enrolled_on "date the student joined the course"
+    }
+    STUDENT ||--o{ ENROLLMENT : has
+    COURSE ||--o{ ENROLLMENT : has

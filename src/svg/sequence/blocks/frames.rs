@@ -281,12 +281,84 @@ fn draw_block_frame(
     );
     if !label.is_empty() {
         // Guard/condition text centered in the frame, black (upstream), not the
-        // gray italic that used to sit beside the tab.
+        // gray italic that used to sit beside the tab. Centering assumes the
+        // frame is wide enough to clear the tab; a frame scoped to a single
+        // participant (e.g. a self-message inside `opt`) is barely wider than
+        // the tab itself, so a purely centered label would render on top of
+        // it. `block_label_placement` falls back to placing it right after
+        // the tab's measured extent whenever centering would collide.
+        let placement = block_label_placement(min_x, max_x, label);
+        let attrs = if placement.centered {
+            format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\"")
+        } else {
+            format!("fill=\"{fg}\" font-size=\"11\"")
+        };
         svg.text(
-            (min_x + max_x) / 2.0,
+            placement.anchor_x,
             y_top + 13.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+            &attrs,
             &format!("[{label}]"),
         );
     }
+}
+
+/// Where a block's `[condition]` guard label renders: centered in the frame
+/// when there's room to clear the tab, otherwise pinned just after the tab's
+/// measured extent (see `draw_block_frame`). Shared with the canvas-width
+/// pre-pass (`block_label_right_overhang`) so both agree on the label's
+/// actual position.
+struct LabelPlacement {
+    anchor_x: f64,
+    centered: bool,
+    right_edge: f64,
+}
+
+fn block_label_placement(min_x: f64, max_x: f64, label: &str) -> LabelPlacement {
+    let frame_x = min_x - 16.0;
+    let label_w = crate::svg::metrics::text_width(&format!("[{label}]"), 7.0, 11.0);
+    let center_x = (min_x + max_x) / 2.0;
+    let tab_right = frame_x + BLOCK_LABEL_W;
+    let gap = 6.0;
+    if center_x - label_w / 2.0 < tab_right + gap {
+        LabelPlacement {
+            anchor_x: tab_right + gap,
+            centered: false,
+            right_edge: tab_right + gap + label_w,
+        }
+    } else {
+        LabelPlacement {
+            anchor_x: center_x,
+            centered: true,
+            right_edge: center_x + label_w / 2.0,
+        }
+    }
+}
+
+/// Widest amount any block's guard label's rendered right edge extends past
+/// `participant_right_edge`. A narrow (e.g. single-participant) frame's label
+/// can fall back to the after-tab placement in `block_label_placement`, which
+/// is not bounded by the frame's own border the way the centered placement
+/// is — fold that overhang into the canvas width before drawing so it is
+/// never cropped.
+pub(in crate::svg::sequence) fn block_label_right_overhang(
+    events: &[Event],
+    x_of: &HashMap<String, f64>,
+    participant_right_edge: f64,
+) -> f64 {
+    let close_of = pair_blocks(events);
+    let mut overhang: f64 = 0.0;
+    for (i, ev) in events.iter().enumerate() {
+        if let EventKind::BlockOpen { label, .. } = &ev.kind {
+            if label.is_empty() {
+                continue;
+            }
+            let (min_x, max_x) = close_of
+                .get(&i)
+                .and_then(|&close| extents(events, i + 1..close, x_of))
+                .unwrap_or_else(|| all_extents(x_of));
+            let placement = block_label_placement(min_x, max_x, label);
+            overhang = overhang.max(placement.right_edge - participant_right_edge);
+        }
+    }
+    overhang.max(0.0)
 }

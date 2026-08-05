@@ -1,0 +1,18 @@
+---
+title: Par and critical
+---
+sequenceDiagram
+    participant Client
+    participant EmailSvc
+    participant SmsSvc
+    participant DB
+    par send email
+        Client->>EmailSvc: Notify
+    and send sms
+        Client->>SmsSvc: Notify
+    end
+    critical acquire lock
+        Client->>DB: Write
+    option lock unavailable
+        DB-->>Client: Retry later
+    end

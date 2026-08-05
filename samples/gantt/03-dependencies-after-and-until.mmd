@@ -1,0 +1,10 @@
+gantt
+    dateFormat YYYY-MM-DD
+    section Backend
+    API design      : a1, 2026-03-01, 3d
+    Database schema : a2, 2026-03-01, 2d
+    Shared lib      : a3, 2026-03-02, 2d
+    Integration     : a4, after a1 a2 a3, 4d
+    section Frontend
+    UI mockups      : b1, 2026-03-01, 5d
+    Code freeze     : b2, 2026-03-01, until a4

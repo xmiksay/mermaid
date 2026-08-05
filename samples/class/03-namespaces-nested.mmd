@@ -1,0 +1,16 @@
+classDiagram
+    namespace Company {
+        class Employee {
+            +String name
+        }
+        namespace Engineering {
+            class Developer {
+                +String language
+            }
+            class Tester {
+                +String tool
+            }
+        }
+    }
+    Employee <|-- Developer
+    Employee <|-- Tester

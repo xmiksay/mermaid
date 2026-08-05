@@ -1,0 +1,16 @@
+flowchart TD
+    Client[Client] --> Gateway[API Gateway]
+    Gateway --> Auth
+    subgraph Backend [Backend services]
+        direction LR
+        Auth[Auth service] --> Users[User service]
+        subgraph Storage [Storage layer]
+            direction TB
+            Users --> Cache[(Cache)]
+            Cache --> DB[(Database)]
+        end
+    end
+    Backend --> Metrics[Metrics collector]
+    style Storage fill:#e6f2ff,stroke:#3366cc
+    classDef highlight fill:#fff3cd,stroke:#cc9900
+    class Backend highlight

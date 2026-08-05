@@ -1,0 +1,52 @@
+requirementDiagram
+
+requirement r1 {
+    id: 1
+    text: parent requirement
+    risk: low
+    verifymethod: inspection
+}
+
+requirement r2 {
+    id: 2
+    text: child requirement
+    risk: low
+    verifymethod: inspection
+}
+
+requirement r3 {
+    id: 3
+    text: copied requirement
+    risk: low
+    verifymethod: inspection
+}
+
+requirement r4 {
+    id: 4
+    text: derived requirement
+    risk: medium
+    verifymethod: test
+}
+
+requirement r5 {
+    id: 5
+    text: refined requirement
+    risk: medium
+    verifymethod: analysis
+}
+
+element e1 {
+    type: simulation
+}
+
+element doc1 {
+    type: document
+}
+
+r1 - contains -> r2
+r1 - copies -> r3
+r1 - derives -> r4
+r1 - refines -> r5
+e1 - satisfies -> r1
+e1 - verifies -> r1
+doc1 - traces -> r1

@@ -29,7 +29,7 @@ const ACTOR_PAD_X: f64 = 20.0;
 const ACTOR_LINE_H: f64 = 18.0;
 const PARTICIPANT_GAP: f64 = 50.0;
 const PAD: f64 = 24.0;
-const TITLE_H: f64 = 30.0;
+const TITLE_H: f64 = 42.0;
 const MSG_STEP: f64 = 50.0;
 const MSG_TOP_GAP: f64 = 30.0;
 const MSG_BOTTOM_GAP: f64 = 30.0;
@@ -132,6 +132,42 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
     let footer_bottom = footer_top + actor_h;
     let height = footer_bottom + PAD;
 
+    // A `note left of`/`note right of` box is anchored off its participant's
+    // lifeline at a fixed width, not measured into the participant layout
+    // above, so it can extend past the outermost participant's box on either
+    // side. Now that every note's geometry is knowable (`x_of` is final),
+    // measure the widest overhang and fold it into the canvas: shift every
+    // participant right to clear a cropped left edge, and grow the width to
+    // clear a cropped right edge (same measure-then-size pattern as elsewhere
+    // in this codebase).
+    let participant_right_edge = width - PAD;
+    let (mut note_min_x, mut note_max_x) = (PAD, participant_right_edge);
+    for ev in &events {
+        if let EventKind::Note(note) = &ev.kind {
+            if let Some(g) = note_geometry(note, &x_of) {
+                note_min_x = note_min_x.min(g.rect_x);
+                note_max_x = note_max_x.max(g.rect_x + g.rect_w);
+            }
+        }
+    }
+    let left_shift = (PAD - note_min_x).max(0.0);
+    if left_shift > 0.0 {
+        for v in x_of.values_mut() {
+            *v += left_shift;
+        }
+    }
+    // A single-participant `opt`/`alt`/... frame's guard label can likewise
+    // fall back to a position past the frame's own border (see
+    // `block_label_right_overhang`); measured against the now-final `x_of`
+    // alongside the note overhang above. Both overhangs are shift-invariant:
+    // shifting every x by `left_shift` moves the note/label and the
+    // participant edge by the same amount, so the gap between them is
+    // unchanged — no need to re-add `left_shift` here.
+    let note_right_overhang = (note_max_x - participant_right_edge).max(0.0);
+    let block_right_overhang =
+        block_label_right_overhang(&events, &x_of, participant_right_edge + left_shift);
+    let width = width + left_shift + note_right_overhang.max(block_right_overhang);
+
     let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_markers(&mut svg, theme);
 
@@ -212,14 +248,52 @@ pub(crate) fn render(d: &SequenceDiagram, theme: &Theme) -> String {
         }
     }
 
+    // Message labels: collect a straight 2-point slot for every cross-lifeline
+    // labeled message (a self-message's label sits beside its loop-back box,
+    // not on a lifeline edge, so it is excluded here), then resolve every
+    // label's position in one pass. `MSG_STEP` already keeps message rows
+    // distinct, so this is a no-op today — wired for consistency with the
+    // other renderers and as a safety net against future layout changes.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut slot_of: HashMap<usize, usize> = HashMap::new();
+    for (i, ev) in events.iter().enumerate() {
+        if let EventKind::Message { msg, .. } = &ev.kind {
+            if let (Some(&x1), Some(&x2)) = (x_of.get(&msg.from), x_of.get(&msg.to)) {
+                if (x1 - x2).abs() >= 1e-6 && !msg.text.is_empty() {
+                    let w = crate::svg::metrics::text_width(&msg.text, 7.0, 12.0) + 8.0;
+                    slot_of.insert(i, label_slots.len());
+                    label_slots.push(super::label_layout::LabelSlot {
+                        polyline: vec![(x1, ev.y), (x2, ev.y)],
+                        size: (w, 18.0),
+                    });
+                }
+            }
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+
     // Events
-    for ev in &events {
+    for (i, ev) in events.iter().enumerate() {
         match &ev.kind {
             EventKind::Message { msg, number } => {
                 let x1 = x_of.get(&msg.from);
                 let x2 = x_of.get(&msg.to);
                 if let (Some(&x1), Some(&x2)) = (x1, x2) {
-                    draw_message(&mut svg, x1, x2, ev.y, msg.arrow, &msg.text, theme);
+                    let label_pos = slot_of
+                        .get(&i)
+                        .map(|&si| label_positions[si])
+                        .unwrap_or(((x1 + x2) / 2.0, ev.y));
+                    draw_message(
+                        &mut svg,
+                        x1,
+                        x2,
+                        ev.y,
+                        msg.arrow,
+                        &msg.text,
+                        theme,
+                        d.message_label_background,
+                        label_pos,
+                    );
                     if let Some(n) = number {
                         // Autonumber draws a filled circle badge on the arrow
                         // origin (upstream) rather than a `"1. "` text prefix.
@@ -364,5 +438,90 @@ mod tests {
         );
         assert!(svg.contains(">Carl<"), "created participant box is drawn");
         assert!(svg.contains(">Hi Carl<"), "creating message is drawn");
+    }
+
+    /// `(x, width)` of every `<rect>` in `svg`.
+    fn rect_extents(svg: &str) -> Vec<(f64, f64)> {
+        let mut out = Vec::new();
+        let mut rest = svg;
+        while let Some(start) = rest.find("<rect ") {
+            let tag_start = start + "<rect ".len();
+            let tag_end = rest[tag_start..]
+                .find('/')
+                .map_or(rest.len(), |i| tag_start + i);
+            let tag = &rest[tag_start..tag_end];
+            let grab = |attr: &str| -> f64 {
+                let s = tag.find(attr).unwrap() + attr.len();
+                let e = s + tag[s..].find('"').unwrap();
+                tag[s..e].parse::<f64>().unwrap()
+            };
+            out.push((grab("x=\""), grab("width=\"")));
+            rest = &rest[tag_end..];
+        }
+        out
+    }
+
+    #[test]
+    fn note_left_of_lone_participant_stays_within_canvas() {
+        // A single-participant diagram's box sits close to the canvas edge; a
+        // fixed-width `note left of`/`note right of` box anchored off that
+        // lifeline extends well past it. The canvas used to be sized from
+        // participant positions only, so both notes rendered cropped (bug).
+        let svg = render(
+            &build(
+                "sequenceDiagram\nparticipant A\n\
+                 note left of A: pinned to the left side of the lone participant\n\
+                 note right of A: pinned to the right side of the lone participant\n",
+            ),
+            &Theme::default(),
+        );
+        let viewbox_w = svg
+            .split("viewBox=\"0 0 ")
+            .nth(1)
+            .and_then(|s| s.split(' ').next())
+            .expect("viewBox present")
+            .parse::<f64>()
+            .expect("viewBox width is numeric");
+        for (x, w) in rect_extents(&svg) {
+            assert!(x >= -0.01, "rect x={x} is cropped off the left canvas edge");
+            assert!(
+                x + w <= viewbox_w + 0.01,
+                "rect right edge {} exceeds canvas width {viewbox_w}",
+                x + w
+            );
+        }
+    }
+
+    /// x of the opening `<text ...>` tag whose content is `needle` (including
+    /// the surrounding `>`/`<` so it doesn't match a text node's own middle).
+    fn text_x(svg: &str, needle: &str) -> f64 {
+        let end = svg
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"));
+        let open = svg[..end].rfind("<text ").expect("preceding <text tag");
+        let tag = &svg[open..end];
+        let s = tag.find("x=\"").expect("x attr") + 3;
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    }
+
+    #[test]
+    fn narrow_opt_block_condition_label_clears_the_tab() {
+        // A single-participant `opt` frame (e.g. wrapping a self-message) is
+        // barely wider than its own pentagon tab; the guard label used to
+        // center in the frame regardless of the tab's width, landing on top
+        // of it instead of after it (bug).
+        let svg = render(
+            &build(
+                "sequenceDiagram\nparticipant Server\nopt caching enabled\nServer->>Server: Store\nend\n",
+            ),
+            &Theme::default(),
+        );
+        let tab_x = text_x(&svg, ">opt<");
+        let label_x = text_x(&svg, ">[caching enabled]<");
+        assert!(
+            label_x + 0.01 >= tab_x + BLOCK_LABEL_W,
+            "condition label (x={label_x}) overlaps the tab (x={tab_x}, width={BLOCK_LABEL_W})"
+        );
     }
 }

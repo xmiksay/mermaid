@@ -16,7 +16,7 @@ use legend::{draw_legend, draw_point_label};
 use ticks::nice_ticks;
 
 const PAD: f64 = 40.0;
-const TITLE_GAP: f64 = 32.0;
+const TITLE_GAP: f64 = 44.0;
 const AXIS_LEFT: f64 = 60.0;
 const AXIS_BOTTOM: f64 = 50.0;
 const CHART_W: f64 = 600.0;
@@ -90,9 +90,10 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         vmin = *min;
         vmax = *max;
     }
+    let has_bars = d.series.iter().any(|s| s.kind == XySeriesKind::Bar);
     // Bar charts baseline at zero unless an explicit y-range says otherwise —
     // an auto range spanning only the data would start bars mid-axis.
-    if !y_explicit && vmin.is_finite() && d.series.iter().any(|s| s.kind == XySeriesKind::Bar) {
+    if !y_explicit && vmin.is_finite() && has_bars {
         vmin = vmin.min(0.0);
         vmax = vmax.max(0.0);
     }
@@ -127,25 +128,43 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
         _ => (1..=n).map(|i| i.to_string()).collect(),
     };
 
-    // Axes.
-    svg.line(
-        chart_left,
-        chart_top,
-        chart_left,
-        chart_bottom,
-        &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
-    );
-    svg.line(
-        chart_left,
-        chart_bottom,
-        chart_right,
-        chart_bottom,
-        &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
-    );
-
     // When horizontal, the category axis (x-axis) runs down the left and the
     // value axis (y-axis) runs along the bottom; bars grow rightward.
     let horiz = d.horizontal;
+
+    // Axes. Bars are anchored flush against one of these two lines — the
+    // x-axis (bottom) in vertical mode, the y-axis (left) in horizontal mode
+    // — so a bar's fill would paint over that line's stroke wherever their
+    // edges coincide. When bars are present, defer drawing the affected line
+    // until after the series below; the other line is untouched by bars and
+    // can be drawn now. Line-only charts are unaffected and draw both here,
+    // as before.
+    let left_line = |svg: &mut SvgBuilder| {
+        svg.line(
+            chart_left,
+            chart_top,
+            chart_left,
+            chart_bottom,
+            &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
+        );
+    };
+    let bottom_line = |svg: &mut SvgBuilder| {
+        svg.line(
+            chart_left,
+            chart_bottom,
+            chart_right,
+            chart_bottom,
+            &format!("stroke=\"{fg}\" stroke-width=\"1.5\""),
+        );
+    };
+    if has_bars && horiz {
+        bottom_line(&mut svg);
+    } else if has_bars {
+        left_line(&mut svg);
+    } else {
+        left_line(&mut svg);
+        bottom_line(&mut svg);
+    }
 
     // Category tick spacing along the category axis (bottom when vertical,
     // left when horizontal).
@@ -369,6 +388,16 @@ pub(crate) fn render(d: &XyChartDiagram, theme: &Theme) -> String {
                     &format!("fill=\"none\" stroke=\"{color}\" stroke-width=\"2\""),
                 );
             }
+        }
+    }
+
+    // Draw the bar-adjacent axis line last so it sits crisply on top of any
+    // bar fill it touches, rather than being painted over.
+    if has_bars {
+        if horiz {
+            left_line(&mut svg);
+        } else {
+            bottom_line(&mut svg);
         }
     }
 

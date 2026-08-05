@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::draw::{icon_name, is_dark};
-use super::layout::build;
+use super::layout::{bounds, build};
 use super::{render, RING_GAP};
 
 use crate::parse::{MindmapDiagram, MindmapNode, MindmapShape};
@@ -50,7 +50,7 @@ fn radial_layout_fans_children_around_root() {
         classes: vec![],
         children: vec![leaf("A"), leaf("B"), leaf("C"), leaf("D")],
     };
-    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
     // The root sits at the origin; every child sits on the first ring.
     assert_eq!((laid.x, laid.y), (0.0, 0.0));
     for c in &laid.children {
@@ -75,7 +75,7 @@ fn descendants_inherit_branch_section() {
         _ => panic!("not mindmap"),
     };
     let root = d.root.clone().unwrap();
-    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0);
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
     let branch = &laid.children[0];
     assert_eq!(branch.section, 0);
     assert_eq!(branch.children[0].section, 0);
@@ -148,6 +148,50 @@ fn icon_name_extraction() {
     assert_eq!(icon_name("fab fa-github"), "github");
     assert_eq!(icon_name("book"), "book");
     assert_eq!(icon_name(""), "");
+}
+
+#[test]
+fn bounds_enclose_a_wide_circle_nodes_full_radius() {
+    // A `((long label))` circle sizes its rendered radius from
+    // `max(w, h) / 2` (see `draw::draw_shape`), which for a long label is
+    // driven by the (wide) text width, not the (fixed) node height — a
+    // circle whose radius comes from `w` reaches further vertically than a
+    // plain box's `h / 2` half-height would suggest. `bounds` must use that
+    // same radius on both axes or the circle's top/bottom edge gets clipped
+    // by the canvas (issue: circle node cropped at canvas edge).
+    let root = MindmapNode {
+        text: "root".into(),
+        shape: MindmapShape::Circle,
+        icon: None,
+        classes: vec![],
+        children: vec![MindmapNode {
+            text: "A very long circle label that forces a wide radius".into(),
+            shape: MindmapShape::Circle,
+            icon: None,
+            classes: vec![],
+            children: vec![],
+        }],
+    };
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
+    let child = &laid.children[0];
+    let true_radius = (child.w / 2.0).max(child.h / 2.0);
+    assert!(
+        true_radius > child.h / 2.0,
+        "test setup must exercise the wide-circle case (w > h)"
+    );
+    let (min_x, min_y, max_x, max_y) = bounds(&laid);
+    assert!(
+        max_y >= child.y + true_radius - 1e-6,
+        "bounds bottom edge ({max_y}) must reach the circle's full radius ({})",
+        child.y + true_radius
+    );
+    assert!(
+        min_y <= child.y - true_radius + 1e-6,
+        "bounds top edge ({min_y}) must reach the circle's full radius ({})",
+        child.y - true_radius
+    );
+    assert!(max_x >= child.x + true_radius - 1e-6);
+    assert!(min_x <= child.x - true_radius + 1e-6);
 }
 
 #[test]

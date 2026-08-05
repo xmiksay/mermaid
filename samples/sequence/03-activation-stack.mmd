@@ -1,0 +1,13 @@
+---
+title: Activation stack
+---
+sequenceDiagram
+    participant Client
+    participant API
+    participant DB
+    Client->>+API: Request
+    activate API
+    API->>+DB: Query
+    DB-->>-API: Rows
+    deactivate API
+    API-->>-Client: Response

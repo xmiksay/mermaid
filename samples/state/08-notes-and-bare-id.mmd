@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Idle
+    Ready
+    Idle --> Ready : init
+    Ready --> Busy : dispatch
+    Busy --> Ready : complete
+    note right of Idle: waiting for the first init call
+    note left of Busy
+        Long-running work happens here; the state
+        machine blocks new dispatches until it completes.
+    end note

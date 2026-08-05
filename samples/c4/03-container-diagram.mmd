@@ -1,0 +1,11 @@
+C4Container
+    title Container view
+    Person(user, "User", "A product user")
+    Container(web, "Web App", "React", "Delivers the UI")
+    Container(api, "API", "Rust/Axum", "Handles business logic")
+    ContainerDb(db, "Database", "PostgreSQL", "Stores product data")
+    ContainerQueue(queue, "Message Queue", "RabbitMQ", "Async job processing")
+    Rel(user, web, "Uses", "HTTPS")
+    Rel(web, api, "Calls", "JSON/HTTPS")
+    Rel(api, db, "Reads/writes", "SQL")
+    Rel(api, queue, "Publishes jobs to")

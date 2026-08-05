@@ -1,0 +1,13 @@
+architecture-beta
+    service cloud1(cloud)[Cloud]
+    service db1(database)[Database]
+    service disk1(disk)[Disk]
+    service server1(server)[Server]
+    service net1(internet)[Internet]
+    service queue1(queue)[Queue]
+
+    cloud1:R -- L:db1
+    db1:R -- L:disk1
+    disk1:R -- L:server1
+    server1:R -- L:net1
+    net1:R -- L:queue1

@@ -25,7 +25,11 @@ fn every_sample_renders() {
         assert!(svg.starts_with("<svg"), "{stem}: missing <svg> prefix");
         assert!(svg.ends_with("</svg>"), "{stem}: missing </svg> suffix");
         assert!(svg.len() > 100, "{stem}: suspiciously small output");
-        fs::write(out.join(format!("{stem}.svg")), &svg).unwrap();
+        let path = out.join(format!("{stem}.svg"));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, &svg).unwrap();
     }
 }
 
@@ -44,6 +48,20 @@ fn doc_gallery_up_to_date() {
             "assets/gallery/{stem}.md is stale; regenerate with `cargo run --example gen-doc-diagrams`"
         );
     }
+}
+
+/// The committed `assets/gallery/README.md` index must match a fresh
+/// `gallery_index()` build.
+#[test]
+fn gallery_index_up_to_date() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/gallery/README.md");
+    let current =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("read assets/gallery/README.md: {e}"));
+    assert_eq!(
+        gallery_index(),
+        current,
+        "assets/gallery/README.md is stale; regenerate with `cargo run --example gen-doc-diagrams`"
+    );
 }
 
 #[test]

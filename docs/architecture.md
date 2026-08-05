@@ -50,13 +50,15 @@ src/
 │   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
 examples/render_user.rs        small one-shot example
-examples/gen-doc-diagrams.rs   regenerates assets/gallery/<stem>.md (the rustdoc gallery)
+examples/gen-doc-diagrams.rs   regenerates assets/gallery/**/*.md (gallery + index)
 tests/integration.rs           end-to-end tests; writes samples to target/test-samples/
-samples/                       one `.mmd` per diagram kind, shared by benches + gallery
-assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry,
-                               embedded into rustdoc via src/lib.rs
-gallery_build.rs               shared `SAMPLES` list + section helper, `include!`'d into
-                               examples/gen-doc-diagrams.rs and tests/integration.rs
+samples/                       primary `<kind>.mmd` per kind + secondary `<kind>/NN-slug.mmd`,
+                               shared by benches + gallery
+assets/gallery/<stem>.md       one rendered gallery section per SAMPLES entry; primaries
+                               embed into rustdoc via src/lib.rs, secondaries don't
+assets/gallery/README.md       browsable index of every sample, grouped by kind
+gallery_build.rs               shared `SAMPLES` list + section/index helpers, `include!`'d
+                               into examples/gen-doc-diagrams.rs and tests/integration.rs
 ```
 
 Cargo manifest: single `[package]`. Crate is published to crates.io as
@@ -66,22 +68,50 @@ Cargo manifest: single `[package]`. Crate is published to crates.io as
 
 `gallery_build.rs` is not a module — it is `include!`'d verbatim into both
 `examples/gen-doc-diagrams.rs` and `tests/integration.rs`, so its `SAMPLES`
-list (one `(stem, source)` per diagram kind) and `gallery_section()` helper are
-shared. `cargo run --example gen-doc-diagrams` regenerates one
-`assets/gallery/<stem>.md` per `SAMPLES` entry (23 files), rewriting only the
-files whose content changed and printing each rewrite — so `git status` after a
-regen shows exactly which diagrams a change affected. `src/lib.rs` embeds them
-into the crate rustdoc with one `#![doc = include_str!("../assets/gallery/<stem>.md")]`
-per stem in `SAMPLES` order (`#![doc]` attributes concatenate in order). The
-`doc_gallery_up_to_date` integration test names the stale stem if any committed
-file drifts from the samples.
+list (one `(title, stem, source)` 3-tuple per sample) and `gallery_section()`
+helper are shared. `cargo run --example gen-doc-diagrams` regenerates one
+`assets/gallery/<stem>.md` per `SAMPLES` entry, rewriting only the files whose
+content changed and printing each rewrite — so `git status` after a regen
+shows exactly which diagrams a change affected.
 
-The split (one file per diagram, `assets/gallery/*.md`) keeps parallel
+**Hybrid primary/secondary scheme.** Every diagram kind has exactly one
+**primary** sample: a flat `samples/<kind>.mmd` → `assets/gallery/<kind>.md`
+pair (stem has no `/`, `is_primary(stem)`). A kind may additionally have any
+number of **secondary** samples living under a per-kind subdirectory,
+numbered from `02`: `samples/<kind>/02-some-slug.mmd` →
+`assets/gallery/<kind>/02-some-slug.md` (stem is `<kind>/NN-slug`,
+`kind_of(stem)` strips back to `<kind>`). Both kinds of entries are plain
+`SAMPLES` 3-tuples — no structural difference, just a stem convention plus
+the `kind_of`/`is_primary` helpers that read it.
+
+**Only the primaries reach rustdoc.** `src/lib.rs` embeds exactly the 23
+primary stems into the crate rustdoc with one
+`#![doc = include_str!("../assets/gallery/<stem>.md")]` per stem, in
+`SAMPLES` order (`#![doc]` attributes concatenate in order). This is
+deliberate and does not grow as secondaries are added: both `ci.yml` and
+`docs.yml` build that page with `cargo doc --no-deps --lib -D warnings` on
+every push, and every extra embedded sample would slow that build. Secondary
+samples exist only as render-fixtures (covered by `every_sample_renders`) and
+as entries in the browsable index below — never as new `#![doc]` lines.
+
+**Browsable index.** `gallery_index()` builds `assets/gallery/README.md`: one
+`## <kind title>` heading per kind (first-appearance order, reusing that
+kind's primary title string), followed by a link-only list — primary first
+(labeled "Basic"), then secondaries in stem order, each linking to its own
+`{stem}.md` relative to `assets/gallery/`. No images are re-embedded there,
+to avoid recreating the same doc-bloat problem one level up. It's generated
+by the same `gen-doc-diagrams` run and checked by the
+`gallery_index_up_to_date` integration test, mirroring
+`doc_gallery_up_to_date`'s pattern. The top-level `README.md` links to it.
+
+The split (one file per sample, `assets/gallery/**/*.md`) keeps parallel
 renderer PRs from conflicting on a shared base64 blob: a PR touching one
-diagram regenerates exactly one gallery file. `.gitattributes` marks
-`assets/gallery/*.md linguist-generated=true` so the blobs stay collapsed in
-GitHub diffs. Changing `SAMPLES` itself (add/remove/reorder a stem) fans out to
-the `lib.rs` include lines, so treat it as a serial-window change.
+diagram regenerates exactly that diagram's gallery file(s). `.gitattributes`
+marks `assets/gallery/**/*.md linguist-generated=true` so the blobs stay
+collapsed in GitHub diffs, primaries and secondaries alike. Changing
+`SAMPLES`' primary entries (add/remove/reorder a primary stem) fans out to
+the `lib.rs` include lines, so treat that as a serial-window change; adding a
+secondary entry never touches `lib.rs`.
 
 ## Benches & integration samples
 
@@ -91,20 +121,15 @@ Two groups: `parse/<kind>` (parse only)
 and `render/<kind>` (parse + render to SVG). Sized inputs use realistic
 non-trivial examples (typically 10-30 lines).
 
-Integration tests write one sample SVG per diagram kind to
-`target/test-samples/<stem>.svg`, one stem per `SAMPLES` entry in
-`gallery_build.rs`:
-- `pie.svg`, `sequence.svg`
-- `flowchart.svg`, `state.svg`
-- `class.svg`, `er.svg`
-- `gantt.svg`, `journey.svg`
-- `timeline.svg`, `sankey.svg`
-- `quadrant.svg`, `xychart.svg`
-- `radar.svg`, `packet.svg`
-- `mindmap.svg`, `gitgraph.svg`
-- `requirement.svg`, `c4.svg`
-- `block.svg`, `architecture.svg`
-- `kanban.svg`, `treemap.svg`, `zenuml.svg`
+Integration tests write one sample SVG to `target/test-samples/<stem>.svg`
+per `SAMPLES` entry in `gallery_build.rs` — one per primary diagram kind
+(`pie.svg`, `sequence.svg`, `flowchart.svg`, `state.svg`, `class.svg`,
+`er.svg`, `gantt.svg`, `journey.svg`, `timeline.svg`, `sankey.svg`,
+`quadrant.svg`, `xychart.svg`, `radar.svg`, `packet.svg`, `mindmap.svg`,
+`gitgraph.svg`, `requirement.svg`, `c4.svg`, `block.svg`,
+`architecture.svg`, `kanban.svg`, `treemap.svg`, `zenuml.svg`), plus one
+nested `<kind>/NN-slug.svg` per secondary sample (e.g.
+`flowchart/02-nested-subgraphs.svg`).
 
 ## Themes — internal contract
 
@@ -200,8 +225,10 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   `font_size`, `use_max_width` (top-level *or* the per-diagram
   `<diagram>.useMaxWidth` key — upstream's schema only defines it per diagram,
   via `per_diagram_use_max_width`), `look`/`layout`/`security_level` (parsed, not
-  yet honored), `ticket_base_url`, `value_format`, `git_graph.*`. Closing a
-  per-diagram config gap is a `meta.config` lookup, not new scanning.
+  yet honored), `ticket_base_url`, `value_format`, `git_graph.*`,
+  `sequence_message_label_background` (`config.sequence.messageLabelBackground`
+  — see [sequence.md](architecture/sequence.md)). Closing a per-diagram config
+  gap is a `meta.config` lookup, not new scanning.
 - **Rendering is `parse_with_meta` → `render_body` (per-diagram match) →
   `decorate::apply`.** `theme_from_meta` builds the effective theme: a preamble
   `theme` overrides the caller's, then `themeVariables`/`fontFamily`/`fontSize`/
@@ -266,11 +293,37 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   and the labels no longer overlap. All graph-shaped kinds benefit for free.
   The `BOW` only parts the curves sideways, though; the two labels still land at
   the shared midpoint *along* the axis, so with #260's opaque backgrounds one
-  still occludes the other (#312). The state renderer therefore detects the pair
-  (a matching `(to, from)` transition) and, via `polyline_midpoint_offset`,
-  nudges each label `LABEL_STAGGER` arc-length back toward its own source — the
-  two edges run opposite ways, so their labels separate along the shared axis
-  and the backgrounds clear.
+  still occludes the other (#312) — the general pairwise label-overlap pass
+  below (`label_layout::layout_edge_labels`) is what actually separates them.
+- **General edge-label overlap avoidance** (`src/svg/label_layout.rs`,
+  `pub(super)`, shared by every graph-shaped renderer — Flowchart, State,
+  Class, ER, Block, Requirement, Architecture — plus Sequence): each renderer
+  draws its edges in a two-pass shape — draw every path first, collecting a
+  `LabelSlot { polyline, size }` per labeled edge in the same order they were
+  routed, then call `layout_edge_labels(&slots)` once for the whole diagram and
+  draw every label at its resolved position. The algorithm starts each label at
+  its polyline's arc-length midpoint (`geometry::polyline_midpoint`) and, for up
+  to 4 passes, scans every pair `(i, j)` in that same order: if their current
+  label rects overlap (`rect_overlap_area`, the same `(x, y, w, h)` overlap test
+  C4's `find_clear_label_point` uses), it nudges `j`'s label back toward its own
+  source by one `LABEL_STAGGER_STEP` (`polyline_midpoint_offset`), clamped to
+  `min(4 steps, 40% of that edge's arc length)` so a short edge gives up
+  gracefully instead of sliding a label off its end; if `j` has no room left it
+  tries nudging `i` forward under the same clamp; if neither can move, both are
+  left as-is and the scan continues (one stuck pair never blocks another). This
+  generalizes the state renderer's original opposite-pair-only stagger (#312) —
+  which it has since replaced entirely — to any two colliding labels, including
+  unrelated edges that merely happen to land near each other; it is a heuristic,
+  not a globally optimal placement for a 3-or-more-way cluster, and is a strict
+  no-op (every label at its natural midpoint) when nothing collides. Requirement
+  keeps its own custom label background (a light-gray patch, not the shared
+  `edge_label_bg`) and only takes the resolved *position* from the shared pass;
+  Architecture has no visible label background at all (upstream has none there
+  either) but still builds a `LabelSlot` with an *estimated* rect purely for the
+  collision math. `layout_edge_labels`'s output only ever feeds a label's draw
+  position — never a renderer's canvas bounding-box computation. C4's own
+  `rect_overlap_area` was deduplicated into this module; C4's heavier
+  `find_clear_label_point` node-avoidance search is unrelated and untouched.
 - Label line breaks: `split_label_lines()` in `src/svg/builder/text.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked

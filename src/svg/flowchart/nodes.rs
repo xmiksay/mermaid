@@ -1,8 +1,9 @@
 //! Flowchart node sizing/drawing and subgraph frame rendering.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::parse::{FlowNode, FlowchartDiagram, NodeShape, Style, Subgraph};
+use crate::sugiyama::NodeId;
 
 use crate::svg::builder::{fnum, split_label_lines, SvgBuilder};
 use crate::svg::interact::{close_click, open_click};
@@ -92,35 +93,7 @@ pub(super) fn draw_node(
             );
         }
         NodeShape::Cylinder => {
-            svg.rect(x, y + 8.0, w, h - 16.0, &fill_attr);
-            svg.path(
-                &format!(
-                    "M{} {} A{} {} 0 0 0 {} {} A{} {} 0 0 0 {} {}",
-                    fnum(x),
-                    fnum(y + 8.0),
-                    fnum(w / 2.0),
-                    fnum(8.0),
-                    fnum(x + w),
-                    fnum(y + 8.0),
-                    fnum(w / 2.0),
-                    fnum(8.0),
-                    fnum(x),
-                    fnum(y + 8.0)
-                ),
-                &fill_attr,
-            );
-            svg.path(
-                &format!(
-                    "M{} {} A{} {} 0 0 0 {} {}",
-                    fnum(x),
-                    fnum(y + h - 8.0),
-                    fnum(w / 2.0),
-                    fnum(8.0),
-                    fnum(x + w),
-                    fnum(y + h - 8.0)
-                ),
-                &format!("fill=\"none\" stroke=\"{flow_node_stroke}\" stroke-width=\"1.5\""),
-            );
+            super::shapes::cylinder(svg, x, y, w, h, &fill_attr);
         }
         NodeShape::Circle => {
             let r = w.max(h) / 2.0;
@@ -278,7 +251,7 @@ fn draw_label(
 
 // ---- subgraph frames -------------------------------------------------------
 
-fn collect_node_ids<'a>(
+pub(super) fn collect_node_ids<'a>(
     sub: &'a Subgraph,
     all: &'a [Subgraph],
     idx_by_id: &HashMap<&str, usize>,
@@ -295,28 +268,42 @@ fn collect_node_ids<'a>(
 }
 
 /// Screen-space bounding box `(x0, y0, x1, y1)` of every subgraph, including the
-/// space for its title, keyed by subgraph id. A box spans all member nodes
-/// gathered recursively through nested children.
+/// space for its title, keyed by subgraph id.
+///
+/// Computed bottom-up (deepest nesting first, via [`subgraph_depths`]): a
+/// subgraph's box pads around the union of its *direct* member nodes' bounds
+/// and its already-padded direct child subgraphs' boxes. Padding once per
+/// nesting level this way guarantees a child's frame is always inset from its
+/// parent's by at least `SUBGRAPH_PAD`, regardless of which node is extremal —
+/// flattening straight through to leaf nodes and padding once from that
+/// flattened set (the previous approach) could make a shared extremal
+/// descendant put both an inner and outer frame's edge at the exact same
+/// coordinate, touching with no visible gap.
 pub(super) fn compute_subgraph_boxes(
     d: &FlowchartDiagram,
     id_to_u32: &HashMap<String, crate::sugiyama::NodeId>,
     pos: &HashMap<crate::sugiyama::NodeId, (f64, f64)>,
     node_sizes: &[(f64, f64)],
 ) -> HashMap<String, (f64, f64, f64, f64)> {
-    let mut sub_idx_by_id: HashMap<&str, usize> = HashMap::new();
-    for (i, s) in d.subgraphs.iter().enumerate() {
-        sub_idx_by_id.insert(s.id.as_str(), i);
-    }
-    let mut boxes = HashMap::new();
-    for sub in &d.subgraphs {
-        let mut ids: Vec<&str> = Vec::new();
-        collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
+    let sub_idx_by_id: HashMap<&str, usize> = d
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let depths = super::edges::subgraph_depths(d, &sub_idx_by_id);
+    let mut order: Vec<usize> = (0..d.subgraphs.len()).collect();
+    order.sort_by(|&a, &b| depths[b].cmp(&depths[a]));
+
+    let mut boxes: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
+    for i in order {
+        let sub = &d.subgraphs[i];
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
-        for id in &ids {
-            let Some(&u) = id_to_u32.get(*id) else {
+        for id in &sub.node_ids {
+            let Some(&u) = id_to_u32.get(id.as_str()) else {
                 continue;
             };
             let (cx, cy) = pos[&u];
@@ -325,6 +312,14 @@ pub(super) fn compute_subgraph_boxes(
             max_x = max_x.max(cx + w / 2.0);
             min_y = min_y.min(cy - h / 2.0);
             max_y = max_y.max(cy + h / 2.0);
+        }
+        for child_id in &sub.child_subgraph_ids {
+            if let Some(&(cx0, cy0, cx1, cy1)) = boxes.get(child_id.as_str()) {
+                min_x = min_x.min(cx0);
+                max_x = max_x.max(cx1);
+                min_y = min_y.min(cy0);
+                max_y = max_y.max(cy1);
+            }
         }
         if !min_x.is_finite() {
             continue;
@@ -340,6 +335,127 @@ pub(super) fn compute_subgraph_boxes(
         );
     }
     boxes
+}
+
+/// Push sibling (non-nested) subgraph frames apart when they collide.
+///
+/// Sugiyama lays out plain node bounding boxes with a uniform `node_gap`; it
+/// has no notion of a subgraph's frame (`SUBGRAPH_PAD` + header band), and a
+/// subgraph with a local `direction` gets its members transposed in place
+/// *after* layout (see `apply_local_directions`), which can turn a narrow
+/// column into a wide row. Either can leave two sibling subgraphs' frames —
+/// which only need to clear each other, not their raw member nodes — visually
+/// overlapping even though sugiyama itself never placed a node on top of
+/// another. Resolve it here, post-layout, by nudging whole clusters apart
+/// along the axis with the smaller overlap until no sibling pair collides.
+pub(super) fn resolve_subgraph_overlaps(
+    d: &FlowchartDiagram,
+    id_to_u32: &HashMap<String, NodeId>,
+    pos: &mut HashMap<NodeId, (f64, f64)>,
+    edge_pts: &mut HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
+    node_sizes: &[(f64, f64)],
+) {
+    if d.subgraphs.len() < 2 {
+        return;
+    }
+    let sub_idx_by_id: HashMap<&str, usize> = d
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let member_sets: Vec<HashSet<NodeId>> = d
+        .subgraphs
+        .iter()
+        .map(|sub| {
+            let mut ids = Vec::new();
+            collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
+            ids.iter()
+                .filter_map(|id| id_to_u32.get(*id).copied())
+                .collect()
+        })
+        .collect();
+
+    const MARGIN: f64 = 12.0;
+    const MAX_PASSES: usize = 8;
+    for _ in 0..MAX_PASSES {
+        let boxes = compute_subgraph_boxes(d, id_to_u32, pos, node_sizes);
+        let mut moved = false;
+        for i in 0..d.subgraphs.len() {
+            for j in (i + 1)..d.subgraphs.len() {
+                if member_sets[i].is_empty() || member_sets[j].is_empty() {
+                    continue;
+                }
+                // Containment is expected and drawn as nesting, not a collision.
+                if member_sets[i].is_subset(&member_sets[j])
+                    || member_sets[j].is_subset(&member_sets[i])
+                {
+                    continue;
+                }
+                let (Some(&(ax0, ay0, ax1, ay1)), Some(&(bx0, by0, bx1, by1))) =
+                    (boxes.get(&d.subgraphs[i].id), boxes.get(&d.subgraphs[j].id))
+                else {
+                    continue;
+                };
+                let overlap_x = ax1.min(bx1) - ax0.max(bx0);
+                let overlap_y = ay1.min(by1) - ay0.max(by0);
+                if overlap_x <= 0.0 || overlap_y <= 0.0 {
+                    continue;
+                }
+                moved = true;
+                if overlap_x <= overlap_y {
+                    let shift = overlap_x / 2.0 + MARGIN / 2.0;
+                    let sign = if ax0 + ax1 <= bx0 + bx1 { -1.0 } else { 1.0 };
+                    translate_cluster(&member_sets[i], sign * shift, 0.0, pos, edge_pts);
+                    translate_cluster(&member_sets[j], -sign * shift, 0.0, pos, edge_pts);
+                } else {
+                    let shift = overlap_y / 2.0 + MARGIN / 2.0;
+                    let sign = if ay0 + ay1 <= by0 + by1 { -1.0 } else { 1.0 };
+                    translate_cluster(&member_sets[i], 0.0, sign * shift, pos, edge_pts);
+                    translate_cluster(&member_sets[j], 0.0, -sign * shift, pos, edge_pts);
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+
+    // Any edge with exactly one endpoint in a moved cluster no longer has a
+    // meaningful routed polyline (its old bend points were computed against
+    // pre-shift positions); fall back to a straight line between the new
+    // endpoints, matching `apply_local_directions`'s handling of the same case.
+    let all_members: HashSet<NodeId> = member_sets.iter().flatten().copied().collect();
+    for (&(a, b), pts) in edge_pts.iter_mut() {
+        if all_members.contains(&a) != all_members.contains(&b) {
+            if let (Some(&pa), Some(&pb)) = (pos.get(&a), pos.get(&b)) {
+                *pts = vec![pa, pb];
+            }
+        }
+    }
+}
+
+fn translate_cluster(
+    members: &HashSet<NodeId>,
+    dx: f64,
+    dy: f64,
+    pos: &mut HashMap<NodeId, (f64, f64)>,
+    edge_pts: &mut HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
+) {
+    for &u in members {
+        if let Some(p) = pos.get_mut(&u) {
+            p.0 += dx;
+            p.1 += dy;
+        }
+    }
+    for (&(a, b), pts) in edge_pts.iter_mut() {
+        if members.contains(&a) && members.contains(&b) {
+            for p in pts.iter_mut() {
+                p.0 += dx;
+                p.1 += dy;
+            }
+        }
+    }
 }
 
 pub(super) fn draw_subgraphs(

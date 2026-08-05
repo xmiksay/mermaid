@@ -29,6 +29,7 @@ mod interact;
 mod journey;
 mod kanban;
 mod label;
+mod label_layout;
 mod markup;
 mod metrics;
 mod mindmap;

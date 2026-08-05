@@ -1,0 +1,5 @@
+architecture-beta
+    service lambda("logos:aws-lambda")[Lambda]
+    service s3("logos:aws-s3")[Storage]
+
+    lambda:R -- L:s3

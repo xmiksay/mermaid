@@ -1,0 +1,14 @@
+stateDiagram-v2
+    state split [[fork]]
+    state merge [[join]]
+    state check <<choice>>
+    [*] --> split
+    split --> TaskA
+    split --> TaskB
+    TaskA --> merge
+    TaskB --> merge
+    merge --> check
+    check --> Success : ok
+    check --> Failure : error
+    Success --> [*]
+    Failure --> [*]

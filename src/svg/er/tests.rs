@@ -21,6 +21,45 @@ fn renders_basic() {
     assert!(svg.contains(">places<"));
 }
 
+/// Bounds `(x0, y0, x1, y1)` of the opaque background rect drawn directly
+/// before the `text-anchor=middle` label for `id`.
+fn label_bg_box(svg: &str, id: &str) -> (f64, f64, f64, f64) {
+    let text = svg.find(&format!(">{id}</text>")).unwrap();
+    let rect_open = svg[..text].rfind("<rect ").unwrap();
+    let rect_end = rect_open + svg[rect_open..].find("/>").unwrap();
+    let tag = &svg[rect_open..rect_end];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    let (x, y, w, h) = (
+        grab("x=\""),
+        grab("y=\""),
+        grab("width=\""),
+        grab("height=\""),
+    );
+    (x, y, x + w, y + h)
+}
+
+#[test]
+fn non_opposite_pair_labels_do_not_overlap() {
+    // Two unrelated relations (A->X, B->X — not a reversed pair) whose
+    // natural midpoints land at the same row; without the general
+    // overlap-avoidance pass their opaque label backgrounds would occlude
+    // one another.
+    let d =
+        build("erDiagram\nA ||--o{ X : \"alpha label here\"\nB ||--o{ X : \"beta label here\"\n");
+    let svg = render(&d, &Theme::default());
+    let (ax0, ay0, ax1, ay1) = label_bg_box(&svg, "alpha label here");
+    let (bx0, by0, bx1, by1) = label_bg_box(&svg, "beta label here");
+    let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+    assert!(
+        !overlap,
+        "label backgrounds overlap: alpha ({ax0},{ay0},{ax1},{ay1}) vs beta ({bx0},{by0},{bx1},{by1})",
+    );
+}
+
 // Pull the numeric value of `attr="…"` immediately following `after` in `s`.
 fn attr_after(s: &str, after: &str, attr: &str) -> f64 {
     let tail = &s[s.find(after).expect("marker present") + after.len()..];

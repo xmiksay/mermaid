@@ -13,6 +13,10 @@ pub struct SequenceDiagram {
     /// nesting, hierarchical `1.1.1` numbering, top-only boxed participants,
     /// suppressed synthesized returns, and a title frame.
     pub zenuml: bool,
+    /// `config.sequence.messageLabelBackground` — off by default. When set,
+    /// a cross-lifeline message label draws on an opaque background rect
+    /// (upstream Mermaid.js has none; this is an opt-in deviation).
+    pub message_label_background: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

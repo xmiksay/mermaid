@@ -1,0 +1,13 @@
+---
+title: Actor box grouping
+---
+sequenceDiagram
+    actor User
+    box Purple Backend
+        participant API
+        participant DB
+    end
+    User->>API: Request
+    API->>DB: Query
+    DB-->>API: Rows
+    API-->>User: Response

@@ -108,6 +108,55 @@ architecture-beta
     assert!(svg.contains(">Queries<"), "edge title missing");
 }
 
+/// The bare edge-title text's `(x, y)`, as drawn by `svg.text` (no
+/// background rect exists for architecture edge titles — see below).
+fn edge_title_pos(svg: &str, label: &str) -> (f64, f64) {
+    let text = svg.find(&format!(">{label}<")).unwrap();
+    let open = svg[..text].rfind("<text ").unwrap();
+    let tag = &svg[open..text];
+    let grab = |attr: &str| {
+        let s = tag.find(attr).unwrap() + attr.len();
+        let e = s + tag[s..].find('"').unwrap();
+        tag[s..e].parse::<f64>().unwrap()
+    };
+    (grab("x=\""), grab("y=\""))
+}
+
+/// The would-be virtual label rect at a resolved edge-title position: no
+/// background is ever drawn for an architecture edge title, but the shared
+/// overlap-avoidance pass still reasons about one internally (an *estimated*
+/// `text_width(...)+8.0` × `14.0` rect) purely for the collision math, so this
+/// reconstructs that same rect from the drawn text position for the test.
+fn virtual_label_rect(svg: &str, label: &str, font_size: f64) -> (f64, f64, f64, f64) {
+    let (tx, ty) = edge_title_pos(svg, label);
+    let my = ty + 3.0; // text baseline is `my - 3.0`
+    let w = crate::svg::metrics::text_width(label, 7.0, font_size) + 8.0;
+    (tx - w / 2.0, my - 7.0, tx + w / 2.0, my + 7.0)
+}
+
+#[test]
+fn non_opposite_pair_labels_do_not_overlap() {
+    // Two unrelated edges sharing the same endpoints (a--b twice, with
+    // different titles — not a reversed pair) route along the *same*
+    // polyline, so their natural midpoints are identical; without the
+    // general overlap-avoidance pass their virtual label rects would occlude
+    // one another.
+    let src = "architecture-beta\nservice a(server)[A]\nservice b(server)[B]\na:R -[m1]- L:b\na:R -[m2]- L:b\n";
+    let d = match crate::parse::parse(src).unwrap() {
+        crate::parse::Diagram::Architecture(d) => d,
+        _ => panic!("expected architecture diagram"),
+    };
+    let theme = Theme::default();
+    let svg = render(&d, &theme);
+    let (ax0, ay0, ax1, ay1) = virtual_label_rect(&svg, "m1", theme.font_size);
+    let (bx0, by0, bx1, by1) = virtual_label_rect(&svg, "m2", theme.font_size);
+    let overlap = ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1;
+    assert!(
+        !overlap,
+        "label rects overlap: m1 ({ax0},{ay0},{ax1},{ay1}) vs m2 ({bx0},{by0},{bx1},{by1})",
+    );
+}
+
 /// Top-left `(x, y)` of every service icon square (`width="80"`) in source
 /// order.
 fn service_boxes(svg: &str) -> Vec<(f64, f64)> {

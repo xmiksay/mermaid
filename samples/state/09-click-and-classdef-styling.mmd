@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> Green
+    Green --> Yellow : caution
+    Yellow --> Red : stop
+    Red --> Green : go
+    click Green href "https://example.com/green" "Docs for green"
+    click Red call showDetails() "Inspect red state"
+    classDef warn fill:#fff3cd,stroke:#cc9900
+    class Yellow warn
+    style Red fill:#f8d7da,stroke:#dc3545

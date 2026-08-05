@@ -18,7 +18,12 @@ mod tests;
 const NODE_PAD_X: f64 = 14.0;
 const NODE_H: f64 = 32.0;
 /// Radius added per depth level; first ring sits this far from the centre.
+/// A node whose own measured size needs more room than this pushes further
+/// out (see `layout::build`'s clearance calc) — this is only the floor.
 const RING_GAP: f64 = 130.0;
+/// Minimum gap kept between a node's own edge and its parent's, once the
+/// clearance calc grows the ring past `RING_GAP` for a wide/tall label.
+const NODE_MARGIN: f64 = 16.0;
 const TEXT_PX: f64 = 7.0;
 const ICON_SIZE: f64 = 16.0;
 /// Gap between an in-node icon glyph and its label text.
@@ -72,7 +77,15 @@ pub(crate) fn render(d: &MindmapDiagram, theme: &Theme) -> String {
     // Root sits at the origin; its children are dealt around the full circle by
     // angular sector (proportional to each subtree's leaf count), and every
     // descendant is fanned outward within its parent's sector.
-    let mut laid = layout::build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, font_size);
+    let mut laid = layout::build(
+        &root,
+        0,
+        -1,
+        -FRAC_PI_2,
+        -FRAC_PI_2 + 2.0 * PI,
+        font_size,
+        0.0,
+    );
 
     // Frame the whole radial layout and shift into positive space.
     let margin = 24.0;

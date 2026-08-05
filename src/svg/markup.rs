@@ -86,7 +86,7 @@ fn parse_line(line: &str, cur: &mut Style, stack: &mut Vec<(String, Style)>) -> 
     // rather than HTML tags — parse those into styled runs instead. Such a line
     // is self-contained, so it neither reads nor mutates the carried tag stack.
     if let Some(inner) = fenced_markdown(line) {
-        return parse_markdown_spans(inner);
+        return parse_markdown_line(inner, &mut Style::default());
     }
     let b = line.as_bytes();
     let mut spans: Vec<Span> = Vec::new();
@@ -112,28 +112,42 @@ fn parse_line(line: &str, cur: &mut Style, stack: &mut Vec<(String, Style)>) -> 
     spans
 }
 
-/// If `line` (trimmed) is a backtick-fenced markdown *string*, return its inner
-/// text. Mermaid marks markdown-string labels by wrapping them in backticks.
-fn fenced_markdown(line: &str) -> Option<&str> {
-    line.trim().strip_prefix('`')?.strip_suffix('`')
+/// If `s` (trimmed) is a backtick-fenced markdown *string*, return its inner
+/// text. Mermaid marks markdown-string labels by wrapping them in backticks —
+/// the fence wraps the *whole* label, which may itself contain embedded
+/// newlines/`<br>`s, so callers must check this against the raw label before
+/// splitting it into display lines (see [`parse_markdown_lines`]).
+pub(crate) fn fenced_markdown(s: &str) -> Option<&str> {
+    s.trim().strip_prefix('`')?.strip_suffix('`')
+}
+
+/// Parse an already-line-split markdown-string label into per-line styled
+/// runs: `**`/`__` toggle bold, `*`/`_` toggle italic, carried across lines
+/// the same way an unclosed HTML tag carries in [`parse_lines`] — so a bold
+/// run left open at a line break still bolds the next line.
+pub(crate) fn parse_markdown_lines(lines: &[&str]) -> Vec<Vec<Span>> {
+    let mut cur = Style::default();
+    lines
+        .iter()
+        .map(|line| parse_markdown_line(line, &mut cur))
+        .collect()
 }
 
 /// Parse a markdown-string body into styled runs: `**`/`__` toggle bold, `*`/`_`
 /// toggle italic. Marker-free text yields a single plain run, so a fenced label
 /// with no emphasis still renders as bare `<text>`.
-fn parse_markdown_spans(inner: &str) -> Vec<Span> {
+fn parse_markdown_line(inner: &str, cur: &mut Style) -> Vec<Span> {
     let b = inner.as_bytes();
     let mut spans: Vec<Span> = Vec::new();
     let mut buf = String::new();
-    let mut cur = Style::default();
     let mut i = 0;
     while i < b.len() {
         if (b[i] == b'*' || b[i] == b'_') && i + 1 < b.len() && b[i + 1] == b[i] {
-            flush(&mut spans, &mut buf, &cur);
+            flush(&mut spans, &mut buf, cur);
             cur.bold = !cur.bold;
             i += 2;
         } else if b[i] == b'*' || b[i] == b'_' {
-            flush(&mut spans, &mut buf, &cur);
+            flush(&mut spans, &mut buf, cur);
             cur.italic = !cur.italic;
             i += 1;
         } else {
@@ -142,7 +156,7 @@ fn parse_markdown_spans(inner: &str) -> Vec<Span> {
             i += ch.len_utf8();
         }
     }
-    flush(&mut spans, &mut buf, &cur);
+    flush(&mut spans, &mut buf, cur);
     if spans.is_empty() {
         spans.push(Span::default());
     }

@@ -1,0 +1,10 @@
+---
+title: Note word wrap
+---
+sequenceDiagram
+    participant A
+    participant B
+    Note over A,B: This is a long note that spans both participants and should wrap across multiple lines inside its box
+    A->>B: Hello
+    Note left of A: A shorter note pinned to the left side of A that still wraps if long enough to need it
+    Note right of B: Another wrapped note anchored to the right of B describing what just happened here

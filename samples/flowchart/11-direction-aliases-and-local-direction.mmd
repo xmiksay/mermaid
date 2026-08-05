@@ -1,0 +1,16 @@
+---
+title: Direction aliases and local direction
+---
+flowchart TD
+    A[Intake] --> B[Router]
+    subgraph Pipeline [Pipeline]
+        direction LR
+        C[Step 1] --> D[Step 2] --> E[Step 3]
+    end
+    B --> C
+    E --> F[Archive]
+    subgraph Fallback
+        direction >
+        G[Retry 1] --> H[Retry 2]
+    end
+    B --> G

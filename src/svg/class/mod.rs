@@ -194,7 +194,11 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         );
     }
 
-    // Relations first.
+    // Relations first: draw every path, collecting each labeled relation's
+    // clipped polyline, then resolve all label positions in one pass so two
+    // unrelated relations whose labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.from), id_to_u32.get(&rel.to)) else {
             continue;
@@ -205,7 +209,19 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         if pts.len() < 2 {
             continue;
         }
-        draw_relation(&mut svg, pts, rel, &sizes, &id_to_u32, theme);
+        let clipped = draw_relation(&mut svg, pts, rel, &sizes, &id_to_u32, theme);
+        if let Some(label) = &rel.label {
+            let w = super::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: clipped,
+                size: (w, 18.0),
+            });
+            labels.push(label);
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        super::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     // Classes.

@@ -1,0 +1,41 @@
+requirementDiagram
+
+requirement system_req {
+    id: 1
+    text: top-level system requirement
+    risk: high
+    verifymethod: inspection
+}
+
+requirement subsystem_a {
+    id: 2
+    text: subsystem A requirement
+    risk: medium
+    verifymethod: analysis
+}
+
+requirement subsystem_b {
+    id: 3
+    text: subsystem B requirement
+    risk: medium
+    verifymethod: analysis
+}
+
+requirement module_a1 {
+    id: 4
+    text: module A1 requirement
+    risk: low
+    verifymethod: test
+}
+
+requirement module_a2 {
+    id: 5
+    text: module A2 requirement
+    risk: low
+    verifymethod: test
+}
+
+system_req - contains -> subsystem_a
+system_req - contains -> subsystem_b
+subsystem_a - contains -> module_a1
+subsystem_a - contains -> module_a2

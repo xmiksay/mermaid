@@ -13,7 +13,7 @@ mod entity;
 mod relation;
 
 use entity::{draw_entity, entity_size};
-use relation::draw_relation;
+use relation::{draw_relation, CARD_MAX_REACH};
 
 const CANVAS_PAD: f64 = 24.0;
 
@@ -61,7 +61,23 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         edges,
         node_size: node_size_su,
     };
-    let layout = layout_with(&g, &LayoutConfig::default()).unwrap_or_default();
+    // A relation label sits centered on its edge, between the cardinality
+    // glyphs at each end (#398). The default layer gap alone doesn't reserve
+    // room for both the glyph reach *and* the label width, so tightly packed
+    // entities (e.g. `direction LR` chains) render the label overlapping the
+    // crow's-foot glyphs. Widen the gap between layers to fit the widest
+    // labeled relation's glyph clearance + label, never narrower than default.
+    let max_label_w = d
+        .relations
+        .iter()
+        .filter(|r| !r.label.is_empty())
+        .map(|r| super::metrics::text_width(&r.label, 7.0, theme.font_size) + 8.0)
+        .fold(0.0_f64, f64::max);
+    let layout_cfg = LayoutConfig {
+        layer_gap: (CARD_MAX_REACH * 2.0 + max_label_w).max(LayoutConfig::default().layer_gap),
+        ..LayoutConfig::default()
+    };
+    let layout = layout_with(&g, &layout_cfg).unwrap_or_default();
     let (raw_w, raw_h) = (layout.width, layout.height);
     let (canvas_w, canvas_h) = match dir {
         FlowDirection::TopDown | FlowDirection::BottomTop => (raw_w, raw_h),
@@ -82,6 +98,11 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
+    // Draw every relation's path first, collecting each labeled one's clipped
+    // polyline, then resolve all label positions in one pass so two unrelated
+    // relations whose labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for rel in &d.relations {
         let (Some(&u), Some(&v)) = (id_to_u32.get(&rel.left), id_to_u32.get(&rel.right)) else {
             continue;
@@ -93,7 +114,19 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
             continue;
         }
         let pts: Vec<(f64, f64)> = raw_pts.iter().map(|&p| transform(p)).collect();
-        draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
+        let clipped = draw_relation(&mut svg, &pts, rel, &sizes, &id_to_u32, theme);
+        if !rel.label.is_empty() && !clipped.is_empty() {
+            let w = super::metrics::text_width(&rel.label, 7.0, theme.font_size) + 8.0;
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: clipped,
+                size: (w, 18.0),
+            });
+            labels.push(&rel.label);
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        super::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     for (i, e) in d.entities.iter().enumerate() {

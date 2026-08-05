@@ -1,0 +1,13 @@
+zenuml
+    title Stereotype annotators
+    @Actor User
+    @Boundary UI
+    @Control Ctrl
+    @Entity Order
+    @Database DB
+    User -> UI.submit() {
+        Ctrl.process() {
+            Order.validate()
+            DB.save(Order)
+        }
+    }

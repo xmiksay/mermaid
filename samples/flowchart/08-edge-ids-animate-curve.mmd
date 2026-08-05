@@ -1,0 +1,9 @@
+---
+title: Edge ids, animate and curve
+---
+flowchart LR
+    A[Start] --> B[Middle]
+    A e1@--> C[Fast path]
+    e1@{ animate: true, curve: step }
+    linkStyle 0 interpolate linear
+    linkStyle default stroke:#888,stroke-width:2px

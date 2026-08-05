@@ -92,6 +92,10 @@ pub struct DiagramMeta {
     /// `config.timeline.disableMulticolor` from frontmatter — copied onto a
     /// [`TimelineDiagram`] to keep a sectionless timeline one flat color.
     pub timeline_disable_multicolor: Option<bool>,
+    /// `config.sequence.messageLabelBackground` from frontmatter — copied onto
+    /// a [`SequenceDiagram`] to draw an opaque background behind message
+    /// labels (off by default; upstream Mermaid.js has no such box).
+    pub sequence_message_label_background: Option<bool>,
     /// `config.sankey.showValues` from frontmatter — copied onto a
     /// [`SankeyDiagram`] to toggle the per-node value label.
     pub sankey_show_values: Option<bool>,

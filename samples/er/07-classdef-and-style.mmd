@@ -1,0 +1,13 @@
+erDiagram
+    CUSTOMER {
+        int id PK
+        string name
+    }
+    ORDER {
+        int id PK
+        int customer_id FK
+    }
+    CUSTOMER ||--o{ ORDER : places
+    classDef vip fill:#ffd166,stroke:#e09f3e
+    class CUSTOMER vip
+    style ORDER fill:#e0fbfc,stroke:#3d5a80

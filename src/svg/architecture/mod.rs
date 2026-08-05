@@ -7,11 +7,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::parse::ArchitectureDiagram;
+use crate::parse::{ArchSide, ArchitectureDiagram};
 use crate::sugiyama::NodeId;
 
 use super::builder::SvgBuilder;
-use super::geometry::polyline_midpoint;
 use super::theme::Theme;
 
 mod draw;
@@ -94,6 +93,29 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
     let mut group_y = PAD;
     let mut max_x: f64 = PAD;
 
+    // A titled edge draws its label centered in the gap between the two
+    // icons it connects, with no background rect (upstream architecture
+    // diagrams never draw one). The default H_GAP/V_GAP (40px) is barely
+    // wider than a short label, so two closely packed service icons routinely
+    // render the label overlapping one or both neighboring tiles (#405, same
+    // class of bug as the ER crow's-foot label fix). Widen whichever gap a
+    // labeled edge actually spans to fit the widest label along that axis,
+    // never narrower than the default.
+    let max_label_w = |horizontal: bool| {
+        d.edges
+            .iter()
+            .filter(|e| {
+                let horiz = matches!(e.from_side, ArchSide::Left | ArchSide::Right)
+                    && matches!(e.to_side, ArchSide::Left | ArchSide::Right);
+                horiz == horizontal
+            })
+            .filter_map(|e| e.label.as_deref())
+            .map(|label| super::metrics::text_width(label, 7.0, theme.font_size) + 8.0)
+            .fold(0.0_f64, f64::max)
+    };
+    let h_gap = max_label_w(true).max(H_GAP);
+    let v_gap = max_label_w(false).max(V_GAP);
+
     for parent in &group_order {
         let ids = by_parent.get(parent).cloned().unwrap_or_default();
         if ids.is_empty() {
@@ -141,8 +163,8 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
             .map(|(i, id)| {
                 let n = i as NodeId;
                 let &(c, r) = grid.get(id).unwrap_or(&(0, 0));
-                let cx = col_rank[&c] as f64 * (SERVICE_W + H_GAP) + SERVICE_W / 2.0;
-                let cy = row_rank[&r] as f64 * (SERVICE_H + V_GAP) + SERVICE_H / 2.0;
+                let cx = col_rank[&c] as f64 * (SERVICE_W + h_gap) + SERVICE_W / 2.0;
+                let cy = row_rank[&r] as f64 * (SERVICE_H + v_gap) + SERVICE_H / 2.0;
                 (n, (cx, cy))
             })
             .collect();
@@ -234,6 +256,13 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         );
     }
 
+    // Draw every edge's path first, collecting each labeled one's clipped
+    // polyline plus an *estimated* virtual rect (no background is drawn here —
+    // upstream's architecture diagrams have none — the rect exists purely for
+    // the shared collision math), then resolve all label positions in one
+    // pass so two unrelated edges whose labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut edge_titles: Vec<&str> = Vec::new();
     for e in &d.edges {
         // An endpoint may be a service/junction (`centers`) or a group box.
         let resolve = |id: &String| centers.get(id).or_else(|| group_boxes.get(id));
@@ -274,14 +303,22 @@ pub(crate) fn render(d: &ArchitectureDiagram, theme: &Theme) -> String {
         );
 
         if let Some(title) = &e.label {
-            let (mx, my) = polyline_midpoint(&pts);
-            svg.text(
-                mx,
-                my - 3.0,
-                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
-                title,
-            );
+            let w = super::metrics::text_width(title, 7.0, theme.font_size) + 8.0;
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: pts,
+                size: (w, 14.0),
+            });
+            edge_titles.push(title);
         }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for ((mx, my), title) in label_positions.into_iter().zip(edge_titles) {
+        svg.text(
+            mx,
+            my - 3.0,
+            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"11\""),
+            title,
+        );
     }
 
     for p in &placed_services {

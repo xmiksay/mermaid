@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Active
+    state Active {
+        [*] --> NetworkOn
+        NetworkOn --> NetworkOff : disconnect
+        NetworkOff --> NetworkOn : connect
+        --
+        [*] --> AudioMuted
+        AudioMuted --> AudioOn : unmute
+        AudioOn --> AudioMuted : mute
+    }

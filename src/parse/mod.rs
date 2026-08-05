@@ -172,6 +172,11 @@ pub fn parse_with_meta(input: &str) -> Result<(Diagram, DiagramMeta), ParseError
     if let (Diagram::Timeline(t), Some(true)) = (&mut diagram, meta.timeline_disable_multicolor) {
         t.disable_multicolor = true;
     }
+    if let (Diagram::Sequence(s), Some(true)) =
+        (&mut diagram, meta.sequence_message_label_background)
+    {
+        s.message_label_background = true;
+    }
     if let Diagram::GitGraph(g) = &mut diagram {
         apply_git_graph_config(&mut g.config, &meta.git_graph);
     }

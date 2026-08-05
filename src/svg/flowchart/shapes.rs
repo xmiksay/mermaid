@@ -158,7 +158,7 @@ pub(super) fn draw(
             );
         }
         NodeShape::LinedCylinder => {
-            cylinder(svg, x, y, w, h, fill_attr, &seam);
+            cylinder(svg, x, y, w, h, fill_attr);
             // Extra seam ring below the top cap marks the disk.
             svg.path(
                 &format!(
@@ -333,37 +333,40 @@ fn brace_path(bx: f64, top: f64, bot: f64, q: f64, dir: f64) -> String {
     )
 }
 
-/// Vertical cylinder outline (top ellipse cap, body, front seam), reused by the
-/// disk shape which stacks an extra seam ring on top.
-fn cylinder(svg: &mut SvgBuilder, x: f64, y: f64, w: f64, h: f64, fill_attr: &str, seam: &str) {
-    svg.rect(x, y + 8.0, w, h - 16.0, fill_attr);
+/// Vertical cylinder outline: one continuous closed path tracing the whole
+/// silhouette (full top ellipse, straight sides, front bottom curve) so the
+/// shape gets a single fill/stroke with no separate rect border underneath —
+/// the front arc of the top ellipse doubles as the "open lid" seam line.
+/// Shared by the plain database shape (`nodes.rs`) and the lined-disk shape.
+pub(super) fn cylinder(svg: &mut SvgBuilder, x: f64, y: f64, w: f64, h: f64, fill_attr: &str) {
+    let rx = w / 2.0;
+    let ry = 8.0;
+    let top_y = y + ry;
+    let bot_y = y + h - ry;
+    // The top cap is a native <ellipse> rather than two path arcs: the arc
+    // endpoints would be exactly `2*rx` apart (the full major-axis diameter),
+    // a degenerate case where different SVG engines can rasterize the two
+    // half-arcs as slightly non-coincident curves, leaving a faint seam.
+    svg.ellipse(x + rx, top_y, rx, ry, fill_attr);
+    // Body: straight sides + bottom cap, sharing the same fill so it reads
+    // as one seamless cylinder with the ellipse above. Its top edge sits
+    // exactly on the ellipse's equator (its widest point, width `w`), so
+    // there's no gap or overlap between the two pieces. Deliberately left
+    // unclosed (no trailing `Z`): SVG fill auto-closes an open subpath with
+    // a straight line, but stroke does not, so the top edge is filled but
+    // not stroked — a stroked line there would cut a visible chord straight
+    // through the middle of the ellipse above it.
     svg.path(
         &format!(
-            "M{} {} A{} {} 0 0 0 {} {} A{} {} 0 0 0 {} {}",
-            fnum(x),
-            fnum(y + 8.0),
-            fnum(w / 2.0),
-            fnum(8.0),
-            fnum(x + w),
-            fnum(y + 8.0),
-            fnum(w / 2.0),
-            fnum(8.0),
-            fnum(x),
-            fnum(y + 8.0),
+            "M{x0} {top_y} L{x0} {bot_y} A{rx} {ry} 0 0 0 {x1} {bot_y} L{x1} {top_y}",
+            x0 = fnum(x),
+            x1 = fnum(x + w),
+            top_y = fnum(top_y),
+            bot_y = fnum(bot_y),
+            rx = fnum(rx),
+            ry = fnum(ry),
         ),
         fill_attr,
-    );
-    svg.path(
-        &format!(
-            "M{} {} A{} {} 0 0 0 {} {}",
-            fnum(x),
-            fnum(y + h - 8.0),
-            fnum(w / 2.0),
-            fnum(8.0),
-            fnum(x + w),
-            fnum(y + h - 8.0),
-        ),
-        seam,
     );
 }
 

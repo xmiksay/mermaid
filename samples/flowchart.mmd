@@ -4,7 +4,7 @@ flowchart TD
     Valid -->|yes| Process[Process] & Audit[(Audit log)]
     Valid -->|no| Error>Error]
     subgraph Cleanup [Cleanup phase]
-        Process --> End([End])
-        Audit --> End
+        Process -->|log entry written| End([End])
+        Audit -->|log entry synced| End
     end
     Error --> End

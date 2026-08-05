@@ -16,7 +16,7 @@ use super::color::readable_text_color;
 use super::theme::Theme;
 
 const MARGIN: f64 = 20.0;
-const TITLE_H: f64 = 40.0;
+const TITLE_H: f64 = 52.0;
 /// Left gutter reserved for the title and the actor legend; tasks start here.
 const LEFT_MARGIN: f64 = 160.0;
 const TASK_W: f64 = 150.0;

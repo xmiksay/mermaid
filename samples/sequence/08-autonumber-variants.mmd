@@ -1,0 +1,14 @@
+---
+title: Autonumber variants
+---
+sequenceDiagram
+    participant A
+    participant B
+    autonumber
+    A->>B: First
+    B-->>A: Second
+    autonumber off
+    A->>B: Not numbered
+    autonumber 1.5 0.5
+    A->>B: Fractional start
+    B-->>A: Fractional step

@@ -8,7 +8,7 @@ use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
-use super::geometry::{clip_rect, polyline_midpoint};
+use super::geometry::clip_rect;
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -201,6 +201,12 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
         .map(|b| (b.name.clone(), (b.x, b.y, b.w, b.h)))
         .collect();
 
+    // Draw every relation's path first, collecting each one's clipped
+    // polyline plus its `<<kind>>` label and background size, then resolve
+    // all label positions in one pass so two unrelated relations whose
+    // labels would collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut rel_labels: Vec<(String, f64)> = Vec::new();
     for rel in &d.relations {
         let (Some(a), Some(b)) = (by_name.get(&rel.from), by_name.get(&rel.to)) else {
             continue;
@@ -280,18 +286,25 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             ),
         );
 
-        let (mx, my) = polyline_midpoint(&clipped);
         // Width from the displayed glyphs (`<<kind>>`), not the entity-coded
         // form that carries the `#lt;`/`#gt;` sentinels.
         let label_w = super::metrics::text_width(&format!("<<{kind_word}>>"), 5.5, theme.font_size);
         let lw = (label_w + 14.0).max(60.0);
+        label_slots.push(super::label_layout::LabelSlot {
+            polyline: clipped,
+            size: (lw, 16.0),
+        });
+        rel_labels.push((label, lw));
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for ((mx, my), (label, lw)) in label_positions.into_iter().zip(&rel_labels) {
         // Upstream draws the relation label on a light-gray background patch
         // (`.relationshipLabelBox`, rgb(232,232,232) at 0.85 opacity), no
         // border/pill, that just masks the line beneath it.
         svg.rect(
             mx - lw / 2.0,
             my - 9.0,
-            lw,
+            *lw,
             16.0,
             "fill=\"#e8e8e8\" fill-opacity=\"0.85\"",
         );
@@ -299,7 +312,7 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             mx,
             my + 3.0,
             &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            &label,
+            label,
         );
     }
 

@@ -29,10 +29,6 @@ const PSEUDO_R: f64 = 10.0; // start/end radius
 const CANVAS_PAD: f64 = 24.0;
 const CHOICE_W: f64 = 60.0;
 const CHOICE_H: f64 = 40.0;
-/// Arc-length by which an opposite-pair transition's label is nudged toward its
-/// own source, so the two labels of the pair clear each other's opaque
-/// background (#312).
-const LABEL_STAGGER: f64 = 15.0;
 
 pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     if d.states.is_empty() {
@@ -124,11 +120,20 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
 
     let mut boxes = compute_composite_boxes(d, &id_to_u32, &pos, &sizes);
 
-    // Canvas extent from node boundaries and cluster frames. A frame reserves
-    // header room above its members for the title, so its top/left can fall
-    // above/left of the topmost node — measure both corners of every box and
-    // shift everything back into a positive CANVAS_PAD margin so the title band
-    // is not clipped by the viewBox top edge (issue #242).
+    // Note boxes are text-measured (width depends on content), so their real
+    // extent has to be computed up front — same two-pass "measure, then size"
+    // as node/composite bounds below — instead of assuming fixed padding.
+    let note_boxes: Vec<(f64, f64, f64, f64)> = d
+        .notes
+        .iter()
+        .filter_map(|note| note_box(note, &id_to_u32, &sizes, &pos, &boxes, theme))
+        .collect();
+
+    // Canvas extent from node boundaries, cluster frames, and note boxes. A
+    // frame reserves header room above its members for the title, so its
+    // top/left can fall above/left of the topmost node — measure every
+    // corner and shift everything back into a positive CANVAS_PAD margin so
+    // nothing is clipped by the viewBox edges (issue #242).
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = 0.0_f64;
@@ -140,7 +145,7 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         max_x = max_x.max(x + w / 2.0);
         max_y = max_y.max(y + h / 2.0);
     }
-    for &(bx0, by0, bx1, by1) in boxes.values() {
+    for &(bx0, by0, bx1, by1) in boxes.values().chain(note_boxes.iter()) {
         min_x = min_x.min(bx0);
         min_y = min_y.min(by0);
         max_x = max_x.max(bx1);
@@ -174,21 +179,13 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     // Cluster frames first (under nodes/edges) so labels stay legible.
     draw_composites(&mut svg, d, &boxes, &dividers, theme);
 
-    // Opposite-pair transitions (`A --> B` alongside `B --> A`) bow onto
-    // separate curves, but their labels still land at the shared midpoint y and
-    // one's opaque background occludes the other (#312). Detect the pairs so the
-    // label of each is nudged back along its own arc toward its source.
-    let reversed_pairs: HashSet<(&str, &str)> = d
-        .transitions
-        .iter()
-        .filter(|t| {
-            d.transitions
-                .iter()
-                .any(|o| o.from == t.to && o.to == t.from)
-        })
-        .map(|t| (t.from.as_str(), t.to.as_str()))
-        .collect();
-
+    // Transitions: draw every path first, collecting each labeled one's
+    // clipped polyline, then resolve all label positions in one pass so two
+    // unrelated transitions (including an opposite pair, `A --> B` alongside
+    // `B --> A`, whose curves bow apart but whose labels would otherwise
+    // still land at the same midpoint) don't occlude one another (#312).
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for tr in &d.transitions {
         let (Some(start), Some(end)) = (
             endpoint_clip(&tr.from, &id_to_u32, &d.states, &sizes, &pos, &boxes),
@@ -216,15 +213,21 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
             },
             _ => vec![start.center, end.center],
         };
-        // For an opposite pair, pull the label back toward this edge's own
-        // source; the two edges run in opposite directions, so their labels
-        // separate along the shared axis and stop overlapping.
-        let label_offset = if reversed_pairs.contains(&(tr.from.as_str(), tr.to.as_str())) {
-            -LABEL_STAGGER
-        } else {
-            0.0
-        };
-        draw_transition(&mut svg, &pts, tr, &start, &end, label_offset, theme);
+        let clipped = draw_transition(&mut svg, &pts, &start, &end, theme);
+        if let Some(label) = &tr.label {
+            if !clipped.is_empty() {
+                let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+                label_slots.push(super::label_layout::LabelSlot {
+                    polyline: clipped,
+                    size: (w, 18.0),
+                });
+                labels.push(label);
+            }
+        }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        crate::svg::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     for (i, state) in d.states.iter().enumerate() {

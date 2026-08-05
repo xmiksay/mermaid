@@ -44,6 +44,41 @@ const GAP: f64 = 8.0;
 /// Inner padding between a composite container and its natural-size children.
 const GROUP_PAD: f64 = 8.0;
 
+/// Grid gap to use for the whole diagram: the default [`GAP`], widened to fit
+/// the widest labeled edge's rendered width if any edge carries one.
+///
+/// Block's fixed grid packs adjacent cells [`GAP`] (8px) apart, so a labeled
+/// edge between two neighbors is clipped to an ~8px segment — nowhere near
+/// enough for the label itself, and the shared collision-avoidance pass
+/// (`label_layout::layout_edge_labels`) can only nudge a label within a
+/// fraction of its own edge's length, so a too-short edge gives it no room
+/// either. Deriving one gap for the whole grid from the widest label mirrors
+/// how ER widens `layer_gap` for the same reason (#398) — simpler here since
+/// Block has a single uniform gap rather than per-layer ones.
+fn label_gap(items: &[BlockItem], font_size: f64) -> f64 {
+    fn walk(items: &[BlockItem], font_size: f64, w: &mut f64) {
+        for it in items {
+            match it {
+                BlockItem::Edge(e) => {
+                    if let Some(label) = &e.label {
+                        let lw = super::metrics::text_width(label, 7.0, font_size) + 8.0;
+                        *w = w.max(lw);
+                    }
+                }
+                BlockItem::Group(g) => walk(&g.items, font_size, w),
+                _ => {}
+            }
+        }
+    }
+    let mut max_label_w: f64 = 0.0;
+    walk(items, font_size, &mut max_label_w);
+    if max_label_w <= 0.0 {
+        GAP
+    } else {
+        (max_label_w + GAP).max(GAP)
+    }
+}
+
 /// Maps a laid-out child frame (local coords) onto its parent frame:
 /// `parent = (tx, ty) + s · local`. Composite groups scale their children
 /// into a single grid slot, so nested geometry composes these.
@@ -86,8 +121,18 @@ struct Laid {
 }
 
 pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
-    let (cw, ch) = cell_dims(&d.items, theme.font_size);
-    let (laid, total_w, total_h) = layout_items(&d.items, d.columns.unwrap_or(3), PAD, PAD, cw, ch);
+    let gap = label_gap(&d.items, theme.font_size);
+    let (cw, ch) = cell_dims(&d.items, theme.font_size, gap);
+    let (laid, total_w, total_h) = layout_items(
+        &d.items,
+        d.columns.unwrap_or(3),
+        PAD,
+        PAD,
+        cw,
+        ch,
+        theme.font_size,
+        gap,
+    );
     let width = PAD * 2.0 + total_w;
     let height = PAD * 2.0 + total_h;
     let mut svg = SvgBuilder::new(width.max(120.0), height.max(60.0)).theme(theme);
@@ -143,11 +188,30 @@ pub(crate) fn render(d: &BlockDiagram, theme: &Theme) -> String {
     for l in &laid {
         draw(l, &mut svg, theme, &d.class_defs);
     }
-    // Draw edges last so they sit on top.
+    // Draw edges last so they sit on top: every path first, collecting each
+    // labeled edge's clipped 2-point segment, then resolve all label
+    // positions in one pass so two unrelated edges whose labels would
+    // collide land apart.
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
     for l in &laid {
         if let BlockItem::Edge(e) = &l.item {
-            draw_edge(e, &nodes, &mut svg, theme);
+            let clipped = draw_edge(e, &nodes, &mut svg, theme);
+            if let Some(label) = &e.label {
+                if !clipped.is_empty() {
+                    let w = super::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
+                    label_slots.push(super::label_layout::LabelSlot {
+                        polyline: clipped,
+                        size: (w, 18.0),
+                    });
+                    labels.push(label);
+                }
+            }
         }
+    }
+    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
+    for (pos, text) in label_positions.into_iter().zip(labels) {
+        super::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
     svg.finish()

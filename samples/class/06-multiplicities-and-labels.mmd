@@ -1,0 +1,8 @@
+classDiagram
+    class Customer
+    class Order
+    class Product
+    class LineItem
+    Customer "1" --> "*" Order : places
+    Order "1" --> "1..*" LineItem : contains
+    LineItem "*" --> "1" Product : references

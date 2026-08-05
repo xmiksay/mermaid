@@ -1,0 +1,10 @@
+---
+title: Create and destroy lifecycle
+---
+sequenceDiagram
+    participant Client
+    create participant Worker
+    Client->>Worker: Assign task
+    Worker-->>Client: Ack
+    destroy Worker
+    Client-xWorker: Shutdown

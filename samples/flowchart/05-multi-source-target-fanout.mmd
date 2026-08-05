@@ -1,0 +1,6 @@
+---
+title: Multi-source fanout
+---
+flowchart LR
+    A[Service A] & B[Service B] --> C[Queue] & D[Queue backup]
+    D ~~~ E[Archive]
