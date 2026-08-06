@@ -10,10 +10,12 @@ use super::builder::SvgBuilder;
 use super::style::resolve_edge_style;
 use super::theme::Theme;
 
+mod directions;
 mod edges;
 mod nodes;
 mod shapes;
 
+use directions::*;
 use edges::*;
 use nodes::*;
 
