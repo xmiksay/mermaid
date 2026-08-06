@@ -28,6 +28,14 @@ Parser: `src/parse/er/` · Renderer: `src/svg/er/`.
   relation already materialized the entity.
 - ER `direction TB/BT/LR/RL` fills `ErDiagram.direction`; the renderer drives
   the same size-swap/transpose the flowchart and class renderers use.
+- ER relation labels sit centered on their edge, between the cardinality
+  glyphs at each end. The default sugiyama layer gap alone doesn't reserve
+  room for both the glyph reach and the label width, so tightly packed
+  entities (e.g. `direction LR` chains) would render the label overlapping
+  the crow's-foot glyphs; `layer_gap` is widened to
+  `CARD_MAX_REACH * 2.0 + max_label_w` (never narrower than the sugiyama
+  default) to fit the widest labeled relation's glyph clearance plus label
+  (#398, `src/svg/er/mod.rs`).
 - ER Crow's-Foot markers are drawn as explicit paths (`draw_cardinality`),
   positioned along the edge from the entity boundary. The crow's foot is **wide
   at the entity border and converges to a single point** one marker length out

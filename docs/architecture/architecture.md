@@ -15,7 +15,13 @@ Parser: `src/parse/architecture.rs` · Renderer: `src/svg/architecture/` (`mod.r
   compact ranks, then each node is placed at its cell centre. Edges are routed
   with straight orthogonal segments between the pinned sides (`ortho_route`):
   same-axis ports get a two-segment jog (straight when already aligned), mixed
-  axes a single elbow — never a free-angle diagonal.
+  axes a single elbow — never a free-angle diagonal. A titled edge's label
+  draws centered in the gap between the two icons it connects, with no
+  background rect (upstream never draws one); the default `H_GAP`/`V_GAP`
+  (40px) is barely wider than a short label, so `grid_place` widens whichever
+  axis a labeled edge actually spans to fit that axis's widest label, never
+  narrower than the default (#405, `src/svg/architecture/mod.rs`) — the same
+  fix class as the ER crow's-foot label spacing below.
 - architecture-beta icons: `draw_arch_icon` (`src/svg/architecture/draw.rs`) draws
   six built-in glyphs (`cloud`, `database`/`db`, `disk` — a distinct concentric
   platter, `server`, `internet`/`globe`, `queue`/`kafka`) at a caller-chosen

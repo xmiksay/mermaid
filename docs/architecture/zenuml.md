@@ -17,7 +17,13 @@ Parser: `src/parse/zenuml/` · Renderer: `src/svg/sequence/zenuml.rs`
     `@Database X` declare the matching UML stereotype (each drawn with its own
     glyph by `draw_stereotype` in `src/svg/sequence/glyphs.rs` — boundary
     circle-with-bar, control arrow-circle, entity underlined circle, database
-    cylinder); any other `@Type X` is a plain participant. `@Starter(X)` sets the
+    cylinder); any other `@Type X` is a plain participant. The left icon
+    column width (`icon_col_w` in `src/svg/sequence/zenuml.rs`) is per-kind: a
+    plain participant gets none, `@Boundary` gets a dedicated wider
+    `BOUNDARY_ICON_W` (38px, vs the shared `ICON_W` 26px for the other
+    stereotypes) because its bar-and-circle glyph needs more clearance from
+    its own center than a circle-only icon, or the bar pokes out past the
+    box's left edge. `@Starter(X)` sets the
     top-level caller. A bare/`A.method()` call with no explicit `A -> B` source
     originates from the starter — a synthetic `Starter` lane, created lazily,
     when none is declared.
