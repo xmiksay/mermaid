@@ -15,6 +15,42 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - rhombus: `t = 1 / (|dx|/hw + |dy|/hh)`
 - other shapes fall back to rect
 
+## Canvas & subgraph frame sizing
+
+- Canvas sizing is a proper **measure-then-shift** pass: every edge's clipped
+  polyline and label position is resolved before drawing, a true bounding box
+  is computed over node, subgraph-frame, and label rects, then everything is
+  shifted so the measured minimum lands at `CANVAS_PAD` — otherwise a
+  local-`direction`-shifted subgraph frame or a BOW-routed back-edge label
+  could land at a negative/overflowing coordinate and get clipped by the
+  viewBox.
+- `compute_subgraph_boxes` (`src/svg/flowchart/nodes.rs`) sizes each frame
+  **bottom-up** (deepest nested subgraph first): a frame pads around the union
+  of its own direct members' bounds and its direct children's *already-padded*
+  frames, guaranteeing at least `SUBGRAPH_PAD` between a child's frame and its
+  parent's — flattening straight through to every recursive leaf (the old
+  approach) let a nested child sharing an extremal node with its ancestor pad
+  outward from that same node, leaving zero visible margin between the two
+  frames.
+- `resolve_subgraph_overlaps` (`src/svg/flowchart/nodes.rs`) nudges apart any
+  two **sibling** (non-nested) subgraph frames that still collide after
+  local-direction transposition — sugiyama itself has no notion of subgraph
+  frame padding, only per-node `node_gap`.
+- `apply_local_directions` processes subgraphs innermost-first: direct member
+  nodes transpose individually for a `direction` override, but a direct child
+  subgraph moves as one rigid block (translated, not re-swapped) so its own
+  local direction survives an ancestor's differing transpose instead of being
+  overridden by it.
+- The `[(text)]` database/cylinder shape (`cylinder` in
+  `src/svg/flowchart/shapes.rs`, shared by the plain database shape and the
+  lined-disk shape) is one continuous closed path — a native `<ellipse>` top
+  cap (avoids a faint rasterization seam where two half-arc endpoints would
+  otherwise be exactly `2*rx` apart) plus a deliberately-unclosed body path
+  (straight sides + bottom arc) sharing the same fill, so it reads as one
+  seamless cylinder instead of a filled rect body with a separate stroked
+  seam arc doubling its border. `SvgBuilder::ellipse` (`src/svg/builder/mod.rs`)
+  is the shared native-ellipse helper.
+
 ## Things to remember
 
 - Flowchart **header aliases**: `parse_direction` also accepts upstream's `<dir>`

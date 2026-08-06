@@ -23,7 +23,11 @@ word (`Mind maps`) so it stays dual-renderable.
   upstream's radial silhouette. `build` recurses over the tree: the root sits at
   the origin and its children are dealt around the full circle by *angular
   sector*, each sector sized in proportion to the subtree's leaf count
-  (`leaves`) at radius `depth * RING_GAP`. To avoid the earlier **sprawl** (leaves
+  (`leaves`), nominally at radius `depth * RING_GAP` — but clamped up to
+  `parent_reach + NODE_MARGIN + own_reach` when a node's own size (or a big
+  sibling) would otherwise overlap/clip against the ring above it, so large
+  circle nodes always get their true radius counted into the canvas bounds.
+  To avoid the earlier **sprawl** (leaves
   flung far from their parent with long diagonal edges), a *non-root* node packs
   its children into a `CHILD_SPREAD`-narrowed cone centred on the parent's own
   radial line rather than across the full inherited sector, so each subtree stays

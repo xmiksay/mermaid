@@ -37,3 +37,6 @@ Parser: `src/parse/xychart.rs` · Renderer: `src/svg/xychart/mod.rs`.
   value/category tick marks and labels, bars, and the line path. Upstream draws
   neither the dotted horizontal gridlines across the plot nor circular markers
   at each data point (#319).
+- The axis bars are drawn **after** the series (bars/line), not before, so a
+  bar sitting flush against the axis doesn't paint a stray dark dash over the
+  axis line at the baseline.

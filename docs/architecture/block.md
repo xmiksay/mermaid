@@ -23,7 +23,11 @@ Parser: `src/parse/block/` · Renderer: `src/svg/block/`.
   - Layout & composite treatment (#259, #310): columns share one width from
     `cell_dims` — the widest label's hug box (`text + PAD_X*2`, floored at
     `MIN_CELL_W`), divided down for multi-span blocks so `d["Wide"]:2` never
-    inflates every column. Rows track their own height (`row_h` in
+    inflates every column. The grid gap itself (`label_gap`) widens past its
+    default to fit the widest edge label between adjacent cells, and
+    `cell_dims` takes that (possibly widened) `gap` so a multi-span block's
+    per-column need still accounts for the same inner gaps `layout_items`
+    actually places. Rows track their own height (`row_h` in
     `layout_items`) so a tall composite pushes the next row down instead of
     overlapping it. Leaf boxes hug text at `CELL_H` rather than filling a fixed
     100×60 cell. A composite (`block:id … end`) is a solid pale container
@@ -48,11 +52,13 @@ Parser: `src/parse/block/` · Renderer: `src/svg/block/`.
     scans the line for the first link operator: `~~~`, dotted `-.->`/`-.-`, and
     the head-bearing solid (`--` core) / thick (`==` core) forms whose head char
     is `>`→`Arrow`, `x`→`Cross`, `o`→`Circle`, or the filler (`-`/`=`)→no head
-    (`---`/`===`). Solid links also take an optional **tail** marker
-    (`<--`/`x--`/`o--`, upstream `[xo<]?--+[-xo>]`); a leading `x`/`o`/`<`
-    counts as a tail only at a token boundary so an id ending in `o` (`foo`)
-    isn't misread. It still reads an inline `-- / -. / ==` label opener off the
-    tail. The renderer draws dotted (`stroke-dasharray`) / thick (wider stroke)
+    (`---`/`===`). Solid, thick, and dotted links all take an optional **tail**
+    marker (`<--`/`x--`/`o--`, upstream `[xo<]?--+[-xo>]` / `[xo<]?==+[=xo>]` /
+    `[xo<]?-?\.+-[xo>]?` — only the invisible `~~~` core has none, `match_link`
+    in `src/parse/block/style.rs`); a leading `x`/`o`/`<` counts as a tail only
+    at a token boundary so an id ending in `o` (`foo`) isn't misread. It still
+    reads an inline `-- / -. / ==` label opener off the tail. The renderer
+    draws dotted (`stroke-dasharray`) / thick (wider stroke)
     styles, skips an invisible link (which still shapes layout), and emits
     `blockarrow`/`blockcross`/`blockcircle` `<marker>`s at the head
     (`marker-end`) and tail (`marker-start`) ends.
