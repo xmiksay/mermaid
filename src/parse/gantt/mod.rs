@@ -136,7 +136,10 @@ pub(crate) fn parse(input: &str) -> Result<GanttDiagram, ParseError> {
                 tasks: Vec::new(),
             });
         }
-        let section = diag.sections.last_mut().unwrap();
+        let section = diag
+            .sections
+            .last_mut()
+            .expect("section pushed above when empty");
         let task = parse_task(
             name.trim(),
             fields.trim(),

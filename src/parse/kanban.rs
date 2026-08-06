@@ -43,11 +43,9 @@ pub(crate) fn parse(input: &str) -> Result<KanbanDiagram, ParseError> {
             .take_while(|c| *c == ' ' || *c == '\t')
             .count();
         let body = content.trim();
-        if col_indent.is_none() {
-            col_indent = Some(indent);
-        }
+        let col_indent = *col_indent.get_or_insert(indent);
 
-        if indent == col_indent.unwrap() {
+        if indent == col_indent {
             if let Some(c) = current_col.take() {
                 d.columns.push(c);
             }
