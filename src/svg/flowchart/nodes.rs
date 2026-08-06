@@ -291,7 +291,7 @@ pub(super) fn compute_subgraph_boxes(
         .enumerate()
         .map(|(i, s)| (s.id.as_str(), i))
         .collect();
-    let depths = super::edges::subgraph_depths(d, &sub_idx_by_id);
+    let depths = super::directions::subgraph_depths(d, &sub_idx_by_id);
     let mut order: Vec<usize> = (0..d.subgraphs.len()).collect();
     order.sort_by(|&a, &b| depths[b].cmp(&depths[a]));
 
