@@ -254,7 +254,7 @@ fn today_marker_off_draws_no_marker() {
         "gantt\ndateFormat YYYY-MM-DD\ntodayMarker off\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
     );
     let svg = render(&build(&src), &Theme::default());
-    assert!(!svg.contains(">today<"));
+    assert!(!svg.contains("class=\"today\""));
 }
 
 #[test]
@@ -266,7 +266,9 @@ fn today_marker_style_applied_when_in_range() {
         "gantt\ndateFormat YYYY-MM-DD\ntodayMarker stroke:cyan,stroke-width:5px\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
     );
     let svg = render(&build(&src), &Theme::default());
-    assert!(svg.contains(">today<"));
+    assert!(svg.contains("class=\"today\""));
+    // Like upstream, the marker is just the line: no hardcoded text label.
+    assert!(!svg.contains(">today<"));
     assert!(svg.contains("stroke:cyan; stroke-width:5px"));
 }
 
