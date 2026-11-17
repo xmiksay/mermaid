@@ -202,3 +202,25 @@ fn color_helpers() {
     // The bright-blue root (git0) is dark enough to warrant white label text.
     assert!(is_dark("#6D6DFF"));
 }
+
+#[test]
+fn cloud_and_bang_have_their_own_outlines() {
+    // `)cloud(` and `))bang((` used to render as a rounded / dashed rect.
+    let svg = crate::render("mindmap\n  root((Hub))\n    a)Cloudy(\n    b))Boom((\n").unwrap();
+    assert!(svg.contains("Cloudy") && svg.contains("Boom"));
+    assert!(
+        !svg.contains("stroke-dasharray=\"4 2\""),
+        "bang is no longer a dashed rect"
+    );
+    // Cloud: an outline made of arcs; bang: a closed polyline.
+    let cloud = super::draw::cloud_path(100.0, 50.0, 60.0, 16.0);
+    assert!(cloud.starts_with('M') && cloud.ends_with('Z') && cloud.matches('A').count() >= 8);
+    let bang = super::draw::bang_path(100.0, 50.0, 60.0, 16.0);
+    assert!(bang.starts_with('M') && bang.ends_with('Z') && bang.matches('L').count() >= 15);
+    for p in [&cloud, &bang] {
+        assert!(!p.contains("NaN") && !p.contains("inf"));
+    }
+    // Degenerate boxes stay finite.
+    assert!(!super::draw::cloud_path(0.0, 0.0, 0.0, 0.0).contains("NaN"));
+    assert!(!super::draw::bang_path(0.0, 0.0, 0.0, 0.0).contains("NaN"));
+}
