@@ -222,17 +222,16 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         let rel = today_days() as f64 - start_day;
         if rel >= 0.0 && rel <= total_days {
             let x = body_x + (rel / total_days) * body_w;
+            // Upstream draws only the line (`<line class="today">`), no text label:
+            // a hardcoded English "today" also clashed with localized charts.
             let attrs = match today_style {
-                Some(css) => format!("style=\"{}\"", css_style(css)),
-                None => "stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\"".to_string(),
+                Some(css) => format!("class=\"today\" style=\"{}\"", css_style(css)),
+                None => {
+                    "class=\"today\" stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\""
+                        .to_string()
+                }
             };
             svg.line(x, body_top, x, body_bottom, &attrs);
-            svg.text(
-                x + 4.0,
-                body_top + 12.0,
-                "fill=\"#d33\" font-size=\"11\" font-weight=\"bold\"",
-                "today",
-            );
         }
     }
 
