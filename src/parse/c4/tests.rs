@@ -151,6 +151,9 @@ fn rel_back_reverses_endpoints() {
     // Reversed: the arrow now points from `b` back to `a`.
     assert_eq!((r.from.as_str(), r.to.as_str()), ("b", "a"));
     assert_eq!(r.label, "depends on");
+    // ...but it was written `a, b`, which is what a style matches.
+    assert!(r.reversed);
+    assert_eq!(r.written_pair(), ("a", "b"));
 }
 
 #[test]
@@ -220,4 +223,26 @@ fn parses_deployment_node_aliases() {
     assert_eq!(dc.members[0].members.len(), 1);
     assert_eq!(dc.members[1].alias, "r");
     assert_eq!(dc.members[1].members.len(), 1);
+}
+
+#[test]
+fn layout_direction_statements() {
+    use crate::parse::C4LayoutDirection;
+    let base = "C4Context\nSystem(a, \"A\")\n";
+    assert_eq!(parse(base).unwrap().layout_direction, None);
+    let td = parse(&format!("{base}LAYOUT_TOP_DOWN()\n")).unwrap();
+    assert_eq!(td.layout_direction, Some(C4LayoutDirection::TopDown));
+    let lr = parse(&format!("{base}LAYOUT_LEFT_RIGHT()\n")).unwrap();
+    assert_eq!(lr.layout_direction, Some(C4LayoutDirection::LeftRight));
+    let landscape = parse(&format!("{base}LAYOUT_LANDSCAPE()\n")).unwrap();
+    assert_eq!(
+        landscape.layout_direction,
+        Some(C4LayoutDirection::LeftRight)
+    );
+    // Inside a boundary body too, and the last statement wins.
+    let nested = "C4Context\nLAYOUT_LEFT_RIGHT()\nSystem_Boundary(b, \"B\") {\n  LAYOUT_TOP_DOWN()\n  System(a, \"A\")\n}\n";
+    assert_eq!(
+        parse(nested).unwrap().layout_direction,
+        Some(C4LayoutDirection::TopDown)
+    );
 }

@@ -32,6 +32,9 @@ pub(crate) struct Work {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
 
+    /// Caller-given order within a layer (`LayerPins::order`); a layer whose
+    /// nodes all have one is sorted by it and never reordered.
+    pub order_key: Vec<Option<f64>>,
     pub original_edges: Vec<(NodeId, NodeId)>,
     pub reversed: Vec<bool>,
     pub self_loop: Vec<bool>,
@@ -92,6 +95,7 @@ impl Work {
             pos: vec![0; n_nodes],
             x: vec![0.0; n_nodes],
             y: vec![0.0; n_nodes],
+            order_key: vec![None; n_nodes],
             original_edges: g.edges.clone(),
             reversed: vec![false; g.edges.len()],
             self_loop,
@@ -109,6 +113,7 @@ impl Work {
         self.pos.push(0);
         self.x.push(0.0);
         self.y.push(0.0);
+        self.order_key.push(None);
         idx
     }
 

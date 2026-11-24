@@ -1,0 +1,33 @@
+C4Deployment
+title Uneven deployment
+Deployment_Node(dc1, "Primary DC", "Bare metal") {
+  Deployment_Node(k8s, "Kubernetes", "v1.30") {
+    Deployment_Node(ns1, "Namespace app") {
+      Container(web, "Web", "Nginx", "Static and proxy")
+      Container(api, "API", "Rust", "Business logic")
+      Container(wrk, "Worker", "Rust", "Jobs")
+      Container(adm, "Admin UI", "Vue")
+    }
+    Deployment_Node(ns2, "Namespace data") {
+      ContainerDb(db, "Postgres", "15", "Primary")
+      ContainerQueue(q, "RabbitMQ", "3.12")
+    }
+  }
+}
+Deployment_Node(dc2, "DR site", "VM") {
+  ContainerDb(replica, "Replica", "Postgres 15")
+}
+Deployment_Node(edge, "Edge") {
+  Container(cdn, "CDN")
+}
+Rel(cdn, web, "Forwards", "HTTPS")
+Rel(web, api, "Proxies")
+Rel(api, db, "Reads/writes")
+Rel(api, q, "Enqueues")
+Rel(q, wrk, "Consumes")
+Rel(wrk, db, "Writes")
+Rel(db, replica, "Streams WAL")
+Rel(replica, api, "Read-only queries in failover")
+Rel(adm, api, "Admin calls")
+Rel(wrk, cdn, "Purges cache")
+Rel(replica, wrk, "Reporting reads")

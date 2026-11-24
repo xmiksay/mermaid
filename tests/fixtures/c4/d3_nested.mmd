@@ -1,0 +1,35 @@
+C4Deployment
+title Two-region deployment
+Deployment_Node(eu, "EU region", "AWS eu-central-1") {
+  Deployment_Node(euaz, "AZ a", "Availability zone") {
+    Deployment_Node(euk8s, "K8s cluster", "EKS") {
+      Container(euapi, "API", "Rust")
+      ContainerDb(eudb, "Primary DB", "Postgres 16")
+      Container(euwork, "Worker", "Rust")
+    }
+  }
+  Deployment_Node(eub, "AZ b", "Availability zone") {
+    Container(eucache, "Cache", "Redis")
+  }
+}
+Deployment_Node(us, "US region", "AWS us-east-1") {
+  Deployment_Node(usaz, "AZ a", "Availability zone") {
+    Deployment_Node(usk8s, "K8s cluster", "EKS") {
+      Container(usapi, "API", "Rust")
+      ContainerDb(usdb, "Replica DB", "Postgres 16")
+      Container(uswork, "Worker", "Rust")
+    }
+  }
+}
+Person(u, "User")
+Rel(u, euapi, "HTTPS")
+Rel(u, usapi, "HTTPS")
+Rel(euapi, eudb, "SQL")
+Rel(usapi, usdb, "SQL")
+Rel(eudb, usdb, "Logical replication", "WAL over VPN")
+Rel(uswork, eudb, "Writes go to primary")
+Rel(euwork, usapi, "Cross-region health probe")
+Rel(euapi, eucache, "Cache")
+Rel(usapi, eucache, "Cache (cross region)")
+Rel(euwork, eudb, "Jobs")
+Rel(uswork, usdb, "Reads")

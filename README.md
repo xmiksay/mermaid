@@ -99,7 +99,7 @@ primary, visibly distinct from `default`, meant to be recolored via
 | Mindmap | `mindmap` | nested nodes, node shapes |
 | Git graph | `gitGraph` | commits, branches, merges, checkouts |
 | Requirement | `requirementDiagram` | requirements, elements, relationships, `direction`, `classDef`/`class`/`style` styling |
-| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems (`Db`/`Queue`/`_Ext` variants), boundaries, relations, `Update*Style` overrides |
+| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` | people, systems (`Db`/`Queue`/`_Ext` variants), boundaries, relations, `Update*Style` overrides; upstream grid for small diagrams, layered layout with routed relations for larger ones or with `LAYOUT_TOP_DOWN()`/`LAYOUT_LEFT_RIGHT()` |
 | Block | `block-beta`, `block` | grid layout, spanning blocks, edges (`-->`/`---`/`-.->`/`==>` plus x/o heads `--x`/`--o`/`==x`/`==o` and tails `<-->`/`x--x`/`o--o`), block arrows |
 | Architecture | `architecture-beta`, `architecture` | groups, services, junctions, edges |
 | Kanban | `kanban` | columns and cards, `id[Label]` form, `@{…}` metadata (assigned/priority/ticket), priority-colored borders, hyperlinked tickets |

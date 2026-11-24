@@ -47,6 +47,9 @@ src/
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
 │   ├── mod.rs       Graph/Layout/LayoutConfig/LayoutError + layout_with()
+│   │                + layout_pinned(LayerPins: nodes forced onto the first/last layer);
+│   │                LayerPins::order (fixed order of a pinned layer),
+│   │                Layout::edge_polylines (per input edge), LayoutConfig::{pull_sources,transpose}
 │   ├── tests.rs
 │   └── {cycle,layer,order,coord,route,work}.rs
 examples/render_user.rs        small one-shot example
@@ -305,7 +308,7 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   its polyline's arc-length midpoint (`geometry::polyline_midpoint`) and, for up
   to 4 passes, scans every pair `(i, j)` in that same order: if their current
   label rects overlap (`rect_overlap_area`, the same `(x, y, w, h)` overlap test
-  C4's `find_clear_label_point` uses), it nudges `j`'s label back toward its own
+  C4's `place_label` uses), it nudges `j`'s label back toward its own
   source by one `LABEL_STAGGER_STEP` (`polyline_midpoint_offset`), clamped to
   `min(4 steps, 40% of that edge's arc length)` so a short edge gives up
   gracefully instead of sliding a label off its end; if `j` has no room left it
@@ -323,7 +326,8 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   collision math. `layout_edge_labels`'s output only ever feeds a label's draw
   position — never a renderer's canvas bounding-box computation. C4's own
   `rect_overlap_area` was deduplicated into this module; C4's heavier
-  `find_clear_label_point` node-avoidance search is unrelated and untouched.
+  `place_label` search (`src/svg/c4/rel_place.rs`, shape/label/line
+  avoidance along a routed polyline) is unrelated and untouched.
 - Label line breaks: `split_label_lines()` in `src/svg/builder/text.rs` splits any
   label on `<br>`/`<br/>`/`<br />` (case-insensitive) and `\n` (real newline or
   the two-char literal escape). `SvgBuilder::text()` auto-emits stacked
@@ -334,8 +338,8 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
   `edge_label_bg` rect (theme `flow_label_bg`, wired from the
   `edgeLabelBackground` theme variable) and centers the label on top, matching
   upstream so a label stays legible where its edge crosses a node or another
-  label (#260). C4 keeps its own two-line label/`[tech]` layout but calls
-  `edge_label_bg` for the same background.
+  label (#260). C4 keeps its own wrapped label/`[tech]` block layout but calls
+  `edge_label_bg` (one rect behind the whole block) for the same background.
 - Text width scales with the font size: `src/svg/metrics.rs` owns the shared
   `text_width(s, base_char_w, font_size)` / `font_scale(font_size)` helpers
   (`= font_size / BASE_FONT_SIZE`, `BASE_FONT_SIZE = 14`). Every renderer keeps

@@ -37,6 +37,7 @@ pub(crate) fn build(w: &Work) -> Layout {
     }
 
     let mut edge_points: HashMap<(NodeId, NodeId), Vec<(f64, f64)>> = HashMap::new();
+    let mut edge_polylines: Vec<Vec<(f64, f64)>> = vec![Vec::new(); w.original_edges.len()];
     for (orig_idx, &(orig_u, orig_v)) in w.original_edges.iter().enumerate() {
         if w.self_loop[orig_idx] {
             if let Some(&(cx, cy)) = node_pos.get(&orig_u) {
@@ -73,6 +74,7 @@ pub(crate) fn build(w: &Work) -> Layout {
         if w.reversed[orig_idx] {
             waypoints.reverse();
         }
+        edge_polylines[orig_idx] = waypoints.clone();
         edge_points.insert((orig_u, orig_v), waypoints);
     }
 
@@ -92,6 +94,7 @@ pub(crate) fn build(w: &Work) -> Layout {
     Layout {
         node_pos,
         edge_points,
+        edge_polylines,
         width,
         height,
     }
@@ -159,8 +162,8 @@ mod tests {
         };
         let mut w = Work::from_input(&g).unwrap();
         cycle::remove(&mut w);
-        layer::assign(&mut w);
-        order::minimize_crossings(&mut w, 24);
+        layer::assign_pinned(&mut w, &[], &[], false);
+        order::minimize_crossings(&mut w, 24, false);
         super::super::coord::assign(&mut w, &LayoutConfig::default());
         build(&w)
     }

@@ -18,6 +18,7 @@ fn arrow_marker_present() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
+            reversed: false,
         }],
         ..Default::default()
     };
@@ -43,6 +44,7 @@ fn bidirectional_has_both_markers() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: true,
+            reversed: false,
         }],
         ..Default::default()
     };
@@ -67,6 +69,7 @@ fn relations_are_solid() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
+            reversed: false,
         }],
         ..Default::default()
     };
@@ -91,6 +94,7 @@ fn rel_is_straight_and_unbacked() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
+            reversed: false,
         }],
         ..Default::default()
     };
@@ -121,6 +125,7 @@ fn rel_style_override_colors_line_and_label() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
+            reversed: false,
         }],
         rel_styles: vec![C4RelStyle {
             from: "a".into(),
@@ -146,14 +151,10 @@ fn label_does_not_land_on_an_unrelated_node() {
     // to Mainframe — and its label — pass directly over Internet Banking.
     // The label must dodge it instead of rendering on its fill.
     let elements = context_sample().elements;
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0, V_GAP, H_GAP);
-    let mut pos = HashMap::new();
-    let mut boundaries = Vec::new();
-    let mut leaves = Vec::new();
-    place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
-    let obstacle = *pos.get("SystemAA").expect("Internet Banking placed");
-    let source = *pos.get("customerA").expect("Banking Customer placed");
-    let target = *pos.get("SystemC").expect("Mainframe placed");
+    let p = grid_of(elements.clone(), None);
+    let obstacle = rect_of(&p, "SystemAA");
+    let source = rect_of(&p, "customerA");
+    let target = rect_of(&p, "SystemC");
     // Sanity: the obstacle must actually sit between the two endpoints
     // (same column, middle row) or this test would pass vacuously.
     assert!(
@@ -179,6 +180,7 @@ fn label_does_not_land_on_an_unrelated_node() {
             link: None,
             direction: C4RelDirection::Default,
             bidirectional: false,
+            reversed: false,
         }],
         ..Default::default()
     };
@@ -202,4 +204,53 @@ fn label_does_not_land_on_an_unrelated_node() {
         overlap_x <= 0.0 || overlap_y <= 0.0,
         "label {label_rect:?} must not overlap Internet Banking's box {obstacle:?}"
     );
+}
+
+#[test]
+fn reversed_pair_labels_do_not_stack() {
+    // #381: RelIndex(2, web, api, ...) and RelIndex(4, api, web, ...) are
+    // the exact same line, reversed. Their labels must not land on top of
+    // one another once both are placed.
+    let rel = |from: &str, to: &str, label: &str| C4Relation {
+        from: from.into(),
+        to: to.into(),
+        label: label.into(),
+        technology: None,
+        sprite: None,
+        tags: None,
+        link: None,
+        direction: C4RelDirection::Default,
+        bidirectional: false,
+        reversed: false,
+    };
+    let d = C4Diagram {
+        kind: C4Kind::Dynamic,
+        elements: vec![person("web", "Web"), person("api", "API")],
+        relations: vec![
+            rel("web", "api", "POST /checkout"),
+            rel("api", "web", "Order confirmation"),
+        ],
+        ..Default::default()
+    };
+    let s = layout_scene(&d, &HashMap::new(), &Theme::default());
+    let rects: Vec<Rect> = s.rels.iter().filter_map(RelPlan::label_rect).collect();
+    assert_eq!(rects.len(), 2);
+    assert_eq!(
+        crate::svg::label_layout::rect_overlap_area(rects[0], rects[1]),
+        0.0,
+        "label backgrounds {rects:?} overlap"
+    );
+}
+
+#[test]
+fn arrow_tip_sits_on_the_path_end() {
+    // The marker's tip is x=10 of its 10-unit viewBox; refX must match so the
+    // tip lands exactly on the clipped border point.
+    let d = C4Diagram {
+        elements: vec![person("a", "A")],
+        ..Default::default()
+    };
+    let svg = render(&d, &Theme::default());
+    assert!(svg.contains("refX=\"10\""), "{svg}");
+    assert!(svg.contains("M0,0 L10,5 L0,10 z"));
 }

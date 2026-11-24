@@ -1,0 +1,10 @@
+C4Container
+Container(a, "Alpha", "Rust", "Does alpha things")
+Container(b, "Beta", "Go", "Does beta things")
+Container(c, "Gamma")
+Rel(a, b, "First call")
+Rel(a, b, "Second call", "gRPC")
+Rel(a, b, "Third call")
+Rel(a, b, "Fourth call")
+Rel(b, a, "Reverse")
+Rel(a, a, "Self loop")

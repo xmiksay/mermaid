@@ -7,9 +7,14 @@
 
 use super::work::Work;
 
-pub(crate) fn minimize_crossings(w: &mut Work, max_iter: usize) {
+pub(crate) fn minimize_crossings(w: &mut Work, max_iter: usize, transpose: bool) {
     if w.layers.len() <= 1 {
         return;
+    }
+    for l in 0..w.layers.len() {
+        if is_fixed(w, l) {
+            sort_by_key(w, l);
+        }
     }
 
     let mut best_crossings = count_crossings(w);
@@ -44,6 +49,78 @@ pub(crate) fn minimize_crossings(w: &mut Work, max_iter: usize) {
             w.pos[v] = i;
         }
     }
+    if transpose {
+        transpose_layers(w);
+    }
+}
+
+/// A layer whose nodes all carry a caller-given order key.
+fn is_fixed(w: &Work, l: usize) -> bool {
+    let layer = &w.layers[l];
+    !layer.is_empty() && layer.iter().all(|&v| w.order_key[v].is_some())
+}
+
+fn sort_by_key(w: &mut Work, l: usize) {
+    let mut layer = w.layers[l].clone();
+    layer.sort_by(|&a, &b| {
+        let (ka, kb) = (w.order_key[a].unwrap_or(0.0), w.order_key[b].unwrap_or(0.0));
+        ka.total_cmp(&kb).then(a.cmp(&b))
+    });
+    for (i, &v) in layer.iter().enumerate() {
+        w.pos[v] = i;
+    }
+    w.layers[l] = layer;
+}
+
+/// Crossings between `u`'s and `v`'s edges to the layer on one side, with
+/// `u` placed left of `v`.
+fn pair_crossings(w: &Work, u: usize, v: usize, look_up: bool) -> usize {
+    let ends = |x: usize| -> Vec<usize> {
+        let edges = if look_up { &w.in_e[x] } else { &w.out_e[x] };
+        edges
+            .iter()
+            .map(|&e| {
+                let o = if look_up {
+                    w.edges[e].src
+                } else {
+                    w.edges[e].dst
+                };
+                w.pos[o]
+            })
+            .collect()
+    };
+    let (eu, ev) = (ends(u), ends(v));
+    eu.iter()
+        .map(|&a| ev.iter().filter(|&&b| b < a).count())
+        .sum()
+}
+
+/// Swap neighbours within each (unfixed) layer while that strictly reduces
+/// crossings with both adjacent layers; a few passes until nothing improves.
+fn transpose_layers(w: &mut Work) {
+    const MAX_PASSES: usize = 8;
+    for _ in 0..MAX_PASSES {
+        let mut improved = false;
+        for l in 0..w.layers.len() {
+            if is_fixed(w, l) {
+                continue;
+            }
+            for i in 0..w.layers[l].len().saturating_sub(1) {
+                let (u, v) = (w.layers[l][i], w.layers[l][i + 1]);
+                let now = pair_crossings(w, u, v, true) + pair_crossings(w, u, v, false);
+                let swapped = pair_crossings(w, v, u, true) + pair_crossings(w, v, u, false);
+                if swapped < now {
+                    w.layers[l].swap(i, i + 1);
+                    w.pos[u] = i + 1;
+                    w.pos[v] = i;
+                    improved = true;
+                }
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
 }
 
 fn sweep_down(w: &mut Work) {
@@ -59,6 +136,9 @@ fn sweep_up(w: &mut Work) {
 }
 
 fn reorder_layer(w: &mut Work, layer_idx: usize, neighbor_layer_idx: usize) {
+    if is_fixed(w, layer_idx) {
+        return;
+    }
     let look_up = neighbor_layer_idx < layer_idx;
     let layer = w.layers[layer_idx].clone();
 
@@ -143,7 +223,7 @@ mod tests {
         };
         let mut w = Work::from_input(&g).unwrap();
         super::super::cycle::remove(&mut w);
-        layer::assign(&mut w);
+        layer::assign_pinned(&mut w, &[], &[], false);
         w
     }
 
@@ -154,16 +234,37 @@ mod tests {
         // the sweep finds the planar embedding.
         let mut w = build(&[1, 2, 3, 4], &[(1, 4), (2, 3)]);
         let before = count_crossings(&w);
-        minimize_crossings(&mut w, 24);
+        minimize_crossings(&mut w, 24, false);
         let after = count_crossings(&w);
         assert!(after <= before);
         assert_eq!(after, 0);
     }
 
     #[test]
+    fn transpose_fixes_what_the_sweep_leaves() {
+        // A layer order the barycenter sweep ties on: 1 -> {3, 4}, 2 -> 3.
+        let mut w = build(&[1, 2, 3, 4], &[(1, 3), (1, 4), (2, 3)]);
+        minimize_crossings(&mut w, 24, true);
+        assert_eq!(count_crossings(&w), 0);
+    }
+
+    #[test]
+    fn keyed_layer_keeps_its_order() {
+        // Bottom layer {3, 4} is keyed 4 before 3; crossing minimisation must
+        // arrange the top layer around it instead of reordering it.
+        let mut w = build(&[1, 2, 3, 4], &[(1, 3), (2, 4)]);
+        let (i3, i4) = (w.real_idx[&3], w.real_idx[&4]);
+        w.order_key[i3] = Some(2.0);
+        w.order_key[i4] = Some(1.0);
+        minimize_crossings(&mut w, 24, true);
+        assert!(w.pos[i4] < w.pos[i3]);
+        assert_eq!(count_crossings(&w), 0, "the free layer followed the keys");
+    }
+
+    #[test]
     fn single_chain_zero_crossings() {
         let mut w = build(&[1, 2, 3], &[(1, 2), (2, 3)]);
-        minimize_crossings(&mut w, 24);
+        minimize_crossings(&mut w, 24, false);
         assert_eq!(count_crossings(&w), 0);
     }
 }

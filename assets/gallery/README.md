@@ -192,6 +192,7 @@ One or more rendered examples per supported diagram kind. The first example of e
 - [Rel direction and rel styling](c4/08-rel-direction-and-rel-styling.md)
 - [Layout row wrap config](c4/09-layout-row-wrap-config.md)
 - [Keyword args and tags](c4/10-keyword-args-and-tags.md)
+- [Container graph layout](c4/11-container-graph-layout.md)
 
 ## Block
 

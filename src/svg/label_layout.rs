@@ -38,7 +38,7 @@ pub(super) fn rect_overlap_area(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)
 }
 
 /// The `(x, y, w, h)` rect a `size`-sized label centered at `center` occupies.
-fn rect_at(center: (f64, f64), size: (f64, f64)) -> (f64, f64, f64, f64) {
+pub(crate) fn rect_at(center: (f64, f64), size: (f64, f64)) -> (f64, f64, f64, f64) {
     (
         center.0 - size.0 / 2.0,
         center.1 - size.1 / 2.0,

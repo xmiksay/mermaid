@@ -1,0 +1,16 @@
+C4Dynamic
+title Login flow
+ContainerDb(c4, "Customer DB", "Postgres", "Accounts")
+Container(c1, "SPA", "Vue", "Browser app")
+Container_Boundary(b, "API Application") {
+  Component(c3, "Security component", "Rust", "Password hashing, sessions")
+  Component(c2, "Sign-in controller", "Axum handler", "Login endpoint")
+  Component(c5, "MFA verifier", "Rust", "TOTP check")
+}
+System_Ext(idp, "Identity provider", "OIDC")
+RelIndex(1, c1, c2, "Submits credentials to", "JSON/HTTPS")
+RelIndex(2, c2, c3, "Calls isAuthenticated() on")
+RelIndex(3, c3, c4, "select * from users where username = ?", "JDBC")
+RelIndex(4, c3, c5, "Requests second factor")
+RelIndex(5, c5, idp, "Validates federated assertion", "OIDC")
+RelIndex(6, c2, c1, "Returns session cookie")

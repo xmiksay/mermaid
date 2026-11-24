@@ -143,8 +143,8 @@ mod tests {
         };
         let mut w = Work::from_input(&g).unwrap();
         cycle::remove(&mut w);
-        layer::assign(&mut w);
-        order::minimize_crossings(&mut w, 24);
+        layer::assign_pinned(&mut w, &[], &[], false);
+        order::minimize_crossings(&mut w, 24, false);
         w
     }
 

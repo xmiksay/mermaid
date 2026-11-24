@@ -1,0 +1,40 @@
+C4Deployment
+title Production deployment
+Deployment_Node(cdn, "CDN", "Cloudflare") {
+  Container(static, "Static assets", "S3 + edge cache")
+}
+Deployment_Node(eu, "eu-central-1", "AWS region") {
+  Deployment_Node(vpc, "VPC", "10.0.0.0/16") {
+    Deployment_Node(pub, "Public subnet") {
+      Container(lb, "Load balancer", "ALB", "TLS termination")
+    }
+    Deployment_Node(k8s, "EKS cluster", "Kubernetes 1.30") {
+      Deployment_Node(ns, "namespace: shop") {
+        Container(api1, "API pod", "Rust/Axum", "3 replicas")
+        Container(worker, "Worker pod", "Rust/Tokio", "Background jobs")
+      }
+      Deployment_Node(obs, "namespace: observability") {
+        Container(prom, "Prometheus", "metrics")
+        Container(loki, "Loki", "logs")
+      }
+    }
+    Deployment_Node(data, "Private subnet") {
+      ContainerDb(rds, "RDS Postgres", "db.r6g.large", "Primary + replica")
+      ContainerDb(redis, "ElastiCache", "Redis 7")
+    }
+  }
+}
+Person(cust, "Customer")
+Person(ops, "SRE on call")
+Rel(cust, static, "Loads SPA", "HTTPS")
+Rel(cust, lb, "API calls", "HTTPS")
+Rel(lb, api1, "Forwards", "HTTP/2")
+Rel(api1, rds, "Reads/writes", "SQL/TLS")
+Rel(api1, redis, "Sessions, cache")
+Rel(worker, rds, "Batch jobs", "SQL")
+Rel(worker, redis, "Job queue")
+Rel(prom, api1, "Scrapes /metrics")
+Rel(prom, worker, "Scrapes /metrics")
+Rel(loki, api1, "Collects logs")
+Rel(ops, prom, "Dashboards & alerts", "Grafana")
+Rel(ops, loki, "Log queries")

@@ -5,6 +5,7 @@ use crate::parse::{C4Element, C4ElementKind, C4ElementStyle};
 
 use super::super::builder::{fnum, SvgBuilder};
 use super::super::theme::Theme;
+use super::text::{layout_shape_text, outline_insets, queue_rx, LineRole, CYL_RY};
 
 /// Effective colors for one element after applying any `UpdateElementStyle`
 /// override on top of the built-in palette.
@@ -58,10 +59,6 @@ pub(super) fn draw_element(
     }
     let _ = theme;
 }
-
-/// Height of the centered person figure (head + shoulders), reserved between the
-/// stereotype and the name in a person box.
-const PERSON_GLYPH_H: f64 = 30.0;
 
 /// A large, horizontally centered person figure (head + shoulders), drawn in a
 /// contrasting fill — matching upstream's centered glyph rather than a small
@@ -126,7 +123,7 @@ fn draw_cylinder(
     let text_fill = style.text.as_str();
     let muted = style.muted.as_str();
     let rx = w / 2.0;
-    let ry = 10.0;
+    let ry = CYL_RY;
     let top_y = y + ry;
     let bot_y = y + h - ry;
     svg.path(
@@ -163,7 +160,7 @@ fn draw_cylinder(
         ),
         &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
-    write_label_block(svg, el, x, y + ry, w, h - 2.0 * ry, fill, text_fill, muted);
+    write_label_block(svg, el, x, y, w, h, fill, text_fill, muted);
 }
 
 fn draw_queue(
@@ -179,22 +176,25 @@ fn draw_queue(
     let border = &style.border;
     let text_fill = style.text.as_str();
     let muted = style.muted.as_str();
-    let rx = h / 2.0;
-    svg.rect(
-        x,
-        y,
-        w,
-        h,
-        &format!(
-            "fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\" rx=\"{rx}\" ry=\"{rx}\""
-        ),
+    // A cylinder lying down, the same geometry `Outline::HCylinder` clips
+    // against: body plus back cap, then the front cap's visible inner arc.
+    let (rx, ry) = (queue_rx(h), h / 2.0);
+    let (l, r, bot) = (fnum(x + rx), fnum(x + w - rx), fnum(y + h));
+    let (top, rx, ry) = (fnum(y), fnum(rx), fnum(ry));
+    svg.path(
+        &format!("M {l} {top} L {r} {top} A {rx} {ry} 0 0 1 {r} {bot} L {l} {bot} A {rx} {ry} 0 0 1 {l} {top} Z"),
+        &format!("fill=\"{fill}\" stroke=\"{border}\" stroke-width=\"1.5\""),
+    );
+    svg.path(
+        &format!("M {r} {top} A {rx} {ry} 0 0 0 {r} {bot}"),
+        &format!("fill=\"none\" stroke=\"{border}\" stroke-width=\"1.5\""),
     );
     write_label_block(svg, el, x, y, w, h, fill, text_fill, muted);
 }
 
-/// Stack a shape's text block top-down as upstream does: stereotype → (person
-/// icon) → name → `[techn]` → description, with the description sinking toward
-/// the bottom of the box instead of clustering under the name (#327).
+/// Draw the shape's wrapped text block (see [`layout_shape_text`]), centered
+/// vertically in whatever room the outline leaves — a grid row stretches
+/// shorter shapes to its tallest one.
 #[allow(clippy::too_many_arguments)]
 fn write_label_block(
     svg: &mut SvgBuilder,
@@ -213,55 +213,29 @@ fn write_label_block(
     let kind_label = kind_text(el.kind, el.external)
         .replace('<', "#lt;")
         .replace('>', "#gt;");
-    let top = y + 6.0;
-    svg.text(
-        cx,
-        top + 12.0,
-        &format!("text-anchor=\"middle\" fill=\"{muted}\" font-size=\"10\" font-style=\"italic\""),
-        &kind_label,
-    );
-    // A person's figure sits between the stereotype and the name.
-    let mut next_y = top + 20.0;
-    if matches!(el.kind, C4ElementKind::Person) {
-        draw_person_icon(svg, cx, next_y, fill);
-        next_y += PERSON_GLYPH_H + 4.0;
+    let text = layout_shape_text(el, &kind_label, w);
+    let (inset_top, inset_bottom) = outline_insets(el.kind);
+    let room = h - inset_top - inset_bottom;
+    let top = y + inset_top + ((room - text.height) / 2.0).max(0.0);
+    if let Some(g) = text.glyph_top {
+        draw_person_icon(svg, cx, top + g, fill);
     }
-    let title_y = next_y + 12.0;
-    svg.text(
-        cx,
-        title_y,
-        &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""),
-        &el.label,
-    );
-    let mut next_y = title_y + 4.0;
-    if let Some(t) = &el.technology {
-        next_y += 14.0;
-        svg.text(
-            cx,
-            next_y,
-            &format!(
+    for line in &text.lines {
+        let attrs = match line.role {
+            LineRole::Stereotype => format!(
                 "text-anchor=\"middle\" fill=\"{muted}\" font-size=\"10\" font-style=\"italic\""
             ),
-            &format!("[{}]", t),
-        );
-    }
-    if let Some(d) = &el.descr {
-        let max_chars = ((w - 16.0) / 6.2).max(8.0) as usize;
-        let bottom = (y + h) - 6.0;
-        let max_lines = ((bottom - (next_y + 12.0)) / 12.0).max(1.0) as usize;
-        let lines = wrap_text(d, max_chars, max_lines);
-        // Sink the block so its last line rests near the bottom border, but never
-        // overlap the name/tech above it.
-        let block_h = lines.len() as f64 * 12.0;
-        let first_baseline = (bottom - block_h + 10.0).max(next_y + 14.0);
-        for (i, line) in lines.iter().enumerate() {
-            svg.text(
-                cx,
-                first_baseline + (i as f64) * 12.0,
-                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-                line,
-            );
-        }
+            LineRole::Name => format!(
+                "text-anchor=\"middle\" fill=\"{fg}\" font-size=\"13\" font-weight=\"bold\""
+            ),
+            LineRole::Techn => format!(
+                "text-anchor=\"middle\" fill=\"{muted}\" font-size=\"10\" font-style=\"italic\""
+            ),
+            LineRole::Descr => {
+                format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\"")
+            }
+        };
+        svg.text(cx, top + line.baseline, &attrs, &line.text);
     }
 }
 
@@ -336,39 +310,4 @@ fn is_dark_fill(fill: &str) -> bool {
         }
     }
     false
-}
-
-fn wrap_text(s: &str, max_chars: usize, max_lines: usize) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    for word in s.split_whitespace() {
-        if cur.is_empty() {
-            cur.push_str(word);
-            continue;
-        }
-        if cur.chars().count() + 1 + word.chars().count() <= max_chars {
-            cur.push(' ');
-            cur.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut cur));
-            cur.push_str(word);
-            if lines.len() >= max_lines {
-                break;
-            }
-        }
-    }
-    if !cur.is_empty() && lines.len() < max_lines {
-        lines.push(cur);
-    }
-    if lines.len() > max_lines {
-        lines.truncate(max_lines);
-    }
-    if let Some(last) = lines.last_mut() {
-        if last.chars().count() > max_chars {
-            let mut t: String = last.chars().take(max_chars.saturating_sub(1)).collect();
-            t.push('…');
-            *last = t;
-        }
-    }
-    lines
 }

@@ -131,3 +131,38 @@ fn errors_on_missing_size() {
     };
     assert_eq!(layout(&g).unwrap_err(), super::LayoutError::MissingSize(2));
 }
+
+#[test]
+fn parallel_edges_keep_their_own_dummy_chains() {
+    // Two edges 1 -> 3 skip layer 1 (held by 2): each gets its own dummy, so
+    // their per-index polylines differ while `edge_points` holds just one.
+    let g = make_graph(&[1, 2, 3], &[(1, 2), (2, 3), (1, 3), (1, 3)], (40.0, 20.0));
+    let l = layout(&g).unwrap();
+    assert_eq!(l.edge_polylines.len(), 4);
+    let (a, b) = (&l.edge_polylines[2], &l.edge_polylines[3]);
+    assert_eq!(a.len(), 3);
+    assert_eq!(b.len(), 3);
+    assert_ne!(a[1], b[1], "parallel edges share a dummy");
+}
+
+#[test]
+fn pins_against_an_edge_are_rejected() {
+    use super::{layout_pinned, LayerPins};
+    let g = make_graph(&[1, 2], &[(1, 2)], (10.0, 10.0));
+    let into_first = LayerPins {
+        first: vec![2],
+        ..LayerPins::default()
+    };
+    assert_eq!(
+        layout_pinned(&g, &LayoutConfig::default(), &into_first).err(),
+        Some(LayoutError::PinnedAgainstEdge(2))
+    );
+    let out_of_last = LayerPins {
+        last: vec![1],
+        ..LayerPins::default()
+    };
+    assert_eq!(
+        layout_pinned(&g, &LayoutConfig::default(), &out_of_last).err(),
+        Some(LayoutError::PinnedAgainstEdge(1))
+    );
+}

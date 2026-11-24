@@ -215,3 +215,16 @@ fn curve_step_turns_at_midpoints_and_reaches_endpoint() {
     assert_eq!(d, "M0 0L10 0L10 10L20 10");
     assert!(!d.contains('C'));
 }
+
+#[test]
+fn curve_basis_points_follow_the_curve_with_exact_endpoints() {
+    use super::curve_basis_points;
+    let pts = [(0.0, 0.0), (50.0, 100.0), (100.0, 0.0)];
+    let flat = curve_basis_points(&pts);
+    assert_eq!(flat.first(), Some(&(0.0, 0.0)));
+    assert_eq!(flat.last(), Some(&(100.0, 0.0)));
+    // The B-spline never reaches its interior control point.
+    let peak = flat.iter().map(|p| p.1).fold(0.0_f64, f64::max);
+    assert!(peak > 10.0 && peak < 100.0, "peak {peak}");
+    assert_eq!(curve_basis_points(&pts[..2]), vec![pts[0], pts[1]]);
+}

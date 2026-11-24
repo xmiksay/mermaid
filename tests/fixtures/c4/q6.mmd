@@ -1,0 +1,8 @@
+C4Container
+Container(a, "Producer", "Rust", "Emits domain events")
+ContainerQueue(q, "Order and payment events topic", "Kafka", "Domain events for orders, payments and stock. Retained for seven days, compacted per aggregate key, replicated across three brokers with min.insync.replicas=2 and idempotent producers enabled.")
+Container(b, "Consumer", "Go", "Projects events")
+Container(c, "Auditor", "Python", "Archives events")
+Rel(a, q, "Publishes")
+Rel(q, b, "Delivers")
+Rel(q, c, "Delivers")

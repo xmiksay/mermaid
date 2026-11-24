@@ -4,82 +4,119 @@ use std::fmt::Write as _;
 
 use super::fnum;
 
-/// Faithful port of d3-shape `curveBasis` (open cubic B-spline) to an SVG path.
-///
-/// Endpoints are exact: the path starts at `pts[0]` and ends at `pts[n-1]`, so
-/// node-boundary clipping and arrow markers still line up.
-///   `0` pts → `""`            `1` pt → `"M x y"`
-///   `2` pts → `"M x0 y0L x1 y1"` (straight; short edges stay straight)
+/// One drawing command of a d3 `curveBasis` path.
+enum BasisSeg {
+    Move((f64, f64)),
+    Line((f64, f64)),
+    Cubic((f64, f64), (f64, f64), (f64, f64)),
+}
+
+/// Faithful port of d3-shape `curveBasis` (open cubic B-spline) as a command
+/// list. Endpoints are exact: the path starts at `pts[0]` and ends at
+/// `pts[n-1]`, so node-boundary clipping and arrow markers still line up.
+///   `0` pts → nothing         `1` pt → a moveTo
+///   `2` pts → moveTo + lineTo (straight; short edges stay straight)
 ///   `≥3`    → moveTo(p0); lineTo((5p0+p1)/6); a bezier per interior point;
 ///             a closing bezier; a final lineTo(last point).
-pub(crate) fn curve_basis_path(pts: &[(f64, f64)]) -> String {
+fn basis_segments(pts: &[(f64, f64)]) -> Vec<BasisSeg> {
     let n = pts.len();
-    let mut s = String::new();
-    if n == 0 {
-        return s;
-    }
-    if n == 1 {
-        let _ = write!(s, "M{} {}", fnum(pts[0].0), fnum(pts[0].1));
-        return s;
-    }
-    if n == 2 {
-        let _ = write!(
-            s,
-            "M{} {}L{} {}",
-            fnum(pts[0].0),
-            fnum(pts[0].1),
-            fnum(pts[1].0),
-            fnum(pts[1].1),
-        );
-        return s;
-    }
-
-    fn bezier(s: &mut String, x0: f64, y0: f64, x1: f64, y1: f64, x: f64, y: f64) {
-        let _ = write!(
-            s,
-            "C{} {} {} {} {} {}",
-            fnum((2.0 * x0 + x1) / 3.0),
-            fnum((2.0 * y0 + y1) / 3.0),
-            fnum((x0 + 2.0 * x1) / 3.0),
-            fnum((y0 + 2.0 * y1) / 3.0),
-            fnum((x0 + 4.0 * x1 + x) / 6.0),
-            fnum((y0 + 4.0 * y1 + y) / 6.0),
-        );
-    }
-
-    let (mut x0, mut y0) = (f64::NAN, f64::NAN);
-    let (mut x1, mut y1) = (f64::NAN, f64::NAN);
-
-    for (i, &(x, y)) in pts.iter().enumerate() {
-        match i {
-            0 => {
-                let _ = write!(s, "M{} {}", fnum(x), fnum(y));
+    let mut segs = Vec::with_capacity(n + 2);
+    match n {
+        0 => return segs,
+        1 | 2 => {
+            segs.push(BasisSeg::Move(pts[0]));
+            if n == 2 {
+                segs.push(BasisSeg::Line(pts[1]));
             }
+            return segs;
+        }
+        _ => {}
+    }
+
+    fn bezier(p0: (f64, f64), p1: (f64, f64), p: (f64, f64)) -> BasisSeg {
+        BasisSeg::Cubic(
+            ((2.0 * p0.0 + p1.0) / 3.0, (2.0 * p0.1 + p1.1) / 3.0),
+            ((p0.0 + 2.0 * p1.0) / 3.0, (p0.1 + 2.0 * p1.1) / 3.0),
+            (
+                (p0.0 + 4.0 * p1.0 + p.0) / 6.0,
+                (p0.1 + 4.0 * p1.1 + p.1) / 6.0,
+            ),
+        )
+    }
+
+    let mut p0 = (f64::NAN, f64::NAN);
+    let mut p1 = (f64::NAN, f64::NAN);
+    for (i, &p) in pts.iter().enumerate() {
+        match i {
+            0 => segs.push(BasisSeg::Move(p)),
             1 => { /* d3 stores the point only; emits nothing */ }
             2 => {
-                let _ = write!(
-                    s,
-                    "L{} {}",
-                    fnum((5.0 * x0 + x1) / 6.0),
-                    fnum((5.0 * y0 + y1) / 6.0)
-                );
-                bezier(&mut s, x0, y0, x1, y1, x, y);
+                segs.push(BasisSeg::Line((
+                    (5.0 * p0.0 + p1.0) / 6.0,
+                    (5.0 * p0.1 + p1.1) / 6.0,
+                )));
+                segs.push(bezier(p0, p1, p));
             }
-            _ => bezier(&mut s, x0, y0, x1, y1, x, y),
+            _ => segs.push(bezier(p0, p1, p)),
         }
-        x0 = x1;
-        y0 = y1;
-        x1 = x;
-        y1 = y;
+        p0 = p1;
+        p1 = p;
     }
 
     // d3 Basis.lineEnd for an open curve with ≥3 points: one final bezier using
     // the incoming point = the last point, then a lineTo to the exact last
-    // point. After the loop (x1,y1)=last and (x0,y0)=second-to-last.
-    bezier(&mut s, x0, y0, x1, y1, x1, y1);
-    let _ = write!(s, "L{} {}", fnum(x1), fnum(y1));
+    // point. After the loop p1 = last and p0 = second-to-last.
+    segs.push(bezier(p0, p1, p1));
+    segs.push(BasisSeg::Line(p1));
+    segs
+}
 
+/// [`basis_segments`] as an SVG path string.
+pub(crate) fn curve_basis_path(pts: &[(f64, f64)]) -> String {
+    let mut s = String::new();
+    for seg in basis_segments(pts) {
+        let _ = match seg {
+            BasisSeg::Move((x, y)) => write!(s, "M{} {}", fnum(x), fnum(y)),
+            BasisSeg::Line((x, y)) => write!(s, "L{} {}", fnum(x), fnum(y)),
+            BasisSeg::Cubic(c1, c2, p) => write!(
+                s,
+                "C{} {} {} {} {} {}",
+                fnum(c1.0),
+                fnum(c1.1),
+                fnum(c2.0),
+                fnum(c2.1),
+                fnum(p.0),
+                fnum(p.1),
+            ),
+        };
+    }
     s
+}
+
+/// The `curveBasis` curve through `pts` flattened to a polyline (each bezier
+/// sampled at `BASIS_SAMPLES` steps) — what a renderer tests label placement
+/// against, since the drawn curve departs from its control polygon.
+pub(crate) fn curve_basis_points(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    const BASIS_SAMPLES: usize = 8;
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for seg in basis_segments(pts) {
+        match seg {
+            BasisSeg::Move(p) | BasisSeg::Line(p) => out.push(p),
+            BasisSeg::Cubic(c1, c2, p) => {
+                let Some(&p0) = out.last() else { continue };
+                for k in 1..=BASIS_SAMPLES {
+                    let t = k as f64 / BASIS_SAMPLES as f64;
+                    let u = 1.0 - t;
+                    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+                    out.push((
+                        a * p0.0 + b * c1.0 + c * c2.0 + d * p.0,
+                        a * p0.1 + b * c1.1 + c * c2.1 + d * p.1,
+                    ));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Straight-segment path through the waypoints (d3 `curveLinear`): a `moveTo`

@@ -16,6 +16,9 @@ pub struct C4Diagram {
     pub layout: C4LayoutConfig,
     /// `SHOW_LEGEND()` was requested (legend rendering deferred).
     pub show_legend: bool,
+    /// Explicit `LAYOUT_TOP_DOWN()` / `LAYOUT_LEFT_RIGHT()` /
+    /// `LAYOUT_LANDSCAPE()` statement, if any (the last one wins).
+    pub layout_direction: Option<C4LayoutDirection>,
 }
 
 impl Default for C4Diagram {
@@ -30,6 +33,7 @@ impl Default for C4Diagram {
             boundary_styles: Vec::new(),
             layout: C4LayoutConfig::default(),
             show_legend: false,
+            layout_direction: None,
         }
     }
 }
@@ -59,6 +63,16 @@ pub struct C4RelStyle {
 pub struct C4LayoutConfig {
     pub shape_in_row: Option<usize>,
     pub boundary_in_row: Option<usize>,
+}
+
+/// Flow direction requested by a C4-PlantUML `LAYOUT_*()` statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum C4LayoutDirection {
+    /// `LAYOUT_TOP_DOWN()`.
+    TopDown,
+    /// `LAYOUT_LEFT_RIGHT()` or its alias `LAYOUT_LANDSCAPE()`.
+    LeftRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +149,21 @@ pub struct C4Relation {
     pub link: Option<String>,
     pub direction: C4RelDirection,
     pub bidirectional: bool,
+    /// Written as `Rel_Back(a, b)`: `from`/`to` hold the drawn direction
+    /// (`b` → `a`), the source wrote `a, b`.
+    pub reversed: bool,
+}
+
+impl C4Relation {
+    /// The endpoints as written in the source — what `UpdateRelStyle(a, b)`
+    /// matches against, as upstream does.
+    pub fn written_pair(&self) -> (&str, &str) {
+        if self.reversed {
+            (&self.to, &self.from)
+        } else {
+            (&self.from, &self.to)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

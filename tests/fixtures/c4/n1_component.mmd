@@ -1,0 +1,33 @@
+C4Component
+title Order service - components
+Container(spa, "Web shop", "Vue 3", "Customer-facing storefront and checkout flow")
+ContainerDb(pg, "Orders DB", "PostgreSQL 16", "Orders, line items, payment intents")
+ContainerQueue(bus, "Event bus", "NATS JetStream", "Domain events")
+System_Ext(psp, "Payment provider", "Stripe-like PSP")
+System_Ext(mail, "Mail relay")
+Container_Boundary(api, "Order API (Rust / Axum)") {
+  Component(http, "HTTP router", "axum::Router", "Routes, auth extractor, rate limiting")
+  Boundary(domain, "Domain") {
+    Component(orders, "Order service", "Rust", "Create, cancel, query orders")
+    Component(pricing, "Pricing engine", "Rust", "Discounts, taxes, currency conversion with long description text that wraps")
+    Component(pay, "Payment orchestrator", "Rust", "Intents, webhooks, retries")
+  }
+  Boundary(infra, "Infrastructure") {
+    ComponentDb(repo, "Order repository", "SeaORM")
+    ComponentQueue(outbox, "Outbox relay", "tokio task", "Transactional outbox to bus")
+    Component(notifier, "Notifier", "lettre", "Order confirmation mails")
+  }
+}
+Rel(spa, http, "Places orders", "JSON/HTTPS")
+Rel(http, orders, "Dispatches commands")
+Rel(orders, pricing, "Prices basket")
+Rel(orders, pay, "Starts payment")
+Rel(pay, psp, "Creates payment intent and confirms charge", "HTTPS")
+Rel(psp, http, "Webhook: payment succeeded / failed", "HTTPS")
+Rel(orders, repo, "Persists orders")
+Rel(repo, pg, "Reads/writes", "SQL")
+Rel(orders, outbox, "Enqueues domain event")
+Rel(outbox, pg, "Polls outbox table", "SQL")
+Rel(outbox, bus, "Publishes OrderPlaced, OrderPaid", "NATS")
+Rel(notifier, bus, "Subscribes OrderPaid")
+Rel(notifier, mail, "Sends confirmation", "SMTP")

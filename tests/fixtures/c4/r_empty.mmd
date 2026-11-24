@@ -1,0 +1,15 @@
+C4Context
+LAYOUT_TOP_DOWN()
+Person(a, "A")
+System(b, "B")
+Boundary(e, "Empty boundary") {
+}
+Boundary(o, "Only outside rels") {
+  System(x, "X")
+}
+Rel(a, b, "uses")
+Rel(a, ghost, "to undefined")
+Rel(o, b, "boundary to outside")
+Rel(b, o, "back to boundary")
+Rel(x, x, "self")
+Rel(ghost2, ghost3, "both undefined")

@@ -485,6 +485,14 @@ const SAMPLES: &[(&str, &str, &str)] = &[
         )),
     ),
     (
+        "Container view in layered layout",
+        "c4/11-container-graph-layout",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/samples/c4/11-container-graph-layout.mmd"
+        )),
+    ),
+    (
         "Identifying vs non-identifying",
         "er/02-identifying-vs-non-identifying",
         include_str!(concat!(

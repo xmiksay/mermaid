@@ -35,6 +35,7 @@ fn rel(from: &str, to: &str, label: &str) -> C4Relation {
         link: None,
         direction: C4RelDirection::Default,
         bidirectional: false,
+        reversed: false,
     }
 }
 
@@ -91,17 +92,11 @@ fn sibling_boundaries_do_not_overlap() {
         ),
     ];
 
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0, V_GAP, H_GAP);
-    let mut pos = HashMap::new();
-    let mut boundaries = Vec::new();
-    let mut leaves = Vec::new();
-    place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
-
+    let boundaries = grid_of(elements, None).boundaries;
     assert_eq!(boundaries.len(), 4);
     for (i, a) in boundaries.iter().enumerate() {
         for b in &boundaries[i + 1..] {
-            let ra = (a.x, a.y, a.w, a.h);
-            let rb = (b.x, b.y, b.w, b.h);
+            let (ra, rb) = (a.rect, b.rect);
             assert!(
                 !overlaps(ra, rb),
                 "boundary frames overlap: {ra:?} vs {rb:?}"
@@ -118,22 +113,11 @@ fn boundary_contains_its_members() {
         C4BoundaryKind::Deployment,
         vec![person("x", "X"), person("y", "Y")],
     )];
-    let (nodes, _, _) = flow_layout(&elements, SHAPE_IN_ROW, BOUNDARY_IN_ROW, 14.0, V_GAP, H_GAP);
-    let mut pos = HashMap::new();
-    let mut boundaries = Vec::new();
-    let mut leaves = Vec::new();
-    place_absolute(&nodes, PAD, PAD, &mut pos, &mut boundaries, &mut leaves);
-
-    let b = &boundaries[0];
-    for (_, x, y, w, h) in &leaves {
-        assert!(
-            *x >= b.x && *x + *w <= b.x + b.w,
-            "member escapes boundary x"
-        );
-        assert!(
-            *y >= b.y && *y + *h <= b.y + b.h,
-            "member escapes boundary y"
-        );
+    let p = grid_of(elements, None);
+    let (bx, by, bw, bh) = p.boundaries[0].rect;
+    for (_, (x, y, w, h)) in &p.leaves {
+        assert!(*x >= bx && *x + *w <= bx + bw, "member escapes boundary x");
+        assert!(*y >= by && *y + *h <= by + bh, "member escapes boundary y");
     }
 }
 
@@ -142,21 +126,10 @@ fn boundary_contains_its_members() {
 /// (not symmetrically below it), and only Mainframe wraps to the next row.
 #[test]
 fn context_uses_upstream_row_flow() {
-    let d = context_sample();
-    let (nodes, _, _) = flow_layout(
-        &d.elements,
-        SHAPE_IN_ROW,
-        BOUNDARY_IN_ROW,
-        14.0,
-        V_GAP,
-        H_GAP,
-    );
+    let p = grid_of(context_sample().elements, None);
     let by_alias = |a: &str| {
-        nodes
-            .iter()
-            .find(|n| n.el.alias == a)
-            .map(|n| (n.x, n.y))
-            .expect("placed")
+        let r = rect_of(&p, a);
+        (r.0, r.1)
     };
     let (bank_x, bank_y) = by_alias("SystemAA");
     let (email_x, email_y) = by_alias("SystemB");
@@ -179,21 +152,10 @@ fn context_uses_upstream_row_flow() {
 /// by a long diagonal.
 #[test]
 fn context_tiers_persons_above_systems() {
-    let d = context_sample();
-    let (nodes, _, _) = flow_layout(
-        &d.elements,
-        SHAPE_IN_ROW,
-        BOUNDARY_IN_ROW,
-        14.0,
-        V_GAP,
-        H_GAP,
-    );
+    let p = grid_of(context_sample().elements, None);
     let by_alias = |a: &str| {
-        nodes
-            .iter()
-            .find(|n| n.el.alias == a)
-            .map(|n| (n.x, n.y))
-            .expect("placed")
+        let r = rect_of(&p, a);
+        (r.0, r.1)
     };
     let (customer_x, customer_y) = by_alias("customerA");
     let (employee_x, employee_y) = by_alias("customerB");
@@ -216,11 +178,26 @@ fn layout_config_controls_shapes_per_row() {
     // With shape_in_row = 1 the two shapes stack vertically; default (4)
     // would place them on the same row. Verify the override changes layout.
     let elements = vec![person("a", "A"), person("b", "B")];
-    let (nodes, _, _) = flow_layout(&elements, 1, BOUNDARY_IN_ROW, 14.0, V_GAP, H_GAP);
-    assert_eq!(nodes.len(), 2);
+    let p = grid_of(elements, Some(1));
+    let (a, b) = (rect_of(&p, "a"), rect_of(&p, "b"));
+    assert!(b.1 > a.1, "second shape should wrap to the next row");
+    assert_eq!(a.0, b.0, "wrapped shapes share the left edge");
+}
+
+#[test]
+fn grid_row_takes_its_tallest_shape() {
+    // A long description makes `b` taller; its row-mate `a` is stretched to
+    // match and the next row starts below both.
+    let mut b = system("b", "B", false);
+    b.descr = Some("word ".repeat(30));
+    let elements = vec![system("a", "A", false), b, system("c", "C", false)];
+    let p = grid_of(elements, Some(2));
+    let (ra, rb, rc) = (rect_of(&p, "a"), rect_of(&p, "b"), rect_of(&p, "c"));
+    assert_eq!(ra.1, rb.1);
+    assert_eq!(ra.3, rb.3, "row-mates share the row height");
+    assert!(rb.3 > text::shape_size(&system("a", "A", false)).1);
     assert!(
-        nodes[1].y > nodes[0].y,
-        "second shape should wrap to the next row"
+        rc.1 >= rb.1 + rb.3,
+        "next row starts below the tallest shape"
     );
-    assert_eq!(nodes[0].x, nodes[1].x, "wrapped shapes share the left edge");
 }

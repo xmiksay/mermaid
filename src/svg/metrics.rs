@@ -30,6 +30,36 @@ pub(crate) fn text_width(s: &str, base_char_w: f64, font_size: f64) -> f64 {
     units * base_char_w * font_scale(font_size)
 }
 
+/// Proportional estimate of one line's width at `font_size`, glyph class by
+/// glyph class (in em: narrow `i`/`l`/punctuation, lowercase, digits,
+/// uppercase, wide `M`/`W`/`m`/`w`, and a full em for CJK / full-width,
+/// a little more for emoji), widened for bold. Deliberately generous, for
+/// renderers that must guarantee text fits a fixed-width box (C4), where
+/// [`text_width`]'s single per-glyph width lets `MMMM` overflow.
+pub(crate) fn proportional_width(s: &str, font_size: f64, bold: bool) -> f64 {
+    let em: f64 = s.chars().map(glyph_em).sum();
+    em * font_size * if bold { 1.08 } else { 1.0 }
+}
+
+fn glyph_em(c: char) -> f64 {
+    if matches!(c as u32, 0x1F300..=0x1FAFF) {
+        return 1.25;
+    }
+    if char_width_units(c) > 1.0 {
+        return 1.0;
+    }
+    match c {
+        ' ' => 0.3,
+        'i' | 'l' | 'I' | 'j' | '.' | ',' | ':' | ';' | '\'' | '!' | '|' | '`' => 0.32,
+        'f' | 'r' | 't' | '(' | ')' | '[' | ']' | '/' | '-' => 0.42,
+        'M' | 'W' | 'm' | 'w' | '@' | '%' => 0.95,
+        'A'..='Z' => 0.72,
+        '0'..='9' => 0.62,
+        'a'..='z' => 0.58,
+        _ => 0.66,
+    }
+}
+
 /// Advance width of `c` in half-width units: 2 for East-Asian wide / full-width
 /// glyphs, 1 otherwise. Covers the common CJK ideograph, kana, Hangul and
 /// full-width-form ranges — enough to size labels without a full Unicode table.
@@ -70,6 +100,17 @@ mod tests {
             text_width("hello", 7.5, 2.0 * BASE_FONT_SIZE),
             2.0 * text_width("hello", 7.5, BASE_FONT_SIZE)
         );
+    }
+
+    #[test]
+    fn proportional_width_tells_wide_from_narrow_glyphs() {
+        let wide = proportional_width("MMMMMMMMMM", 10.0, false);
+        let narrow = proportional_width("iiiiiiiiii", 10.0, false);
+        assert!(wide > 2.5 * narrow);
+        assert!(proportional_width("ab", 10.0, true) > proportional_width("ab", 10.0, false));
+        // A CJK glyph is a full em; an emoji a little more.
+        assert_eq!(proportional_width("日", 10.0, false), 10.0);
+        assert!(proportional_width("🚀", 10.0, false) > 10.0);
     }
 
     #[test]

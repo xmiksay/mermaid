@@ -1,0 +1,13 @@
+C4Container
+LAYOUT_LEFT_RIGHT()
+Person(u, "User")
+Container_Boundary(sys, "System") {
+  Container(x, "X")
+  Container_Boundary(inner, "Inner") {
+    Container(y, "Y")
+  }
+}
+Rel(u, sys, "Uses whole system")
+Rel(u, inner, "Uses inner")
+Rel(sys, u, "Notifies")
+Rel(x, y, "calls")

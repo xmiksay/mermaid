@@ -1,480 +1,263 @@
-//! C4 relation drawing: straight point-to-point connectors clipped to each
-//! node, with an arrow head and an optional `[techn]` tag.
+//! C4 relations: each one follows its placement route (straight in grid
+//! mode, a sugiyama-routed spline in graph mode), clipped to the two shapes'
+//! drawn outlines, with an arrow head and a wrapped label + `[techn]` block.
 
 use std::collections::HashMap;
 
-use crate::parse::{C4RelStyle, C4Relation};
+use crate::parse::{C4Element, C4RelStyle, C4Relation};
 
-use super::super::builder::{fnum, SvgBuilder};
-use super::super::geometry::{clip_rect, polyline_midpoint};
+use super::super::builder::{curve_basis_path, curve_basis_points, curve_linear_path, SvgBuilder};
 use super::super::label::edge_label_bg;
-use super::super::label_layout::{rect_overlap_area, segment_rect_overlap};
-use super::super::metrics::text_width;
+use super::super::label_layout::rect_at;
 use super::super::theme::Theme;
-use super::C4_LINE;
+use super::outline::{clip_route, Rect};
+use super::rel_annotate::place_labels;
+use super::rel_label::{LABEL_CLEARANCE, SHAPE_CLEARANCE};
+use super::rel_loop::self_loop;
+use super::rel_route::{enclosure_route, endpoint_shapes, RoutePath};
+use super::rel_straight::straight_routes;
+use super::text::{bundle_label_extent, RelLabel};
+use super::{Placement, C4_LINE};
 
-/// A line segment obstacle: another relation's clipped-to-boundary endpoints.
-type Segment = ((f64, f64), (f64, f64));
+/// Arrow marker id; its `refX` puts the tip exactly on the path's end point.
+pub(super) const ARROW_ID: &str = "c4-arrow";
+pub(super) const ARROW_REF_X: u32 = 10;
+pub(super) const ARROW_SIZE: u32 = 9;
 
-/// A relation's clipped endpoints, keyed by the alias pair it connects — kept
-/// around so every relation's label search can also dodge every *other*
-/// relation's routed line, not just node rects (#382).
-struct RelLine {
-    from: String,
-    to: String,
-    p0: (f64, f64),
-    p1: (f64, f64),
-}
+/// The arrowhead itself (9px long, 9px wide) plus a little room: a label may
+/// never cover it, in any layout.
+pub(super) const ARROWHEAD: f64 = 14.0;
+pub(super) const ARROWHEAD_PAD: f64 = 6.0;
 
 /// Minimum visual gap to leave between two reversed-pair labels once both are
 /// placed along their shared connector.
 const REL_LABEL_CLEARANCE: f64 = 10.0;
 
-/// The on-canvas width of a relation's label background — mirrors the `lw`
-/// computation in [`draw_one_rel`], capped at the same truncation length.
-fn label_footprint_width(label: &str) -> f64 {
-    text_width(&truncate(label, 36), 8.0, 10.0) + 6.0
+/// One relation, fully resolved before anything is drawn so the canvas can be
+/// sized to include every line and label.
+pub(super) struct RelPlan<'a> {
+    pub rel: &'a C4Relation,
+    /// Control points of the drawn path, ends on the shape outlines.
+    pub path: Vec<(f64, f64)>,
+    /// The drawn line itself (the flattened spline when `curved`).
+    pub line: Vec<(f64, f64)>,
+    /// Drawn as a spline (graph-mode routes, self-loops) or straight.
+    pub curved: bool,
+    pub label: Option<(RelLabel, (f64, f64))>,
+    /// A thin line from the label to its relation's line, when the label had
+    /// to sit off it (`rel_place::Spot`).
+    pub leader: Option<((f64, f64), (f64, f64))>,
 }
 
-/// The row/column gap the element grid needs so a reversed-pair relation
-/// (`A->B` alongside `B->A`, e.g. a `Rel_U`/`Rel_D` pair between the same two
-/// elements) has room for both labels laid out along their short connector
-/// with a clear gap between them, rather than just touching. Two elements
-/// connected only by non-reversed relations (or unlabeled ones) don't need
-/// any extra room, so this returns `0.0` and the grid keeps its default
-/// spacing — the same "widen only when needed" pattern used for ER's
-/// `layer_gap` (#399). Sized off the labels' combined *width* rather than
-/// height: two diagonally-adjacent elements (a common outcome of the row-flow
-/// wrap) connect with a short diagonal segment, and it's the wide label
-/// backgrounds — not their 14px height — that need the room.
-pub(super) fn min_reversed_pair_gap(rels: &[C4Relation]) -> f64 {
-    let mut extra = 0.0_f64;
-    for (i, a) in rels.iter().enumerate() {
-        if a.label.is_empty() {
+impl RelPlan<'_> {
+    pub(super) fn label_rect(&self) -> Option<Rect> {
+        self.label.as_ref().map(|(l, c)| rect_at(*c, (l.w, l.h)))
+    }
+
+    pub(super) fn shift(&mut self, dx: f64, dy: f64) {
+        for p in self.path.iter_mut().chain(self.line.iter_mut()) {
+            p.0 += dx;
+            p.1 += dy;
+        }
+        if let Some((_, c)) = &mut self.label {
+            c.0 += dx;
+            c.1 += dy;
+        }
+        if let Some((a, b)) = &mut self.leader {
+            *a = (a.0 + dx, a.1 + dy);
+            *b = (b.0 + dx, b.1 + dy);
+        }
+    }
+}
+
+/// The `(column, row)` gaps the grid needs so relation labels fit between
+/// the shapes they connect instead of covering them: a column gap as wide as
+/// the widest label and a row gap as tall as the tallest, plus clearance on
+/// both sides. A reversed pair (`A->B` alongside `B->A`) runs on two
+/// parallel lines whose labels sit side by side across a row gap or stacked
+/// in a column gap, so it needs their combined width across columns but only
+/// their combined height across rows (#399). `(0.0, 0.0)` without labels,
+/// so the grid keeps its default spacing.
+pub(super) fn min_label_gaps(rels: &[C4Relation]) -> (f64, f64) {
+    // Clearance either side, plus the arrowhead the label must not cover.
+    let margin = 2.0 * (SHAPE_CLEARANCE + LABEL_CLEARANCE) + ARROWHEAD + ARROWHEAD_PAD;
+    let (w, h) = bundle_label_extent(rels, false, REL_LABEL_CLEARANCE);
+    if w == 0.0 {
+        (0.0, 0.0)
+    } else {
+        (w + margin, h + margin)
+    }
+}
+
+/// Resolve every relation's clipped path and label position. Labels are
+/// placed in source order, each one an obstacle for every later one, so
+/// relations between the same pair (e.g. reversed `RelIndex` steps) don't
+/// stack their labels (#381).
+pub(super) fn plan_rels<'a>(
+    rels: &'a [C4Relation],
+    elements: &[C4Element],
+    placement: &Placement,
+    rel_styles: &HashMap<(&str, &str), &C4RelStyle>,
+) -> Vec<RelPlan<'a>> {
+    let shapes = endpoint_shapes(elements, placement);
+    let needed: Vec<bool> = (0..rels.len())
+        .map(|i| placement.routes.get(i).is_none_or(Option::is_none))
+        .collect();
+    let straight = straight_routes(rels, &shapes, placement, &needed);
+
+    // Self-loops and boundary-anchored relations are planned last, so they
+    // can keep clear of every other relation's ends.
+    let mut paths: Vec<Option<RoutePath>> = vec![None; rels.len()];
+    let mut deferred = Vec::new();
+    for (i, r) in rels.iter().enumerate() {
+        let (Some(&start), Some(&end)) = (shapes.get(r.from.as_str()), shapes.get(r.to.as_str()))
+        else {
+            continue;
+        };
+        paths[i] = if r.from == r.to || start.2 || end.2 {
+            deferred.push((i, start, end));
+            None
+        } else if let Some(route) = placement.routes.get(i).cloned().flatten() {
+            let ends = ((start.0, start.1), (end.0, end.1));
+            Some((clip_route(&route, ends.0, ends.1), placement.curved))
+        } else {
+            straight.get(i).cloned().flatten()
+        };
+    }
+    // Boundary-anchored routes may still be routed by the graph layout.
+    for &(i, start, end) in &deferred {
+        if rels[i].from != rels[i].to {
+            if let Some(route) = placement.routes.get(i).cloned().flatten() {
+                let ends = ((start.0, start.1), (end.0, end.1));
+                paths[i] = Some((clip_route(&route, ends.0, ends.1), placement.curved));
+            }
+        }
+    }
+    // Self-loops first (enclosure routes then slide clear of their ends too).
+    deferred.sort_by_key(|&(i, ..)| rels[i].from != rels[i].to);
+    for (i, start, end) in deferred {
+        if paths[i].is_some() {
             continue;
         }
-        for b in &rels[i + 1..] {
-            if b.label.is_empty() || a.from != b.to || a.to != b.from {
-                continue;
-            }
-            let wa = label_footprint_width(&a.label);
-            let wb = label_footprint_width(&b.label);
-            extra = extra.max(wa + wb + REL_LABEL_CLEARANCE);
-        }
-    }
-    extra
-}
-
-/// Draw every relation in `rels`. Relations are resolved in source order, and
-/// each one's placed label rect(s) become an obstacle for every relation
-/// drawn after it — the same mechanism the upstream `#312` opposite-pair
-/// stagger uses elsewhere, applied here to keep two relations between the same
-/// pair of elements (e.g. `RelIndex` steps that go back and forth) from
-/// stacking their labels exactly on top of one another (#381).
-pub(super) fn draw_rels(
-    rels: &[C4Relation],
-    rel_styles: &HashMap<(&str, &str), &C4RelStyle>,
-    pos: &HashMap<String, (f64, f64, f64, f64)>,
-    svg: &mut SvgBuilder,
-    theme: &Theme,
-) {
-    let lines: Vec<Option<RelLine>> = rels
-        .iter()
-        .map(|r| {
-            let &(ax, ay, aw, ah) = pos.get(&r.from)?;
-            let &(bx, by, bw, bh) = pos.get(&r.to)?;
-            let (sx, sy) = (ax + aw / 2.0, ay + ah / 2.0);
-            let (tx, ty) = (bx + bw / 2.0, by + bh / 2.0);
-            Some(RelLine {
-                from: r.from.clone(),
-                to: r.to.clone(),
-                p0: clip_rect((tx, ty), (sx, sy), (aw, ah)),
-                p1: clip_rect((sx, sy), (tx, ty), (bw, bh)),
-            })
-        })
-        .collect();
-
-    let mut placed_labels: Vec<(f64, f64, f64, f64)> = Vec::new();
-
-    for (i, r) in rels.iter().enumerate() {
-        let Some(line) = &lines[i] else { continue };
-        let ov = rel_styles.get(&(r.from.as_str(), r.to.as_str())).copied();
-
-        // A relation reversing this one's pair (`B->A` alongside `A->B`) is
-        // collinear by construction — its line can never be dodged without
-        // also dodging our own, so it's excluded here and handled instead via
-        // `placed_labels` below.
-        let other_lines: Vec<Segment> = lines
+        let taken: Vec<(f64, f64)> = paths
             .iter()
-            .enumerate()
-            .filter_map(|(j, l)| {
-                if j == i {
-                    return None;
-                }
-                let l = l.as_ref()?;
-                let same_pair =
-                    (l.from == r.from && l.to == r.to) || (l.from == r.to && l.to == r.from);
-                (!same_pair).then_some((l.p0, l.p1))
-            })
+            .flatten()
+            .flat_map(|(p, _)| [p.first(), p.last()])
+            .flatten()
+            .copied()
             .collect();
-
-        draw_one_rel(
-            r,
-            ov,
-            line.p0,
-            line.p1,
-            pos,
-            &other_lines,
-            &mut placed_labels,
-            svg,
-            theme,
-        );
+        paths[i] = if rels[i].from == rels[i].to {
+            // The shape's own earlier loops are nested round, not avoided.
+            let lines: Vec<&[(f64, f64)]> = paths
+                .iter()
+                .zip(rels)
+                .filter(|(_, r)| !(r.from == r.to && r.from == rels[i].from))
+                .filter_map(|(p, _)| p.as_ref().map(|(p, _)| p.as_slice()))
+                .collect();
+            Some((self_loop(start, placement, &taken, &lines), true))
+        } else {
+            let label =
+                RelLabel::new(&rels[i], placement.narrow_labels).map_or((0.0, 0.0), |l| (l.w, l.h));
+            let lines: Vec<&[(f64, f64)]> =
+                paths.iter().flatten().map(|(p, _)| p.as_slice()).collect();
+            enclosure_route(start, end, placement, (&taken, &lines), label)
+                .map(|p| (p, false))
+                .or_else(|| straight.get(i).cloned().flatten())
+        };
     }
+    let mut plans: Vec<RelPlan<'a>> = rels
+        .iter()
+        .zip(paths)
+        .filter_map(|(r, p)| {
+            let (path, curved) = p?;
+            let line = if curved {
+                curve_basis_points(&path)
+            } else {
+                path.clone()
+            };
+            Some(RelPlan {
+                rel: r,
+                path,
+                line,
+                curved,
+                label: None,
+                leader: None,
+            })
+        })
+        .collect();
+
+    place_labels(&mut plans, placement, rel_styles);
+    plans
 }
 
-#[allow(clippy::too_many_arguments)]
-fn draw_one_rel(
-    r: &C4Relation,
-    ov: Option<&C4RelStyle>,
-    p_first: (f64, f64),
-    p_last: (f64, f64),
-    pos: &HashMap<String, (f64, f64, f64, f64)>,
-    other_lines: &[Segment],
-    placed_labels: &mut Vec<(f64, f64, f64, f64)>,
+/// Draw every planned relation: all lines first, then all labels, so no line
+/// is painted over an earlier relation's label.
+pub(super) fn draw_rels(
+    plans: &[RelPlan],
+    rel_styles: &HashMap<(&str, &str), &C4RelStyle>,
     svg: &mut SvgBuilder,
     theme: &Theme,
 ) {
-    let fg: &str = ov
-        .and_then(|s| s.text_color.as_deref())
-        .unwrap_or(&theme.fg);
-    let fg_muted = &theme.fg_muted;
-    let stroke: &str = ov.and_then(|s| s.line_color.as_deref()).unwrap_or(C4_LINE);
-
-    let markers = if r.bidirectional {
-        "marker-start=\"url(#c4-arrow)\" marker-end=\"url(#c4-arrow)\""
-    } else {
-        "marker-end=\"url(#c4-arrow)\""
-    };
-
-    svg.path(
-        &format!(
-            "M{} {} L{} {}",
-            fnum(p_first.0),
-            fnum(p_first.1),
-            fnum(p_last.0),
-            fnum(p_last.1),
-        ),
-        &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1\" {markers}"),
-    );
-
-    let label = &r.label;
-    let tech = r.technology.as_deref();
-    if label.is_empty() && tech.is_none() {
-        return;
-    }
-
-    let label = truncate(label, 36);
-    let tech = tech.map(|t| format!("[{}]", truncate(t, 30)));
-    let lw = text_width(&label, 8.0, 10.0) + 6.0;
-    let tw = tech.as_deref().map(|t| text_width(t, 8.0, 9.0) + 6.0);
-
-    // Nodes the relation doesn't itself connect to must stay clear of the
-    // label — a straight point-to-point line can pass directly through an
-    // unrelated node in a cramped row-flow layout, and upstream never lets
-    // the label land on its fill (#366). Every other relation's already-placed
-    // label is an obstacle too, so two relations between the same pair (or
-    // any other pair that lands its label at the same spot) don't stack their
-    // labels on top of each other (#381). Placed labels are inflated by
-    // `LABEL_CLEARANCE` so `find_clear_label_point`'s "first zero-overlap
-    // point" search settles for a visible gap instead of a merely-touching
-    // one — literal non-overlap is enough for a node's opaque fill, but two
-    // adjacent labels reading as touching still looks like one long word
-    // (#399).
-    let obstacles: Vec<(f64, f64, f64, f64)> = pos
-        .iter()
-        .filter(|(id, _)| **id != r.from && **id != r.to)
-        .map(|(_, &rect)| rect)
-        .chain(
-            placed_labels
-                .iter()
-                .map(|&rect| inflate(rect, LABEL_CLEARANCE)),
-        )
-        .collect();
-    let (mut mx, mut my) = find_clear_label_point(p_first, p_last, lw, tw, &obstacles, other_lines);
-    if let Some(s) = ov {
-        mx += s.offset_x.unwrap_or(0.0);
-        my += s.offset_y.unwrap_or(0.0);
-    }
-    let rects = label_rects(mx, my, lw, tw);
-    placed_labels.extend(rects.iter().copied());
-
-    // Opaque background behind each label line so the relation label stays
-    // legible where it crosses geometry (upstream `edgeLabelBackground`, #260).
-    if let Some(tech) = tech {
-        let tw = tw.expect("tw is Some whenever tech is Some");
-        edge_label_bg(svg, mx, my - 4.0, lw, 13.0, theme);
-        edge_label_bg(svg, mx, my + 9.0, tw, 12.0, theme);
-        svg.text(
-            mx,
-            my - 1.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            &label,
-        );
-        svg.text(
-            mx,
-            my + 12.0,
-            &format!(
-                "text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\" font-style=\"italic\""
-            ),
-            &tech,
-        );
-    } else {
-        edge_label_bg(svg, mx, my, lw, 14.0, theme);
-        svg.text(
-            mx,
-            my + 4.0,
-            &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
-            &label,
+    for plan in plans {
+        let r = plan.rel;
+        let ov = rel_styles.get(&r.written_pair()).copied();
+        let stroke: &str = ov.and_then(|s| s.line_color.as_deref()).unwrap_or(C4_LINE);
+        let markers = if r.bidirectional {
+            format!("marker-start=\"url(#{ARROW_ID})\" marker-end=\"url(#{ARROW_ID})\"")
+        } else {
+            format!("marker-end=\"url(#{ARROW_ID})\"")
+        };
+        let d = if plan.curved {
+            curve_basis_path(&plan.path)
+        } else {
+            curve_linear_path(&plan.path)
+        };
+        svg.path(
+            &d,
+            &format!("fill=\"none\" stroke=\"{stroke}\" stroke-width=\"1\" {markers}"),
         );
     }
-}
-
-/// The background rect(s) a label centered at `(mx, my)` occupies — one for a
-/// plain label, two (label + `[techn]`) when `tw` is `Some`. Mirrors the
-/// geometry the draw calls in [`draw_one_rel`] use, so `placed_labels` tracks
-/// exactly what got painted.
-fn label_rects(mx: f64, my: f64, lw: f64, tw: Option<f64>) -> Vec<(f64, f64, f64, f64)> {
-    match tw {
-        Some(tw) => vec![
-            (mx - lw / 2.0, my - 10.5, lw, 13.0),
-            (mx - tw / 2.0, my + 3.0, tw, 12.0),
-        ],
-        None => vec![(mx - lw / 2.0, my - 7.0, lw, 14.0)],
-    }
-}
-
-/// Slide the label along the relation line — preferring its arc-length
-/// midpoint — until its background rect(s) clear every `obstacles` rect and
-/// don't cross any of `line_obstacles`. Falls back to the position with the
-/// least overlap if the line is too short for a fully clear spot (e.g. two
-/// adjacent nodes with barely a gap).
-fn find_clear_label_point(
-    p0: (f64, f64),
-    p1: (f64, f64),
-    lw: f64,
-    tw: Option<f64>,
-    obstacles: &[(f64, f64, f64, f64)],
-    line_obstacles: &[Segment],
-) -> (f64, f64) {
-    if obstacles.is_empty() && line_obstacles.is_empty() {
-        return polyline_midpoint(&[p0, p1]);
-    }
-    const STEPS: i32 = 100;
-    let mut best = (p0.0 + 0.5 * (p1.0 - p0.0), p0.1 + 0.5 * (p1.1 - p0.1));
-    let mut best_overlap = f64::INFINITY;
-    for i in 0..=STEPS {
-        let k = (i + 1) / 2;
-        let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
-        let t = (0.5 + sign * k as f64 / STEPS as f64).clamp(0.0, 1.0);
-        let mx = p0.0 + t * (p1.0 - p0.0);
-        let my = p0.1 + t * (p1.1 - p0.1);
-        let overlap = label_overlap(mx, my, lw, tw, obstacles, line_obstacles);
-        if overlap <= 0.0 {
-            return (mx, my);
+    for plan in plans {
+        let Some((label, (mx, my))) = &plan.label else {
+            continue;
+        };
+        if let Some((a, b)) = plan.leader {
+            svg.line(
+                a.0,
+                a.1,
+                b.0,
+                b.1,
+                &format!("stroke=\"{C4_LINE}\" stroke-width=\"0.75\" stroke-dasharray=\"2 2\""),
+            );
         }
-        if overlap < best_overlap {
-            best_overlap = overlap;
-            best = (mx, my);
+        let r = plan.rel;
+        let ov = rel_styles.get(&r.written_pair()).copied();
+        let fg: &str = ov
+            .and_then(|s| s.text_color.as_deref())
+            .unwrap_or(&theme.fg);
+        let fg_muted = &theme.fg_muted;
+        // One opaque background behind the whole block keeps every line
+        // legible where it crosses geometry (upstream `edgeLabelBackground`,
+        // #260).
+        edge_label_bg(svg, *mx, *my, label.w, label.h, theme);
+        let (label_ys, tech_ys) = label.baselines(*my);
+        for (text, y) in label.label.iter().zip(label_ys) {
+            svg.text(
+                *mx,
+                y,
+                &format!("text-anchor=\"middle\" fill=\"{fg}\" font-size=\"10\""),
+                text,
+            );
         }
-    }
-    best
-}
-
-/// A few pixels of breathing room a label's background must keep clear of
-/// another relation's routed line — `segment_rect_overlap` alone only
-/// catches a literal intersection, which still lets a line pass close enough
-/// to a label to read as touching (#399). Inflating the rect by this margin
-/// before the crossing-length check makes "clear" mean a visually
-/// comfortable gap, not just zero overlap.
-const LINE_CLEARANCE: f64 = 4.0;
-
-/// Same idea as [`LINE_CLEARANCE`] but for two labels sitting next to each
-/// other: an already-placed label is inflated by this much before it's added
-/// to the next relation's obstacle list, so a reversed-pair label search
-/// stops at a visible gap rather than the first merely-touching spot (#399).
-const LABEL_CLEARANCE: f64 = 6.0;
-
-fn inflate(rect: (f64, f64, f64, f64), m: f64) -> (f64, f64, f64, f64) {
-    (rect.0 - m, rect.1 - m, rect.2 + 2.0 * m, rect.3 + 2.0 * m)
-}
-
-/// Total overlap between the label's background rect(s), centered at
-/// `(mx, my)`, and every rect in `obstacles`, plus the crossing length of
-/// every segment in `line_obstacles` that runs through them (each rect
-/// inflated by [`LINE_CLEARANCE`] first, so a near-miss counts too).
-fn label_overlap(
-    mx: f64,
-    my: f64,
-    lw: f64,
-    tw: Option<f64>,
-    obstacles: &[(f64, f64, f64, f64)],
-    line_obstacles: &[Segment],
-) -> f64 {
-    let rects = label_rects(mx, my, lw, tw);
-    let rect_overlap: f64 = rects
-        .iter()
-        .flat_map(|rect| {
-            obstacles
-                .iter()
-                .map(move |obs| rect_overlap_area(*rect, *obs))
-        })
-        .sum();
-    let line_overlap: f64 = rects
-        .iter()
-        .flat_map(|rect| {
-            line_obstacles
-                .iter()
-                .map(move |(p0, p1)| segment_rect_overlap(*p0, *p1, inflate(*rect, LINE_CLEARANCE)))
-        })
-        .sum();
-    rect_overlap + line_overlap
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= n {
-        s.to_string()
-    } else {
-        let mut out: String = chars[..n.saturating_sub(1)].iter().collect();
-        out.push('…');
-        out
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn find_clear_label_point_uses_midpoint_when_unobstructed() {
-        let p = find_clear_label_point((0.0, 0.0), (100.0, 0.0), 20.0, None, &[], &[]);
-        assert_eq!(p, (50.0, 0.0));
-    }
-
-    #[test]
-    fn find_clear_label_point_dodges_a_node_straddling_the_midpoint() {
-        // Mirrors #366: a third node sits directly on the line between the
-        // two shapes the relation connects, covering the geometric midpoint.
-        let obstacle = (30.0, -10.0, 40.0, 20.0); // x 30..70, y -10..10
-        let (mx, my) =
-            find_clear_label_point((0.0, 0.0), (100.0, 0.0), 20.0, None, &[obstacle], &[]);
-        let label_rect = (mx - 10.0, my - 7.0, 20.0, 14.0);
-        assert_eq!(
-            rect_overlap_area(label_rect, obstacle),
-            0.0,
-            "label {label_rect:?} must clear obstacle {obstacle:?}"
-        );
-        assert_eq!(my, 0.0, "label should stay on the relation line");
-    }
-
-    #[test]
-    fn find_clear_label_point_falls_back_when_no_gap_exists() {
-        // The obstacle covers the whole line, so no clear spot exists — the
-        // best-effort fallback must still return a finite point on the line.
-        let obstacle = (-100.0, -10.0, 300.0, 20.0);
-        let (mx, my) =
-            find_clear_label_point((0.0, 0.0), (100.0, 0.0), 20.0, None, &[obstacle], &[]);
-        assert!(mx.is_finite() && my.is_finite());
-    }
-
-    #[test]
-    fn find_clear_label_point_dodges_a_crossing_line() {
-        // An unrelated relation's line runs vertically straight through the
-        // midpoint of this one's line — the label must slide off it (#382).
-        let crossing = ((50.0, -50.0), (50.0, 50.0));
-        let (mx, my) =
-            find_clear_label_point((0.0, 0.0), (100.0, 0.0), 20.0, None, &[], &[crossing]);
-        let label_rect = (mx - 10.0, my - 7.0, 20.0, 14.0);
-        assert_eq!(
-            segment_rect_overlap(crossing.0, crossing.1, label_rect),
-            0.0,
-            "label {label_rect:?} must clear the crossing line {crossing:?}"
-        );
-    }
-
-    #[test]
-    fn draw_rels_separates_reversed_pair_labels() {
-        // #381: RelIndex(2, web, api, ...) and RelIndex(4, api, web, ...) are
-        // the exact same line, reversed. Their labels must not land on top of
-        // one another once both are placed.
-        let mut pos = HashMap::new();
-        pos.insert("web".to_string(), (292.0, 88.0, 220.0, 130.0));
-        pos.insert("api".to_string(), (32.0, 258.0, 220.0, 130.0));
-        let rels = vec![
-            C4Relation {
-                from: "web".to_string(),
-                to: "api".to_string(),
-                label: "POST /checkout".to_string(),
-                technology: None,
-                sprite: None,
-                tags: None,
-                link: None,
-                direction: Default::default(),
-                bidirectional: false,
-            },
-            C4Relation {
-                from: "api".to_string(),
-                to: "web".to_string(),
-                label: "Order confirmation".to_string(),
-                technology: None,
-                sprite: None,
-                tags: None,
-                link: None,
-                direction: Default::default(),
-                bidirectional: false,
-            },
-        ];
-        let rel_styles = HashMap::new();
-        let theme = Theme::default_theme();
-        let mut svg = SvgBuilder::new(600.0, 500.0).theme(&theme);
-        draw_rels(&rels, &rel_styles, &pos, &mut svg, &theme);
-        let out = svg.finish();
-        assert!(out.contains("POST /checkout"));
-        assert!(out.contains("Order confirmation"));
-
-        // Parse the opaque label-background rects (the theme's
-        // `flow_label_bg` fill) and check no two of them overlap — a hidden
-        // label would still show up as text in the markup, so the real
-        // regression is two backgrounds painted on top of one another.
-        let bg = format!("fill=\"{}\" stroke=\"none\"", theme.flow_label_bg);
-        let label_rects: Vec<(f64, f64, f64, f64)> = out
-            .split("<rect ")
-            .skip(1)
-            .filter(|chunk| chunk.contains(&bg))
-            .map(|chunk| {
-                let attr = |name: &str| -> f64 {
-                    let needle = format!("{name}=\"");
-                    let start = chunk.find(&needle).unwrap() + needle.len();
-                    let end = chunk[start..].find('"').unwrap() + start;
-                    chunk[start..end].parse().unwrap()
-                };
-                (attr("x"), attr("y"), attr("width"), attr("height"))
-            })
-            .collect();
-        assert!(
-            label_rects.len() >= 2,
-            "expected at least two label backgrounds, got {label_rects:?}"
-        );
-        for i in 0..label_rects.len() {
-            for j in (i + 1)..label_rects.len() {
-                assert_eq!(
-                    rect_overlap_area(label_rects[i], label_rects[j]),
-                    0.0,
-                    "label backgrounds {:?} and {:?} overlap",
-                    label_rects[i],
-                    label_rects[j]
-                );
-            }
+        for (text, y) in label.tech.iter().zip(tech_ys) {
+            svg.text(
+                *mx,
+                y,
+                &format!(
+                    "text-anchor=\"middle\" fill=\"{fg_muted}\" font-size=\"9\" font-style=\"italic\""
+                ),
+                text,
+            );
         }
     }
 }

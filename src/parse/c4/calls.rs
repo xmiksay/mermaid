@@ -3,8 +3,8 @@
 //! plus the shared quote-aware argument splitter.
 
 use super::super::ast::{
-    C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4LayoutConfig, C4RelDirection,
-    C4RelStyle, C4Relation,
+    C4Diagram, C4Element, C4ElementKind, C4ElementStyle, C4LayoutConfig, C4LayoutDirection,
+    C4RelDirection, C4RelStyle, C4Relation,
 };
 use super::super::token::split_top_level;
 use super::super::ParseError;
@@ -15,6 +15,7 @@ pub(super) enum C4Directive {
     Rel(C4RelStyle),
     Layout(C4LayoutConfig),
     ShowLegend,
+    Direction(C4LayoutDirection),
 }
 
 pub(super) fn apply_directive(d: &mut C4Diagram, dir: C4Directive) {
@@ -31,6 +32,7 @@ pub(super) fn apply_directive(d: &mut C4Diagram, dir: C4Directive) {
             }
         }
         C4Directive::ShowLegend => d.show_legend = true,
+        C4Directive::Direction(dir) => d.layout_direction = Some(dir),
     }
 }
 
@@ -43,6 +45,10 @@ pub(super) fn parse_directive(line: &str) -> Option<C4Directive> {
     let args = split_args(args_str);
     match token {
         "SHOW_LEGEND" => Some(C4Directive::ShowLegend),
+        "LAYOUT_TOP_DOWN" => Some(C4Directive::Direction(C4LayoutDirection::TopDown)),
+        "LAYOUT_LEFT_RIGHT" | "LAYOUT_LANDSCAPE" => {
+            Some(C4Directive::Direction(C4LayoutDirection::LeftRight))
+        }
         "UpdateElementStyle" => Some(C4Directive::Element(parse_style_directive(&args))),
         "UpdateBoundaryStyle" => Some(C4Directive::Boundary(parse_style_directive(&args))),
         "UpdateRelStyle" => {
@@ -257,6 +263,7 @@ pub(super) fn parse_rel(line: &str, _line_no: usize) -> Result<Option<C4Relation
         link: kw.link,
         direction,
         bidirectional,
+        reversed: back,
     }))
 }
 
