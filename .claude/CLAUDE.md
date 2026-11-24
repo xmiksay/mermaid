@@ -59,7 +59,7 @@ Drive everything through the Makefile (`make help` lists all targets):
 
 ```bash
 make build              # debug build: library + binary
-make test               # all tests (882: 865 lib + 16 integration + 1 doctest)
+make test               # all tests: lib + integration + doctests
 make test-unit          # in-module #[cfg(test)] only
 make test-integration   # tests/integration.rs → target/test-samples/<stem>.svg
 make lint               # cargo fmt --check + clippy --all-targets -D warnings
