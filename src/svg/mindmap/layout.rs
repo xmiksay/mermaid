@@ -7,6 +7,7 @@ use crate::svg::builder::{split_label_lines, LABEL_LINE_H};
 use crate::svg::markup::strip_tags;
 use crate::svg::metrics::{text_width, BASE_FONT_SIZE};
 
+use super::outline;
 use super::{
     Laid, CHILD_SPREAD, ICON_GAP, ICON_SIZE, NODE_H, NODE_MARGIN, NODE_PAD_X, RING_GAP, TEXT_PX,
 };
@@ -57,10 +58,15 @@ fn node_size(n: &MindmapNode, font_size: f64) -> (f64, f64) {
 
 /// Conservative "reach" from a node's centre to its farthest edge, safe for
 /// any angle: the root is a true circle (its radius is exact in every
-/// direction); every other node is an axis-aligned box, whose half-diagonal
-/// bounds its edge distance regardless of which way it's approached from.
-fn node_reach(w: f64, h: f64) -> f64 {
-    (w * w + h * h).sqrt() / 2.0
+/// direction); a cloud / bang outline is a stadium whose farthest point lies
+/// on its long axis; every other node is an axis-aligned box, whose
+/// half-diagonal bounds its edge distance regardless of which way it's
+/// approached from.
+fn node_reach(shape: MindmapShape, w: f64, h: f64) -> f64 {
+    match outline::extent(shape, w / 2.0, h / 2.0) {
+        Some((ex, _)) => ex,
+        None => w.hypot(h) / 2.0,
+    }
 }
 
 /// Build the laid-out subtree for `n`, placing it at the centre of the angular
@@ -90,7 +96,11 @@ pub(super) fn build(
     } else {
         0.0
     };
-    let own_reach = if depth == 0 { root_r } else { node_reach(w, h) };
+    let own_reach = if depth == 0 {
+        root_r
+    } else {
+        node_reach(n.shape, w, h)
+    };
     let r = if depth == 0 {
         0.0
     } else {
@@ -159,7 +169,8 @@ pub(super) fn bounds(laid: &Laid) -> (f64, f64, f64, f64) {
         let r = (laid.w / 2.0).max(laid.h / 2.0);
         (r, r)
     } else {
-        (laid.w / 2.0, laid.h / 2.0)
+        let (hw, hh) = (laid.w / 2.0, laid.h / 2.0);
+        outline::extent(laid.node.shape, hw, hh).unwrap_or((hw, hh))
     };
     let mut min_x = laid.x - hw;
     let mut max_x = laid.x + hw;

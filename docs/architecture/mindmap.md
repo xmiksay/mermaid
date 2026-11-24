@@ -34,8 +34,12 @@ word (`Mind maps`) so it stays dual-renderable.
   **one slot past** the section (`section 0 → cScale1`, section 1 → cScale2, …) —
   upstream's mindmap section palette is offset one past the generic scale, giving
   the yellow/green/purple/magenta branch rotation. `draw_nodes` fills every node
-  as a borderless (stroke `none`), drop-shadowed (`SHADOW_FILTER`) rounded rect in
-  its branch color, picking white or `theme.fg` label text by the fill's luminance
+  as a borderless (stroke `none`), drop-shadowed (`SHADOW_FILTER`) shape in its
+  branch color (rounded rect by default; `)cloud(` / `))bang((` get the bumpy /
+  jagged outlines from `outline.rs`, which hang off a stadium through the label
+  box's corners with the cap radius padded to `hypot(r, pitch/2)` so every
+  vertex chord stays outside the box; `outline::extent` feeds `bounds` and
+  `node_reach` so the bumps and spikes are framed and spaced), picking white or `theme.fg` label text by the fill's luminance
   (`is_dark`); a bare `Default` node renders as a filled rounded rect too (no more
   thin-underline text). Label font size scales down with depth (`depth_font`) so
   the root/first ring read largest. The root is a solid **bright-blue** disc

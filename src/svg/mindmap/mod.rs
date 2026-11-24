@@ -11,6 +11,7 @@ use crate::svg::theme::Theme;
 
 mod draw;
 mod layout;
+mod outline;
 
 #[cfg(test)]
 mod tests;

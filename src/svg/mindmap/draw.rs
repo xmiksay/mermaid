@@ -10,6 +10,7 @@ use crate::svg::builder::{fnum, SvgBuilder};
 use crate::svg::style::resolve_style;
 use crate::svg::theme::Theme;
 
+use super::outline::{bang_path, cloud_path};
 use super::{Laid, ICON_GAP, ICON_SIZE, NODE_PAD_X};
 
 pub(super) fn draw_edges(laid: &Laid, svg: &mut SvgBuilder, theme: &Theme) {
@@ -143,8 +144,6 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
             let r = hw.max(hh);
             svg.circle(cx, cy, r, &format!("{base} stroke-width=\"2\""));
         }
-        // Upstream draws `))bang((` as a jagged burst and `)cloud(` as a bumpy
-        // outline; both used to fall back to (dashed / rounded) rects.
         MindmapShape::Bang => {
             svg.path(
                 &bang_path(cx, cy, hw, hh),
@@ -171,72 +170,6 @@ fn draw_shape(svg: &mut SvgBuilder, laid: &Laid, fill: &str, stroke: &str) {
             svg.path(&d, &format!("{base} stroke-width=\"2\""));
         }
     }
-}
-
-/// Bumpy cloud outline around the node box: points spaced evenly along a
-/// stadium (pill) perimeter, joined by outward arcs, so every bump has the same
-/// size whatever the label width.
-pub(super) fn cloud_path(cx: f64, cy: f64, hw: f64, hh: f64) -> String {
-    use std::f64::consts::{FRAC_PI_2, PI, TAU};
-    let a = (hh * 1.1).min(hw).max(1.0);
-    let straight = (2.0 * hw - 2.0 * a).max(0.0);
-    let per = 2.0 * straight + TAU * a;
-    let n = ((per / (hh.min(24.0) * 1.5)).round() as usize).clamp(8, 40);
-    let (left, right) = (cx - straight / 2.0, cx + straight / 2.0);
-    let pt = |k: usize| -> (f64, f64) {
-        let mut d = per * (k % n) as f64 / n as f64;
-        if d < straight {
-            return (left + d, cy - a);
-        }
-        d -= straight;
-        if d < PI * a {
-            let t = -FRAC_PI_2 + d / a;
-            return (right + a * t.cos(), cy + a * t.sin());
-        }
-        d -= PI * a;
-        if d < straight {
-            return (right - d, cy + a);
-        }
-        d -= straight;
-        let t = FRAC_PI_2 + d / a;
-        (left + a * t.cos(), cy + a * t.sin())
-    };
-    let (x0, y0) = pt(0);
-    let mut d = format!("M{} {}", fnum(x0), fnum(y0));
-    for k in 1..=n {
-        let (px, py) = pt(k - 1);
-        let (qx, qy) = pt(k);
-        let r = ((qx - px).hypot(qy - py) * 0.6).max(1.0);
-        let _ = write!(d, "A{r} {r} 0 0 1 {} {}", fnum(qx), fnum(qy), r = fnum(r));
-    }
-    d.push('Z');
-    d
-}
-
-/// Jagged burst around the node box: spikes on an outer ellipse alternating
-/// with valleys on an inner one.
-pub(super) fn bang_path(cx: f64, cy: f64, hw: f64, hh: f64) -> String {
-    use std::f64::consts::PI;
-    let n = ((hw * 2.0 / (hh.min(24.0) * 0.9)).round() as usize).clamp(8, 32);
-    let dip = hh.min(24.0) * 0.6;
-    let mut d = String::new();
-    for k in 0..n * 2 {
-        let t = PI * k as f64 / n as f64;
-        let (rx, ry) = if k % 2 == 0 {
-            (hw + dip * 0.5, hh + dip * 0.5)
-        } else {
-            (hw - dip * 0.5, (hh - dip * 0.5).max(1.0))
-        };
-        let _ = write!(
-            d,
-            "{}{} {}",
-            if k == 0 { "M" } else { "L" },
-            fnum(cx + rx * t.cos()),
-            fnum(cy + ry * t.sin())
-        );
-    }
-    d.push('Z');
-    d
 }
 
 /// Extract the meaningful name from a Font Awesome class string
