@@ -203,24 +203,92 @@ fn color_helpers() {
     assert!(is_dark("#6D6DFF"));
 }
 
+/// Vertices of an `M…L…A…Z` path: the end point (last two numbers) of each
+/// command.
+fn vertices(path: &str) -> Vec<(f64, f64)> {
+    path.split(|c: char| "MLAZ".contains(c))
+        .filter_map(|seg| {
+            let nums: Vec<f64> = seg
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
+            (nums.len() >= 2).then(|| (nums[nums.len() - 2], nums[nums.len() - 1]))
+        })
+        .collect()
+}
+
+/// Even-odd ray cast.
+fn inside(poly: &[(f64, f64)], (x, y): (f64, f64)) -> bool {
+    let mut hit = false;
+    for (i, &(x1, y1)) in poly.iter().enumerate() {
+        let (x2, y2) = poly[(i + 1) % poly.len()];
+        if (y1 > y) != (y2 > y) && x < x1 + (y - y1) * (x2 - x1) / (y2 - y1) {
+            hit = !hit;
+        }
+    }
+    hit
+}
+
 #[test]
-fn cloud_and_bang_have_their_own_outlines() {
-    // `)cloud(` and `))bang((` used to render as a rounded / dashed rect.
+fn cloud_and_bang_outlines_enclose_the_label_box() {
+    use super::outline::{bang_path, cloud_path, extent};
+    let (cx, cy) = (100.0, 50.0);
+    // Wide label, tall multi-line narrow node, long bang label, tiny box.
+    for (hw, hh) in [(60.0, 16.0), (25.2, 45.0), (150.0, 16.0), (2.0, 1.0)] {
+        for (shape, path) in [
+            (MindmapShape::Cloud, cloud_path(cx, cy, hw, hh)),
+            (MindmapShape::Bang, bang_path(cx, cy, hw, hh)),
+        ] {
+            assert!(path.starts_with('M') && path.ends_with('Z'), "{path}");
+            assert!(!path.contains("NaN") && !path.contains("inf"), "{path}");
+            let poly = vertices(&path);
+            assert!(poly.len() >= 8, "{shape:?} {hw}x{hh}: {path}");
+            // Corners, edge midpoints and label ends sit inside the polygon the
+            // outline only bulges outward from.
+            for (dx, dy) in [
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (1.0, 1.0),
+                (-1.0, 1.0),
+                (0.0, -1.0),
+                (1.0, 0.0),
+                (0.0, 1.0),
+                (-1.0, 0.0),
+            ] {
+                let p = (cx + dx * hw * 0.999, cy + dy * hh * 0.999);
+                assert!(inside(&poly, p), "{shape:?} {hw}x{hh} misses {p:?}");
+            }
+            let (ex, ey) = extent(shape, hw, hh).expect("outline shape");
+            for (x, y) in poly {
+                assert!((x - cx).abs() <= ex + 1e-3 && (y - cy).abs() <= ey + 1e-3);
+            }
+        }
+    }
+    assert_eq!(extent(MindmapShape::Square, 10.0, 10.0), None);
+}
+
+#[test]
+fn cloud_and_bang_render_as_outlines_counted_in_bounds() {
     let svg = crate::render("mindmap\n  root((Hub))\n    a)Cloudy(\n    b))Boom((\n").unwrap();
     assert!(svg.contains("Cloudy") && svg.contains("Boom"));
     assert!(
-        !svg.contains("stroke-dasharray=\"4 2\""),
-        "bang is no longer a dashed rect"
+        !svg.contains("stroke-dasharray"),
+        "bang is not a dashed rect"
     );
-    // Cloud: an outline made of arcs; bang: a closed polyline.
-    let cloud = super::draw::cloud_path(100.0, 50.0, 60.0, 16.0);
-    assert!(cloud.starts_with('M') && cloud.ends_with('Z') && cloud.matches('A').count() >= 8);
-    let bang = super::draw::bang_path(100.0, 50.0, 60.0, 16.0);
-    assert!(bang.starts_with('M') && bang.ends_with('Z') && bang.matches('L').count() >= 15);
-    for p in [&cloud, &bang] {
-        assert!(!p.contains("NaN") && !p.contains("inf"));
-    }
-    // Degenerate boxes stay finite.
-    assert!(!super::draw::cloud_path(0.0, 0.0, 0.0, 0.0).contains("NaN"));
-    assert!(!super::draw::bang_path(0.0, 0.0, 0.0, 0.0).contains("NaN"));
+    let node = |text: &str, shape, children| MindmapNode {
+        text: text.into(),
+        shape,
+        icon: None,
+        classes: vec![],
+        children,
+    };
+    let root = node(
+        "root",
+        MindmapShape::Circle,
+        vec![node("Boom", MindmapShape::Bang, vec![])],
+    );
+    let laid = build(&root, 0, -1, -FRAC_PI_2, -FRAC_PI_2 + 2.0 * PI, 14.0, 0.0);
+    let b = &laid.children[0];
+    let (x0, y0, x1, y1) = bounds(b);
+    assert!(x1 - x0 > b.w && y1 - y0 > b.h, "spikes reach past the box");
 }
