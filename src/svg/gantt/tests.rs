@@ -1,4 +1,4 @@
-use super::axis::{parse_tick_interval, weekday_tick_offset};
+use super::axis::{parse_tick_interval, today_marker_attrs, weekday_tick_offset};
 use super::*;
 use crate::parse::parse;
 
@@ -244,32 +244,62 @@ fn click_wraps_task_bar_in_anchor() {
     assert!(svg.contains("<a href=\"https://example.com\""));
 }
 
+/// A one-task chart spanning today (`base - 1` .. `+5d` tolerates a midnight
+/// rollover between building the source and rendering it).
+fn around_today(marker: &str) -> String {
+    use crate::svg::gantt_date::civil_from_days;
+    let (y, m, day) = civil_from_days(today_days() - 1);
+    format!("gantt\ndateFormat YYYY-MM-DD\n{marker}section S\nT : {y:04}-{m:02}-{day:02}, 5d\n")
+}
+
 #[test]
 fn today_marker_off_draws_no_marker() {
-    // A chart around the present day with `todayMarker off` shows no marker.
-    let base = today_days();
-    use crate::svg::gantt_date::civil_from_days;
-    let (y, m, day) = civil_from_days(base - 1);
-    let src = format!(
-        "gantt\ndateFormat YYYY-MM-DD\ntodayMarker off\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
+    let svg = render(
+        &build(&around_today("todayMarker off\n")),
+        &Theme::default(),
     );
-    let svg = render(&build(&src), &Theme::default());
     assert!(!svg.contains("class=\"today\""));
 }
 
 #[test]
-fn today_marker_style_applied_when_in_range() {
-    let base = today_days();
-    use crate::svg::gantt_date::civil_from_days;
-    let (y, m, day) = civil_from_days(base - 1);
-    let src = format!(
-        "gantt\ndateFormat YYYY-MM-DD\ntodayMarker stroke:cyan,stroke-width:5px\nsection S\nT : {y:04}-{m:02}-{day:02}, 5d\n"
+fn today_marker_default_is_a_solid_theme_line_over_the_bars() {
+    let theme = Theme {
+        today_line_color: Some("#0a0".into()),
+        ..Theme::default()
+    };
+    let svg = render(&build(&around_today("")), &theme);
+    let line = svg.find("class=\"today\"").expect("today line drawn");
+    assert!(
+        svg[line..].starts_with("class=\"today\" fill=\"none\" stroke=\"#0a0\" stroke-width=\"2\"")
     );
-    let svg = render(&build(&src), &Theme::default());
-    assert!(svg.contains("class=\"today\""));
-    // Like upstream, the marker is just the line: no hardcoded text label.
+    assert!(!svg.contains("stroke-dasharray=\"4 3\""));
+    // No hardcoded English label, and the line is painted after the bar.
     assert!(!svg.contains(">today<"));
-    assert!(svg.contains("stroke:cyan; stroke-width:5px"));
+    assert!(svg.rfind(">T<").expect("task label") < line);
+}
+
+#[test]
+fn today_marker_style_layers_over_default_stroke() {
+    let svg = render(
+        &build(&around_today("todayMarker stroke-width:5px,opacity:0.5\n")),
+        &Theme::default(),
+    );
+    // A partial user style keeps the default red stroke underneath it.
+    assert!(svg.contains(
+        "class=\"today\" fill=\"none\" stroke=\"red\" stroke-width=\"2\" style=\"stroke-width:5px; opacity:0.5\""
+    ));
+}
+
+#[test]
+fn today_marker_attrs_cover_every_case() {
+    let t = Theme::default();
+    assert_eq!(today_marker_attrs(Some("off"), &t), None);
+    let base = "class=\"today\" fill=\"none\" stroke=\"red\" stroke-width=\"2\"";
+    assert_eq!(today_marker_attrs(None, &t).as_deref(), Some(base));
+    assert_eq!(
+        today_marker_attrs(Some("stroke:cyan,stroke-width:5px"), &t),
+        Some(format!("{base} style=\"stroke:cyan; stroke-width:5px\""))
+    );
 }
 
 #[test]

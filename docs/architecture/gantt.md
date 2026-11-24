@@ -54,8 +54,13 @@ Parser: `src/parse/gantt/` · Renderer: `src/svg/gantt/` (`mod.rs` layout/draw,
   marker is always positioned at the *current* date (`today_days()` reads the
   system clock) and drawn only when it lands inside the chart's range — so a
   chart of past/future dates stays deterministic. `todayMarker off` suppresses
-  it; any other value is passed through `css_style` (commas → `;`) onto the
-  line's `style`; unset draws the default red dashed line.
+  it. `axis::today_marker_attrs` always emits upstream's `.today` defaults as
+  presentation attributes (`class="today"`, solid 2px stroke in
+  `theme.today_line()` — `todayLineColor`, default `red`); any other value is
+  passed through `css_style` (commas → `;`) onto the line's `style`, which
+  outranks those attributes, so a partial style keeps the default color. No
+  text label (upstream draws none), and the line is drawn **after** the bars
+  (upstream `drawToday` runs last) so a bar covering today cannot hide it.
 - Gantt task tags are consumed as a leading run in `parse_task`: `active`/
   `done` set `TaskStatus`, while `crit`, `milestone` and `vert` are **orthogonal
   flags** (`GanttTask.crit`/`.milestone`/`.vert`) — upstream combines them, so

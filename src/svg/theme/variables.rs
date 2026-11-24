@@ -66,6 +66,9 @@ impl Theme {
         if let Some(v) = get("edgeLabelBackground") {
             self.flow_label_bg = own(v);
         }
+        if let Some(v) = get("todayLineColor") {
+            self.today_line_color = Some(own(v));
+        }
 
         self.apply_sequence_variables(vars);
         self.apply_pie_variables(vars);
@@ -296,7 +299,9 @@ mod tests {
         vars.insert("actorBkg".to_string(), "#eee".to_string());
         vars.insert("pieStrokeColor".to_string(), "#000".to_string());
         vars.insert("pieOpacity".to_string(), "0.7".to_string());
+        vars.insert("todayLineColor".to_string(), "#0a0".to_string());
         t.apply_theme_variables(&vars);
+        assert_eq!(t.today_line(), "#0a0");
         assert_eq!(t.actor_text(), "#a11");
         assert_eq!(t.signal_text(), "#5163");
         assert_eq!(t.actor_fill, "#eee");
