@@ -17,7 +17,7 @@ use super::interact::{close_click, open_click};
 use super::metrics::text_width;
 use super::theme::Theme;
 
-use axis::{axis_ticks, css_style};
+use axis::{axis_ticks, today_marker_attrs};
 use tasks::{chart_span, colors_for, inside_text_ink, resolve_tasks, Resolved};
 
 const BAR_H: f64 = 20.0;
@@ -213,28 +213,6 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
         );
     }
 
-    // Today marker: positioned at the *current* date (system clock), drawn only
-    // when it falls inside the chart's range. `todayMarker off` suppresses it;
-    // any other value is a CSS style applied to the marker line; the default is
-    // a red dashed line (upstream always draws a marker at today).
-    let today_style = d.today_marker.as_deref();
-    if today_style != Some("off") {
-        let rel = today_days() as f64 - start_day;
-        if rel >= 0.0 && rel <= total_days {
-            let x = body_x + (rel / total_days) * body_w;
-            // Upstream draws only the line (`<line class="today">`), no text label:
-            // a hardcoded English "today" also clashed with localized charts.
-            let attrs = match today_style {
-                Some(css) => format!("class=\"today\" style=\"{}\"", css_style(css)),
-                None => {
-                    "class=\"today\" stroke=\"#d33\" stroke-width=\"2\" stroke-dasharray=\"4 3\""
-                        .to_string()
-                }
-            };
-            svg.line(x, body_top, x, body_bottom, &attrs);
-        }
-    }
-
     // Body — one row per task, task labels drawn in the chart. Section names go
     // in the left gutter, vertically centered across the section's rows.
     let mut y = body_top;
@@ -352,6 +330,17 @@ pub(crate) fn render(d: &GanttDiagram, theme: &Theme) -> String {
                 &format!("fill=\"{fg}\" font-size=\"{SECTION_FONT_SIZE}\""),
                 &section.name,
             );
+        }
+    }
+
+    // Today marker: positioned at the *current* date (system clock), drawn only
+    // when it falls inside the chart's range, and after the bars so a bar
+    // covering today cannot hide it (upstream calls `drawToday` last).
+    if let Some(attrs) = today_marker_attrs(d.today_marker.as_deref(), theme) {
+        let rel = today_days() as f64 - start_day;
+        if (0.0..=total_days).contains(&rel) {
+            let x = body_x + (rel / total_days) * body_w;
+            svg.line(x, body_top, x, body_bottom, &attrs);
         }
     }
 

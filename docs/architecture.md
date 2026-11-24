@@ -188,10 +188,10 @@ upstream `themeVariables` names — beyond the generic ones (`primaryColor`,
 (`actorBkg`/`actorBorder`/`actorTextColor`/`actorLineColor`/`signalColor`/
 `signalTextColor`/`labelBoxBkgColor`/`activationBkgColor`), pie
 (`pie{1..12}`/`pieStrokeColor`/`pieOpacity`/`pieTitleTextColor`), git
-(`git{0..7}`/`commitLabelColor`/`tagLabelColor`), the generic `cScale{0..11}`
-categorical scale, plus `titleColor`/`edgeLabelBackground`. Text-color
+(`git{0..7}`/`commitLabelColor`/`tagLabelColor`), gantt `todayLineColor`, the
+generic `cScale{0..11}` categorical scale, plus `titleColor`/`edgeLabelBackground`. Text-color
 variables land on `Option<Str>` fields with `theme.actor_text()`/`signal_text()`/
-`title()`/`commit_label()`/`tag_label()`/`pie_stroke()` accessors that fall back
+`title()`/`commit_label()`/`tag_label()`/`pie_stroke()`/`today_line()` accessors that fall back
 to `fg`/`fg_muted`/`#fff`, so an unset variable keeps the render byte-identical.
 `theme_from_meta` in `src/svg/mod.rs` wires
 theme name → `themeVariables` → `fontFamily`/`fontSize` → `useMaxWidth` onto the

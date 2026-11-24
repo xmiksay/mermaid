@@ -85,6 +85,9 @@ pub struct Theme {
     /// Pie slice fill-opacity (`pieOpacity`). `None` emits no opacity attribute
     /// (fully opaque), keeping the default render byte-identical.
     pub pie_opacity: Option<Str>,
+    /// Gantt today-marker line color (`todayLineColor`). `None` falls back to
+    /// `red`, upstream's value in every built-in theme.
+    pub today_line_color: Option<Str>,
     /// gitGraph commit-id label color (`commitLabelColor`). `None` falls back
     /// to [`fg_muted`][Theme::fg_muted].
     pub commit_label_color: Option<Str>,
@@ -145,6 +148,7 @@ impl Theme {
             xychart_palette: Cow::Borrowed(&XYCHART_DEFAULT),
             pie_stroke: None,
             pie_opacity: None,
+            today_line_color: None,
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
@@ -201,6 +205,7 @@ impl Theme {
             xychart_palette: Cow::Borrowed(&XYCHART_DARK),
             pie_stroke: None,
             pie_opacity: None,
+            today_line_color: None,
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
@@ -240,6 +245,7 @@ impl Theme {
             xychart_palette: Cow::Borrowed(&XYCHART_FOREST),
             pie_stroke: None,
             pie_opacity: None,
+            today_line_color: None,
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
@@ -279,6 +285,7 @@ impl Theme {
             xychart_palette: Cow::Borrowed(&XYCHART_NEUTRAL),
             pie_stroke: None,
             pie_opacity: None,
+            today_line_color: None,
             commit_label_color: None,
             tag_label_color: None,
             quadrant_fills: [None, None, None, None],
@@ -327,6 +334,11 @@ impl Theme {
     /// upstream outlines the circumference and slice edges in black.
     pub fn pie_stroke(&self) -> &str {
         self.pie_stroke.as_deref().unwrap_or("black")
+    }
+
+    /// Gantt today-marker line color (`todayLineColor`), defaulting to red.
+    pub fn today_line(&self) -> &str {
+        self.today_line_color.as_deref().unwrap_or("red")
     }
 
     /// Sequence actor/participant name text color (`actorTextColor`).
@@ -457,5 +469,6 @@ mod tests {
         assert_eq!(t.commit_label(), t.fg_muted);
         assert_eq!(t.tag_label(), t.fg);
         assert_eq!(t.pie_stroke(), "black");
+        assert_eq!(t.today_line(), "red");
     }
 }

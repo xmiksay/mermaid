@@ -1,7 +1,7 @@
 //! Time-axis tick computation and small axis helpers for the gantt renderer.
 //!
 //! Picks a legible tick step (capped by label width), aligns the first tick
-//! onto an optional named weekday, and formats the `todayMarker` CSS string.
+//! onto an optional named weekday, and builds the today-marker attributes.
 
 use crate::parse::GanttDiagram;
 
@@ -9,6 +9,7 @@ use super::{AXIS_FONT_SIZE, AXIS_LABEL_CHAR_W, TICK_LABEL_PAD};
 use crate::svg::builder::escape;
 use crate::svg::gantt_date::{format_date, weekday};
 use crate::svg::metrics::text_width;
+use crate::svg::theme::Theme;
 
 /// Days per tick for a `tickInterval` value like `1day`, `2week`, `1month`
 /// (also the bare `1d`/`1w` units). Returns `None` for an unrecognized unit.
@@ -51,10 +52,27 @@ fn weekday_number(name: &str) -> Option<i64> {
     }
 }
 
+/// Attributes for the today-marker `<line>`, or `None` for `todayMarker off`.
+/// Upstream's `.today` class supplies the default stroke and a `todayMarker`
+/// value is an inline style layered over it; inline `style` outranks SVG
+/// presentation attributes, so a partial user style (`stroke-width:5px`) keeps
+/// the default color instead of leaving the line unstroked.
+pub(super) fn today_marker_attrs(marker: Option<&str>, theme: &Theme) -> Option<String> {
+    let base = format!(
+        "class=\"today\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\"",
+        theme.today_line()
+    );
+    match marker {
+        Some("off") => None,
+        Some(css) => Some(format!("{base} style=\"{}\"", css_style(css))),
+        None => Some(base),
+    }
+}
+
 /// Turn a `todayMarker` CSS string into an SVG `style` attribute value.
 /// Upstream separates the CSS declarations with commas; SVG `style` uses
 /// semicolons, so the commas are swapped and the result is attribute-escaped.
-pub(super) fn css_style(css: &str) -> String {
+fn css_style(css: &str) -> String {
     let joined = css
         .split(',')
         .map(str::trim)

@@ -122,7 +122,8 @@ These work on every diagram type:
   names: sequence `actorBkg`/`actorBorder`/`actorTextColor`/`actorLineColor`/
   `signalColor`/`signalTextColor`/`labelBoxBkgColor`/`activationBkgColor`, pie
   `pie{1..12}`/`pieStrokeColor`/`pieOpacity`/`pieTitleTextColor`, git
-  `git{0..7}`/`commitLabelColor`/`tagLabelColor`, and the `cScale{0..11}`
+  `git{0..7}`/`commitLabelColor`/`tagLabelColor`, gantt `todayLineColor`, and
+  the `cScale{0..11}`
   categorical scale), top-level
   `fontFamily`/`fontSize`, `useMaxWidth: false` (top-level *or* per diagram —
   `flowchart.useMaxWidth`, `sequence.useMaxWidth`, … — emit a fixed-size SVG
