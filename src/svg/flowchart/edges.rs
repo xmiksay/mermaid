@@ -12,6 +12,7 @@ use crate::svg::theme::Theme;
 use super::route::{EdgePath, Pt, ALIGNED_EPS};
 
 /// Clip target for one end of an edge: the shape boundary a connector stops at.
+#[derive(Clone, Copy)]
 pub(super) struct EndClip {
     pub(super) center: (f64, f64),
     pub(super) size: (f64, f64),

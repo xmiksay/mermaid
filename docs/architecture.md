@@ -141,7 +141,8 @@ reading SVGs back through `svg_shapes.rs` (shape boxes, cluster frames) and
 `tests/fixtures/edges/*.mmd` plus the graph-shaped gallery samples: flowchart
 ends meet faces by rank relation (routed ends too) and run straight under
 every marker, aligned edges stay straight, every marker tip stays on its
-node, small round targets keep edges in their band, no edge leaves the viewBox
+node (on a circle's or rhombus's actual outline), edges never hook into their
+heads, small round targets keep edges in their band, no edge leaves the viewBox
 (flowchart/state/class/ER/requirement), output is deterministic, and
 baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to

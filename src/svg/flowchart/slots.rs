@@ -5,16 +5,12 @@ use std::collections::BTreeMap;
 use crate::parse::EdgeHead;
 
 use super::edges::clip_end;
-use super::round::is_round;
 use super::route::{axes, Approach, EdgeIn};
 
 /// Gap between two neighbouring slots, beyond the widest marker.
 const SLOT_MARGIN: f64 = 4.0;
 /// Slot centres stay this far inside a rect face's corners.
 const CORNER_INSET: f64 = 4.0;
-/// Slot centres on a round outline stay within this share of its
-/// half-extent, where the ray to the centre still meets it cleanly.
-pub(super) const ROUND_REACH: f64 = 0.6;
 
 /// One end on a face: edge index, which end, its kind, a cross coordinate,
 /// and whether it is fixed. A movable end's coordinate is where its edge
@@ -68,9 +64,9 @@ pub(super) fn slot_offsets(ins: &[Option<EdgeIn>], aps: &[[Option<Approach>; 2]]
         kinds.sort_by(|x, y| (x.1 / x.2).total_cmp(&(y.1 / y.2)).then(x.0.cmp(&y.0)));
         let (_, which, e, ..) = ends[0];
         let node = e.node(which);
-        let (round, face) = (node.shape.is_some_and(is_round), axes(node.size)[1 - f]);
-        let at = row(&kinds, round, face);
-        let shift = clear_fixed(&kinds, &at, &fixed, reach(round, face));
+        let face = axes(node.size)[1 - f];
+        let at = row(&kinds, face);
+        let shift = clear_fixed(&kinds, &at, &fixed, reach(face));
         for &(i, which, _, k, _, is_fixed) in ends {
             if let (false, Some(rank)) = (is_fixed, kinds.iter().position(|kk| kk.0 == k)) {
                 offs[i][which] = at[rank] + shift;
@@ -84,10 +80,10 @@ pub(super) fn slot_offsets(ins: &[Option<EdgeIn>], aps: &[[Option<Approach>; 2]]
 /// Neighbours sit half of each one's marker width plus the margin apart,
 /// compressed as far as needed to keep every slot within `reach` of the face
 /// centre: markers wider than the face overlap rather than leave their node.
-fn row(kinds: &[(u32, f64, f64, f64)], round: bool, face: f64) -> Vec<f64> {
+fn row(kinds: &[(u32, f64, f64, f64)], face: f64) -> Vec<f64> {
     let gap = |p: &[(u32, f64, f64, f64)]| (p[0].3 + p[1].3) / 2.0 + SLOT_MARGIN;
     let full: f64 = kinds.windows(2).map(gap).sum();
-    let span = 2.0 * reach(round, face);
+    let span = 2.0 * reach(face);
     let k = if full > span { span / full } else { 1.0 };
     let mut at = vec![0.0];
     for p in kinds.windows(2) {
@@ -97,15 +93,9 @@ fn row(kinds: &[(u32, f64, f64, f64)], round: bool, face: f64) -> Vec<f64> {
     at.iter().map(|x| x - mid).collect()
 }
 
-/// How far a slot centre may sit from the face centre: inside the corners
-/// on a rect, within the part of a round outline its ray can still reach
-/// cleanly.
-fn reach(round: bool, face: f64) -> f64 {
-    if round {
-        ROUND_REACH * face / 2.0
-    } else {
-        (face / 2.0 - CORNER_INSET).max(0.0)
-    }
+/// How far a slot centre may sit from the face centre: inside its corners.
+fn reach(face: f64) -> f64 {
+    (face / 2.0 - CORNER_INSET).max(0.0)
 }
 
 /// How far to move the row so no slot lands on a fixed end: for each fixed
@@ -158,7 +148,7 @@ fn plain_landing(e: &EdgeIn, which: usize, f: usize, c: usize) -> Option<(bool, 
     (rel.abs() * hc >= cross.abs() * hf).then_some((rel > 0.0, cross))
 }
 
-fn kind(head: EdgeHead) -> u32 {
+pub(super) fn kind(head: EdgeHead) -> u32 {
     match head {
         EdgeHead::Arrow => 1,
         EdgeHead::Circle => 2,
@@ -169,7 +159,7 @@ fn kind(head: EdgeHead) -> u32 {
 
 /// A marker's width across the edge per unit of stroke width, from the defs
 /// in `edges.rs`.
-fn marker_width(head: EdgeHead) -> f64 {
+pub(super) fn marker_width(head: EdgeHead) -> f64 {
     match head {
         EdgeHead::Arrow | EdgeHead::Circle => 12.0,
         EdgeHead::Cross => 10.0,
@@ -193,25 +183,22 @@ mod tests {
     #[test]
     fn row_spaces_neighbours_by_their_widths_centred() {
         // Arrow (18) and bare (0): 9 + 4 apart, centred.
-        assert_eq!(row(&kinds(&[18.0, 0.0]), false, 200.0), vec![-6.5, 6.5]);
+        assert_eq!(row(&kinds(&[18.0, 0.0]), 200.0), vec![-6.5, 6.5]);
     }
 
     #[test]
     fn row_compresses_but_never_leaves_the_face() {
         // Three 18px heads on a 44px face: 22px gaps shrink to 18 so every
         // slot stays 4px inside the corners.
-        let at = row(&kinds(&[18.0, 18.0, 18.0]), false, 44.0);
+        let at = row(&kinds(&[18.0, 18.0, 18.0]), 44.0);
         assert_eq!(at, vec![-18.0, 0.0, 18.0]);
         // A 360px marker on a 60px face overlaps, but its slot stays inside.
-        let at = row(&kinds(&[360.0, 18.0]), false, 60.0);
+        let at = row(&kinds(&[360.0, 18.0]), 60.0);
         assert!(
             at.iter().all(|x| x.abs() <= 30.0 - CORNER_INSET + 1e-9),
             "{at:?}"
         );
         assert!(at[1] > at[0], "never stacked");
-        // Round: slot centres within 0.6 of the radius.
-        let at = row(&kinds(&[18.0, 18.0, 18.0]), true, 40.0);
-        assert!(at.iter().all(|x| x.abs() <= 12.0 + 1e-9), "{at:?}");
     }
 
     #[test]

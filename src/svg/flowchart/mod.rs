@@ -284,11 +284,7 @@ fn route_edges(
             })
         })
         .collect();
-    let nodes: Vec<((f64, f64), (f64, f64))> = pos
-        .iter()
-        .map(|(u, &c)| (c, node_sizes[*u as usize]))
-        .collect();
-    route_all(ins, &nodes)
+    route_all(ins)
 }
 
 #[cfg(test)]
