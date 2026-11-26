@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use crate::parse::{ErDiagram, FlowDirection};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::SvgBuilder;
-use super::geometry::fit_edges;
+use super::builder::{curve_basis_points, SvgBuilder};
+use super::geometry::{clip_rect_ends, fit_edges};
 use super::theme::Theme;
 
 mod entity;
@@ -96,11 +96,15 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
         };
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
     };
-    let ((dx, dy), (width, height)) = fit_edges(
-        layout.edge_points.values().flatten().map(|&p| transform(p)),
-        (width, height),
-        CANVAS_PAD,
-    );
+    let drawn = layout
+        .edge_points
+        .iter()
+        .filter(|(_, p)| p.len() >= 2)
+        .map(|(&(u, v), p)| {
+            let pts: Vec<(f64, f64)> = p.iter().map(|&q| transform(q)).collect();
+            curve_basis_points(&clip_rect_ends(&pts, sizes[u as usize], sizes[v as usize]))
+        });
+    let ((dx, dy), (width, height)) = fit_edges(drawn.flatten(), (width, height), CANVAS_PAD);
     let transform = move |p: (f64, f64)| {
         let (x, y) = transform(p);
         (x + dx, y + dy)

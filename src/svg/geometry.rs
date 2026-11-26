@@ -101,11 +101,33 @@ pub(super) fn polyline_midpoint_offset(pts: &[(f64, f64)], offset: f64) -> (f64,
     pts[pts.len() / 2]
 }
 
-/// Keep edge geometry on a `w`×`h` canvas. A basis curve stays inside its
-/// control points' hull, so `pts` (every edge's control points) bounds what is
-/// drawn. Where they overflow a side, the drawing is shifted / the canvas
-/// grown so they sit `pad` inside it; elsewhere nothing changes. Returns the
-/// shift `(dx, dy)` and the new canvas size.
+/// A routed polyline (`>= 2` points) with its first point replaced by
+/// `first(pts[1])` and its last by `last(pts[n - 2])`: each end clipped on the
+/// ray from its neighbour to the end shape.
+pub(super) fn clip_polyline(
+    pts: &[(f64, f64)],
+    first: impl FnOnce((f64, f64)) -> (f64, f64),
+    last: impl FnOnce((f64, f64)) -> (f64, f64),
+) -> Vec<(f64, f64)> {
+    let n = pts.len();
+    let mut clipped = Vec::with_capacity(n);
+    clipped.push(first(pts[1]));
+    clipped.extend(&pts[1..n - 1]);
+    clipped.push(last(pts[n - 2]));
+    clipped
+}
+
+/// [`clip_polyline`] onto the `a`- and `b`-sized rects centred on the
+/// polyline's first and last points.
+pub(super) fn clip_rect_ends(pts: &[(f64, f64)], a: (f64, f64), b: (f64, f64)) -> Vec<(f64, f64)> {
+    let (s, t) = (pts[0], pts[pts.len() - 1]);
+    clip_polyline(pts, |p| clip_rect(p, s, a), |p| clip_rect(p, t, b))
+}
+
+/// Keep edge geometry on a `w`×`h` canvas: `pts` are points on every drawn
+/// edge curve. Where they overflow a side, the drawing is shifted / the
+/// canvas grown so they sit `pad` inside it; elsewhere nothing changes.
+/// Returns the shift `(dx, dy)` and the new canvas size.
 pub(super) fn fit_edges(
     pts: impl IntoIterator<Item = (f64, f64)>,
     (w, h): (f64, f64),

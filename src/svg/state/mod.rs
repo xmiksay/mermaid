@@ -3,10 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::parse::{FlowDirection, StateDiagram};
+use crate::parse::{FlowDirection, StateDiagram, StateTransition};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::SvgBuilder;
+use super::builder::{curve_basis_points, SvgBuilder};
 use super::geometry::fit_edges;
 use super::interact::{close_click, open_click};
 use super::theme::Theme;
@@ -169,11 +169,20 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         .collect();
     let shift_x = (CANVAS_PAD - min_x).max(0.0);
     let shift_y = (CANVAS_PAD - min_y).max(0.0);
+    type Pts = Vec<(f64, f64)>;
+    let line = |tr: &StateTransition,
+                pos: &HashMap<NodeId, (f64, f64)>,
+                boxes: &HashMap<String, (f64, f64, f64, f64)>,
+                routed: &HashMap<(NodeId, NodeId), Pts>| {
+        transition_line(tr, &id_to_u32, &d.states, &sizes, pos, boxes, routed)
+    };
+    let drawn = d
+        .transitions
+        .iter()
+        .filter_map(|tr| line(tr, &pos, &boxes, &routed))
+        .flat_map(|l| curve_basis_points(&l));
     let ((ex, ey), (width, height)) = fit_edges(
-        routed
-            .values()
-            .flatten()
-            .map(|&(x, y)| (x + shift_x, y + shift_y)),
+        drawn.map(|(x, y)| (x + shift_x, y + shift_y)),
         (max_x + shift_x + CANVAS_PAD, max_y + shift_y + CANVAS_PAD),
         CANVAS_PAD,
     );
@@ -210,23 +219,10 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
     let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
     let mut labels: Vec<&str> = Vec::new();
     for tr in &d.transitions {
-        let (Some(start), Some(end)) = (
-            endpoint_clip(&tr.from, &id_to_u32, &d.states, &sizes, &pos, &boxes),
-            endpoint_clip(&tr.to, &id_to_u32, &d.states, &sizes, &pos, &boxes),
-        ) else {
+        let Some(clipped) = line(tr, &pos, &boxes, &routed) else {
             continue;
         };
-        // Real node→node transitions keep their routed polyline; an endpoint
-        // that is a composite cluster has no layout route, so draw a straight
-        // connector clipped to the cluster box.
-        let pts: Vec<(f64, f64)> = match (id_to_u32.get(&tr.from), id_to_u32.get(&tr.to)) {
-            (Some(&u), Some(&v)) => match routed.get(&(u, v)) {
-                Some(p) => p.clone(),
-                _ => vec![start.center, end.center],
-            },
-            _ => vec![start.center, end.center],
-        };
-        let clipped = draw_transition(&mut svg, &pts, &start, &end, theme);
+        draw_transition(&mut svg, &clipped, theme);
         if let Some(label) = &tr.label {
             if !clipped.is_empty() {
                 let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
