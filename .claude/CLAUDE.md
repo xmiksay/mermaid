@@ -102,8 +102,12 @@ a committed gallery file drifts from the samples.
 - Keep files small — under 500 LoC. Split a module before it grows past that.
 - DRY and KISS: factor out repetition into shared helpers, and prefer the
   simplest approach that works over clever or over-general designs.
-- Stay faithful to the original JS-rendered Mermaid output — match its visual
-  layout and styling rather than inventing a new look.
+- Render every diagram reasonably: stay close to the JS-rendered Mermaid
+  output, but a deviation is fine when it looks clean and fixes or avoids a
+  graphical problem (overlaps, edges through nodes, arrows sliding along
+  faces, clipped content). Do not add mermaid-svg–specific style or config
+  switches unless strictly necessary; Mermaid's own syntax and config keys
+  keep their upstream meaning.
 - Parser unknown-line policy is **hard-error everywhere**: an unparseable
   statement is a `ParseError::Syntax { line }`, never silently dropped
   (deliberate tolerances are documented in `docs/architecture.md`).
