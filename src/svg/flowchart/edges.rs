@@ -9,7 +9,7 @@ use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, 
 use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus};
 use crate::svg::theme::Theme;
 
-use super::route::EdgePath;
+use super::route::{EdgePath, Pt, ALIGNED_EPS};
 
 /// Clip target for one end of an edge: the shape boundary a connector stops at.
 pub(super) struct EndClip {
@@ -129,6 +129,31 @@ pub(super) fn draw_edge(svg: &mut SvgBuilder, path: &EdgePath, edge: &FlowEdge, 
         svg.raw(&format!("<path d=\"{d}\" {attrs}>{anim}</path>"));
     } else {
         svg.path(&d, &attrs);
+    }
+}
+
+/// Upstream renders every edge through `curveBasis`, so a bare two-point edge
+/// between offset nodes leaves and re-enters along its dominant axis as a
+/// gentle S rather than a straight diagonal. Only the plain (clip-first)
+/// route uses this; aligned ends stay collinear and draw straight.
+pub(super) fn basis_control_points(pts: &[Pt]) -> Vec<Pt> {
+    if pts.len() != 2 {
+        return pts.to_vec();
+    }
+    let ((ax, ay), (bx, by)) = (pts[0], pts[1]);
+    let (dx, dy) = (bx - ax, by - ay);
+    if dy.abs() >= dx.abs() {
+        if dx.abs() < ALIGNED_EPS {
+            return pts.to_vec();
+        }
+        let my = (ay + by) / 2.0;
+        vec![(ax, ay), (ax, my), (bx, my), (bx, by)]
+    } else {
+        if dy.abs() < ALIGNED_EPS {
+            return pts.to_vec();
+        }
+        let mx = (ax + bx) / 2.0;
+        vec![(ax, ay), (mx, ay), (mx, by), (bx, by)]
     }
 }
 

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 #[path = "integration/edge_canvas.rs"]
 mod edge_canvas;
+#[path = "integration/edge_cross.rs"]
+mod edge_cross;
 #[path = "integration/edge_ends.rs"]
 mod edge_ends;
 #[path = "integration/edge_heads.rs"]

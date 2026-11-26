@@ -1,4 +1,5 @@
 bt-fan.mmd	0 0
+bt.mmd	0 0
 circ-pair.mmd	0 0
 d2.mmd	0 4
 d3.mmd	0 0
@@ -18,9 +19,11 @@ labeltangle.mmd	0 0
 long-side.mmd	0 0
 lr-back.mmd	0 0
 lr-fanout.mmd	0 0
+manyk.mmd	6 0
 mixed.mmd	0 0
 nan.mmd	0 0
 opposite.mmd	0 0
+px2.mmd	0 0
 r1-btrl.mmd	0 0
 r2-mixed.mmd	1 0
 r3-local.mmd	0 0
@@ -29,6 +32,7 @@ rh.mmd	0 0
 rhombus-pair.mmd	0 0
 rhombus-wide.mmd	0 0
 rl-fan.mmd	0 0
+rl.mmd	0 0
 s4-flow.mmd	0 0
 s5-bt.mmd	0 0
 s6-rl.mmd	0 0

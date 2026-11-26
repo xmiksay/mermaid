@@ -1,6 +1,5 @@
 //! Edge canvas sweeps (#402): no edge leaves the viewBox, the non-flowchart
-//! drawing is unchanged apart from that shift, flowchart edges add no node
-//! crossings or label collisions, and output is deterministic.
+//! drawing is unchanged apart from that shift, and output is deterministic.
 //!
 //! The baselines under `tests/fixtures/edges/` were captured from the
 //! renderer before #402; `EDGE_BASELINE_WRITE=1` rewrites them from the
@@ -11,9 +10,9 @@ use std::collections::HashMap;
 use mermaid_svg::render;
 
 use crate::edge_ends::graph_sources;
-use crate::svg_read::{drawn, labels, node_at, nodes, view_box, Node, Pt};
+use crate::svg_read::{drawn, view_box, Pt};
 
-const GRAPH: [&str; 5] = ["flowchart", "state", "class", "er", "requirement"];
+pub(crate) const GRAPH: [&str; 5] = ["flowchart", "state", "class", "er", "requirement"];
 
 fn baseline_path(file: &str) -> String {
     format!("{}/tests/fixtures/edges/{file}", env!("CARGO_MANIFEST_DIR"))
@@ -120,78 +119,6 @@ fn non_flowchart_samples_match_baseline_up_to_shift() {
     assert!(
         bad.is_empty(),
         "edge geometry changed beyond a shift: {bad:?}"
-    );
-}
-
-/// `(edge, node)` pairs where an edge runs through a node it does not end on.
-fn crossings(svg: &str) -> usize {
-    let ns = nodes(svg);
-    drawn(svg)
-        .iter()
-        .map(|d| {
-            let ends = [node_at(&ns, d.raw[0]), node_at(&ns, d.raw[d.raw.len() - 1])];
-            ns.iter()
-                .enumerate()
-                .filter(|(i, n)| !ends.contains(&Some(*i)) && d.curve.iter().any(|&p| inside(n, p)))
-                .count()
-        })
-        .sum()
-}
-
-fn inside(n: &Node, p: Pt) -> bool {
-    p.0 > n.b.0 + 1.0 && p.0 < n.b.2 - 1.0 && p.1 > n.b.1 + 1.0 && p.1 < n.b.3 - 1.0
-}
-
-fn overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
-    a.0.max(b.0) + 1.0 < a.2.min(b.2) && a.1.max(b.1) + 1.0 < a.3.min(b.3)
-}
-
-/// Label pairs that overlap each other, plus labels that overlap a node.
-fn label_collisions(svg: &str) -> usize {
-    let ls = labels(svg);
-    let ns = nodes(svg);
-    let pairs = (0..ls.len())
-        .flat_map(|i| (i + 1..ls.len()).map(move |j| (i, j)))
-        .filter(|&(i, j)| overlap(ls[i].0, ls[j].0))
-        .count();
-    let on_nodes = ls
-        .iter()
-        .map(|l| ns.iter().filter(|n| overlap(l.0, n.b)).count())
-        .sum::<usize>();
-    pairs + on_nodes
-}
-
-/// Flowchart samples: no more edge-through-node crossings and no more label
-/// collisions than before #402.
-#[test]
-fn flowchart_samples_add_no_crossings_or_label_collisions() {
-    let current: Vec<(String, String)> = crate::SAMPLES
-        .iter()
-        .filter(|(_, stem, _)| stem.starts_with("flowchart/"))
-        .map(|(_, stem, src)| {
-            let svg = render(src).expect("renders");
-            (
-                stem.to_string(),
-                format!("{} {}", crossings(&svg), label_collisions(&svg)),
-            )
-        })
-        .collect();
-    let base = baseline("baseline-counts.txt", &current);
-    let mut bad = Vec::new();
-    for (stem, now) in &current {
-        let was = base
-            .get(stem)
-            .unwrap_or_else(|| panic!("{stem}: no baseline"));
-        let n: Vec<usize> = now.split(' ').map(|t| t.parse().expect("count")).collect();
-        let w: Vec<usize> = was.split(' ').map(|t| t.parse().expect("count")).collect();
-        if n[0] > w[0] || n[1] > w[1] {
-            bad.push(format!("{stem}: crossings/collisions {now} (was {was})"));
-        }
-    }
-    assert!(
-        bad.is_empty(),
-        "new crossings or collisions:\n{}",
-        bad.join("\n")
     );
 }
 

@@ -10,15 +10,19 @@ use super::route::{axes, is_round, Approach, EdgeIn};
 /// Gap between two neighbouring slots, beyond the widest marker.
 const SLOT_MARGIN: f64 = 4.0;
 
-/// One end on a face: edge index, which end, its kind, the cross coordinate
-/// it comes from, and whether it is a plain-route end (it keeps its place but
-/// still reserves a slot so the others move clear of it).
+/// One end on a face: edge index, which end, its kind, a cross coordinate,
+/// and whether it is fixed. A movable end's coordinate is where its edge
+/// comes from (orders the slots); a fixed end — a plain-route or straight end
+/// that keeps its own place — carries where it lands, relative to the node.
 type End<'e, 'a> = (usize, usize, &'e EdgeIn<'a>, u32, f64, bool);
 
 /// Each end's cross-axis offset on its face. Ends of one kind (the same
 /// marker, or bare) coincide, as upstream draws them; different kinds sit side
 /// by side, centred on the face and ordered by where their edges come from so
-/// they do not cross. Kinds that do not fit on the face all stay centred.
+/// they do not cross. Kinds are never stacked: a face too narrow compresses
+/// the spacing, down to half a marker, then lets the row overrun it evenly.
+/// Fixed ends take no slot; the row only moves aside where it would land on
+/// one, so a lone movable end stays centred.
 pub(super) fn slot_offsets(ins: &[Option<EdgeIn>], aps: &[[Option<Approach>; 2]]) -> Vec<[f64; 2]> {
     let mut offs = vec![[0.0; 2]; ins.len()];
     let mut faces: BTreeMap<(&str, usize, bool), Vec<End>> = BTreeMap::new();
@@ -31,57 +35,107 @@ pub(super) fn slot_offsets(ins: &[Option<EdgeIn>], aps: &[[Option<Approach>; 2]]
                 let end = (i, which, e, kind(e.head(which)), a.from_cross, false);
                 faces.entry((id, f, a.side)).or_default().push(end);
             } else if let Some((side, cross)) = plain_landing(e, which, f, c) {
-                // A unique kind per plain end: it never merges with a slot.
-                let end = (i, which, e, 4 + 2 * i as u32 + which as u32, cross, true);
+                let end = (i, which, e, kind(e.head(which)), cross, true);
                 faces.entry((id, f, side)).or_default().push(end);
             }
         }
     }
     for ((_, f, _), ends) in &faces {
-        // (kind, sum of source cross coordinates, count, widest marker)
+        let width = |&(_, which, e, ..): &End| (marker_width(e.head(which)) * e.stroke()).min(1e4);
+        // Movable kinds: (kind, sum of source cross coordinates, count, widest)
         let mut kinds: Vec<(u32, f64, f64, f64)> = Vec::new();
-        for &(_, which, e, k, from, _) in ends {
-            let w = marker_width(e.head(which)) * e.stroke();
+        for end in ends.iter().filter(|end| !end.5) {
+            let (k, from, w) = (end.3, end.4, width(end));
             match kinds.iter_mut().find(|kk| kk.0 == k) {
                 Some(slot) => *slot = (k, slot.1 + from, slot.2 + 1.0, slot.3.max(w)),
                 None => kinds.push((k, from, 1.0, w)),
             }
         }
-        if kinds.len() < 2 || ends.iter().all(|end| end.5) {
+        let fixed: Vec<(f64, f64)> = ends
+            .iter()
+            .filter(|end| end.5)
+            .map(|end| (end.4, width(end)))
+            .collect();
+        if kinds.is_empty() || (kinds.len() < 2 && fixed.is_empty()) {
             continue;
         }
         kinds.sort_by(|x, y| (x.1 / x.2).total_cmp(&(y.1 / y.2)).then(x.0.cmp(&y.0)));
-        // Slot centres along the face: neighbours sit half of each one's
-        // marker width plus the margin apart.
-        let mut at = vec![0.0];
-        for pair in kinds.windows(2) {
-            at.push(at[at.len() - 1] + (pair[0].3 + pair[1].3) / 2.0 + SLOT_MARGIN);
-        }
         let (_, which, e, ..) = ends[0];
         let node = e.node(which);
-        // A round end's head sits on the curve, so only the slot centres need
-        // to fit; a rect end's whole head stays on the face.
-        let heads = if node.shape.is_some_and(is_round) {
-            0.0
-        } else {
-            (kinds[0].3 + kinds[kinds.len() - 1].3) / 2.0
-        };
-        let span = at[at.len() - 1];
-        if span + heads > axes(node.size)[1 - f] {
-            continue;
-        }
-        for &(i, which, _, k, _, fixed) in ends {
-            let rank = kinds.iter().position(|kk| kk.0 == k).unwrap_or(0);
-            if !fixed {
-                offs[i][which] = at[rank] - span / 2.0;
+        let at = row(
+            &kinds,
+            node.shape.is_some_and(is_round),
+            axes(node.size)[1 - f],
+        );
+        let shift = clear_fixed(&kinds, &at, &fixed);
+        for &(i, which, _, k, _, is_fixed) in ends {
+            if let (false, Some(rank)) = (is_fixed, kinds.iter().position(|kk| kk.0 == k)) {
+                offs[i][which] = at[rank] + shift;
             }
         }
     }
     offs
 }
 
-/// Where a plain-route end lands: the flow face it hits (`true`: toward +`f`)
-/// and its cross coordinate, or `None` on a side face or a cluster.
+/// Slot centres for the sorted `kinds`, centred on a `face`-long face.
+/// Neighbours sit half of each one's marker width plus the margin apart,
+/// compressed to fit the face (a rect end's outer heads included, a round
+/// end's head sits on the curve) but never below half the wider marker.
+fn row(kinds: &[(u32, f64, f64, f64)], round: bool, face: f64) -> Vec<f64> {
+    let gaps: Vec<(f64, f64)> = kinds
+        .windows(2)
+        .map(|p| {
+            (
+                (p[0].3 + p[1].3) / 2.0 + SLOT_MARGIN,
+                (p[0].3.max(p[1].3) / 2.0).max(1.0),
+            )
+        })
+        .collect();
+    let heads = if round {
+        0.0
+    } else {
+        (kinds[0].3 + kinds[kinds.len() - 1].3) / 2.0
+    };
+    let full: f64 = gaps.iter().map(|g| g.0).sum();
+    let k = if full > 0.0 {
+        ((face - heads) / full).min(1.0)
+    } else {
+        1.0
+    };
+    let mut at = vec![0.0];
+    for (gap, floor) in gaps {
+        at.push(at[at.len() - 1] + (gap * k).max(floor));
+    }
+    let mid = at[at.len() - 1] / 2.0;
+    at.iter().map(|x| x - mid).collect()
+}
+
+/// How far to move the row so no slot lands on a fixed end: for each fixed
+/// end a slot would touch (within both half-widths plus the margin), the row
+/// moves to the side away from it, just far enough.
+fn clear_fixed(kinds: &[(u32, f64, f64, f64)], at: &[f64], fixed: &[(f64, f64)]) -> f64 {
+    let mut shift = 0.0;
+    for &(x, w) in fixed {
+        let clear = |i: usize| (kinds[i].3 + w) / 2.0 + SLOT_MARGIN;
+        if !(0..at.len()).any(|i| (at[i] + shift - x).abs() < clear(i)) {
+            continue;
+        }
+        shift = if x >= shift {
+            (0..at.len())
+                .map(|i| x - clear(i) - at[i])
+                .fold(shift, f64::min)
+        } else {
+            (0..at.len())
+                .map(|i| x + clear(i) - at[i])
+                .fold(shift, f64::max)
+        };
+    }
+    shift
+}
+
+/// Where an end without an approach point lands: the flow face it hits
+/// (`true`: toward +`f`) and its cross offset from the node centre, or `None`
+/// on a side face or a cluster.
 fn plain_landing(e: &EdgeIn, which: usize, f: usize, c: usize) -> Option<(bool, f64)> {
     let node = e.node(which);
     node.shape?;
@@ -92,8 +146,11 @@ fn plain_landing(e: &EdgeIn, which: usize, f: usize, c: usize) -> Option<(bool, 
         pts[pts.len() - 2]
     };
     let tip = axes(clip_end(toward, node));
-    let rel = tip[f] - node.center_on(f);
-    (rel.abs() >= axes(node.size)[f] / 2.0 - 0.5).then_some((rel > 0.0, tip[c]))
+    let (rel, cross) = (tip[f] - node.center_on(f), tip[c] - node.center_on(c));
+    // On the flow face (or that side of a round outline) when the landing is
+    // nearer the flow axis than the cross axis, relative to the node's size.
+    let (hf, hc) = (axes(node.size)[f] / 2.0, axes(node.size)[c] / 2.0);
+    (rel.abs() * hc >= cross.abs() * hf).then_some((rel > 0.0, cross))
 }
 
 fn kind(head: EdgeHead) -> u32 {
