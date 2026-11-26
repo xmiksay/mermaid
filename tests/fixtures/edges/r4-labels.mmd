@@ -1,0 +1,10 @@
+flowchart TD
+  A[Gateway] -->|auth| B[Auth service]
+  A -->|orders| C[Order service]
+  A -->|search| D[Search]
+  A -->|metrics| E[Metrics]
+  B -->|token| F[(Token store)]
+  C -->|write| G[(Orders DB)]
+  C -->|publish| H[Bus]
+  D -->|query| G
+  H -->|consume| E

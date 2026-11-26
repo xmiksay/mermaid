@@ -21,7 +21,7 @@ fn baseline_path(file: &str) -> String {
 
 /// Compares `current` (`name<TAB>value` lines) with the stored baseline, or
 /// rewrites the baseline when `EDGE_BASELINE_WRITE` is set.
-fn baseline(file: &str, current: &[(String, String)]) -> HashMap<String, String> {
+pub(crate) fn baseline(file: &str, current: &[(String, String)]) -> HashMap<String, String> {
     let path = baseline_path(file);
     if std::env::var_os("EDGE_BASELINE_WRITE").is_some() {
         let text: String = current.iter().map(|(k, v)| format!("{k}\t{v}\n")).collect();

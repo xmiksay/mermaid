@@ -17,27 +17,46 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 
 ## Edge geometry (#402)
 
-`route_edges` (`mod.rs`) resolves every edge once into an `EdgePath`
-(`src/svg/flowchart/route.rs`: drawn control points, label polyline, curve,
-style); the canvas measurement and the drawing both use it.
+`route_edges` (`mod.rs`) gathers every edge into an `EdgeIn` and `route_all`
+(`src/svg/flowchart/route.rs`) resolves them once into `EdgePath`s (drawn
+control points, label polyline, curve, style); the canvas measurement and the
+drawing both use them.
 
 - **Centre space first, clip last.** Control points start from the routed
-  polyline (node centres plus dummy waypoints). A two-point edge gets the S
-  points `[S, A_s, A_t, T]` from `s_points`: the bend axis comes from the
-  **rank relation** (flow-axis comparison of the centres, with the flow axis
-  of the innermost subgraph holding both ends — `edge_horizontal` in
-  `directions.rs` — else the diagram's), never from the geometry, so wide
-  boxes cannot flip an inter-rank edge onto a side face. Forward and back
-  edges bend across the flow axis mid-way through the gap between the facing
-  faces; same-rank or aligned ends draw straight. Each end is then clipped
-  from its adjacent control point toward the node centre: rects are entered
-  square-on, circles and rhombi are aimed at the centre.
+  polyline (node centres plus dummy waypoints) and each end gets one
+  **approach point** on its flow face (`approaches`):
+  - a two-point edge gets `[S, A_s, A_t, T]`; the bend axis comes from the
+    **rank relation** (flow-axis comparison of the centres, with the flow
+    axis of the innermost subgraph holding both ends — `edge_horizontal` in
+    `directions.rs` — else the diagram's), never from the geometry, so wide
+    boxes cannot flip an inter-rank edge onto a side face. Forward and back
+    edges bend mid-way through the gap between the facing faces
+    (`pair_depth`); same-rank ends join straight;
+  - a routed edge's end gets its approach point on the node's own column,
+    just past its lead-in (`end_approach`). It stays that shallow, not
+    mid-way to the dummy, because the last dummy can sit far to the side and
+    a deep square run would swing the curve through neighbouring nodes.
+
+  Each end is then clipped from its approach point: a rect is entered
+  square-on, so same-kind heads on one face coincide exactly; a circle or
+  rhombus end is clipped on the ray toward the true centre.
 - **Straight under the marker.** Each marked end gets one collinear lead-in
   point on its clip ray, marker reach × stroke width + 4px out from the face
   (`marker_reach` mirrors the marker defs). In a tight gap the bend moves
   toward an unmarked end to make room; a gap too tight for both lead-ins draws
-  straight. Unmarked ends get no lead-in.
-- Same-kind fan-ins meet in one arrowhead, as upstream.
+  straight. Unmarked ends get no lead-in. The stroke width comes from
+  `linkStyle` only when it is a finite number ≥ 0 (`EdgeIn::stroke`).
+- **Slots by kind** (`src/svg/flowchart/slots.rs`). Ends on one face of one
+  node are grouped by kind: the marker (arrow / circle / cross) or bare.
+  Same-kind ends coincide, as upstream (fan-ins meet in one arrowhead).
+  Different kinds sit side by side, centred on the face, neighbours half of
+  each one's marker width + 4 apart, ordered by the mean cross coordinate
+  their edges come from so they do not cross. The offset moves the approach
+  point, lead-in and clip together; a round end's approach moves out by
+  depth / radius so its tip lands about a slot over while still aiming at the
+  centre. Plain-route ends that land on the face (below) reserve their own
+  slot in that order without moving. Kinds that do not fit on the face all
+  stay centred.
 - **Unchanged (clip-first, master's route):** opposite pairs (the
   `bow_opposite_pairs` routes), self-loops, cluster (subgraph-id) ends and
   `linear`/`step` curves keep `clip_edge_polyline` + the dominant-axis
@@ -48,7 +67,7 @@ style); the canvas measurement and the drawing both use it.
 - Canvas sizing is a proper **measure-then-shift** pass: every edge's
   `EdgePath` and label position is resolved before drawing, a true bounding
   box is computed over node, subgraph-frame, label rects and every edge's
-  control points (the basis curve stays inside their hull), then everything is
+  drawn curve (`EdgePath::drawn_points`), then everything is
   shifted so the measured minimum lands at `CANVAS_PAD` — otherwise a
   local-`direction`-shifted subgraph frame or a BOW-routed back-edge label
   could land at a negative/overflowing coordinate and get clipped by the
