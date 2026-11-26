@@ -46,12 +46,15 @@ drawing both use them.
   no approach point and no face slot. As upstream, each is clipped on the ray
   from its neighbouring control point toward the centre, so arrows spread
   around the shape by where they come from instead of hooking into the top
-  arc; its lead-in lies on that same ray. Afterwards `nudge_round_tips`
-  turns an end that would land within both half-widths + 4 of an earlier,
-  different-kind end on the same node just far enough around the centre to
-  clear it (nearest angle first, up to 90°), its lead-in following onto the
-  line to its neighbour. Heads are placed before bare line ends, so a line
-  turns away from a head, never the reverse. Same-kind tips may coincide.
+  arc; its lead-in lies on that same ray. Afterwards `nudge_round_tips` —
+  on every edge except self-loops, master-route edges included — turns an
+  end that would land within both half-widths + 4 of an earlier,
+  different-kind end on the same node around the centre in 1° steps until
+  clear (nearest angle first, up to 90°), its lead-in following onto the
+  line to its neighbour. Placed tips are bucketed by kind and angle, so each
+  step checks only nearby tips of another kind. Heads are placed before bare
+  line ends, so a line turns away from a head, never the reverse. Same-kind
+  tips may coincide.
 - **Straight under the marker.** Each marked end gets one collinear lead-in
   point on its clip ray, marker reach × stroke width + 4px out from the face
   (`marker_reach` mirrors the marker defs). In a tight gap the bend moves
