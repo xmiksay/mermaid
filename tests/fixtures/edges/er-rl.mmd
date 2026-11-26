@@ -1,0 +1,7 @@
+erDiagram
+  direction RL
+  CUSTOMER ||--o{ ORDER : places
+  CUSTOMER ||--|{ ADDRESS : has
+  CUSTOMER }|..|{ ACCOUNT : uses
+  ORDER ||--|{ LINE : contains
+  LINE }o--|| CUSTOMER : refs

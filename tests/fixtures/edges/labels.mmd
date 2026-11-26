@@ -1,0 +1,7 @@
+flowchart LR
+  A[Client] -->|request| B[Gateway]
+  B -->|route a| C[Service A]
+  B -->|route b| D[Service B]
+  B -->|route c| E[Service C]
+  C -->|reply| A
+  D -->|reply| A

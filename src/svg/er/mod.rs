@@ -7,6 +7,7 @@ use crate::parse::{ErDiagram, FlowDirection};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::SvgBuilder;
+use super::geometry::fit_edges;
 use super::theme::Theme;
 
 mod entity;
@@ -94,6 +95,15 @@ pub(crate) fn render(d: &ErDiagram, theme: &Theme) -> String {
             FlowDirection::RightLeft => (raw_h - sy, sx),
         };
         (tx + CANVAS_PAD, ty + CANVAS_PAD)
+    };
+    let ((dx, dy), (width, height)) = fit_edges(
+        layout.edge_points.values().flatten().map(|&p| transform(p)),
+        (width, height),
+        CANVAS_PAD,
+    );
+    let transform = move |p: (f64, f64)| {
+        let (x, y) = transform(p);
+        (x + dx, y + dy)
     };
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);

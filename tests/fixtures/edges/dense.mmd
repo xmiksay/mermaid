@@ -1,0 +1,33 @@
+flowchart TD
+  A([Start]) --> B{Auth?}
+  B -->|yes| C[Load profile]
+  B -->|no| D[/Login form/]
+  D --> B
+  C --> E((Hub))
+  E --> F[Orders]
+  E --> G[Cart]
+  E -.-> H[(Cache)]
+  E ==> I{{Search}}
+  F --o J[Invoice]
+  F --x K[Cancel]
+  G --> J
+  G -.->|checkout now| L>Payment]
+  L -->|ok| M[Receipt]
+  L -->|fail| G
+  I --> F
+  I --> G
+  I -.-> H
+  H --> N[(DB)]
+  J --> N
+  K --> N
+  M --> O([End])
+  N --> O
+  K -->|undo| E
+  P[Audit] --> E
+  P --> N
+  Q{Retry?} --> L
+  M --> Q
+  Q -->|give up| O
+  R((r)) --> E
+  R --x E
+  R --o E

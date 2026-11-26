@@ -5,17 +5,18 @@ use std::collections::HashMap;
 use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge, FlowNode, NodeShape};
 use crate::sugiyama::NodeId;
 
-use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, SvgBuilder};
+use crate::svg::builder::{curve_basis_path, curve_linear_path, curve_step_path, fnum, SvgBuilder};
 use crate::svg::geometry::{clip_circle, clip_rect, clip_rhombus};
-use crate::svg::style::ResolvedStyle;
 use crate::svg::theme::Theme;
+
+use super::route::EdgePath;
 
 /// Clip target for one end of an edge: the shape boundary a connector stops at.
 pub(super) struct EndClip {
     pub(super) center: (f64, f64),
-    size: (f64, f64),
+    pub(super) size: (f64, f64),
     /// `None` marks a subgraph cluster box (clipped as a rectangle).
-    shape: Option<NodeShape>,
+    pub(super) shape: Option<NodeShape>,
 }
 
 /// Resolve an edge endpoint id to its clip target — a node boundary if it names
@@ -73,56 +74,19 @@ pub(super) fn resolve_edge_geometry(
     Some((start, end, pts))
 }
 
-/// Clips a waypoint polyline's first/last segment to the shape boundary of
-/// each endpoint, without drawing anything — the geometry half of
-/// [`draw_edge`], reused by the measurement pass to size the canvas before
-/// any SVG is emitted.
-pub(super) fn clip_edge_polyline(
-    pts: &[(f64, f64)],
-    start: &EndClip,
-    end: &EndClip,
-) -> Vec<(f64, f64)> {
-    let n = pts.len();
-    let first = clip_end(pts[1], start);
-    let last = clip_end(pts[n - 2], end);
-    let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(n);
-    clipped.push(first);
-    for p in &pts[1..n - 1] {
-        clipped.push(*p);
-    }
-    clipped.push(last);
-    clipped
-}
-
 // ---- edge drawing ----------------------------------------------------------
 
-/// Draws the edge's path and returns its clipped polyline (empty for an
-/// invisible link), so the caller can collect a [`LabelSlot`] for any labeled
-/// edge and resolve every label's position in one pass after the edges loop.
-///
-/// [`LabelSlot`]: crate::svg::label_layout::LabelSlot
-#[allow(clippy::too_many_arguments)]
-pub(super) fn draw_edge(
-    svg: &mut SvgBuilder,
-    pts: &[(f64, f64)],
-    edge: &FlowEdge,
-    curve: EdgeCurve,
-    style_override: &ResolvedStyle,
-    start: &EndClip,
-    end: &EndClip,
-    theme: &Theme,
-) -> Vec<(f64, f64)> {
-    // Invisible links (`~~~`) only shape the layout; they draw nothing.
+/// Draws the edge's path; invisible links (`~~~`) only shape the layout.
+pub(super) fn draw_edge(svg: &mut SvgBuilder, path: &EdgePath, edge: &FlowEdge, theme: &Theme) {
     if edge.line == EdgeLine::Invisible {
-        return Vec::new();
+        return;
     }
-    let clipped = clip_edge_polyline(pts, start, end);
-
-    let d = match curve {
-        EdgeCurve::Linear => curve_linear_path(&clipped),
-        EdgeCurve::Step => curve_step_path(&clipped),
-        _ => curve_basis_path(&basis_control_points(&clipped)),
+    let d = match path.curve {
+        EdgeCurve::Linear => curve_linear_path(&path.ctrl),
+        EdgeCurve::Step => curve_step_path(&path.ctrl),
+        _ => curve_basis_path(&path.ctrl),
     };
+    let style_override = &path.style;
 
     // linkStyle overrides layer over the kind-based defaults.
     let stroke = style_override
@@ -160,48 +124,11 @@ pub(super) fn draw_edge(
         let anim = format!(
             "<animate attributeName=\"stroke-dashoffset\" values=\"{};0\" \
              dur=\"0.6s\" repeatCount=\"indefinite\"/>",
-            crate::svg::builder::fnum(period)
+            fnum(period)
         );
         svg.raw(&format!("<path d=\"{d}\" {attrs}>{anim}</path>"));
     } else {
         svg.path(&d, &attrs);
-    }
-
-    clipped
-}
-
-/// Upstream Mermaid renders every edge through `curveBasis`, so even a
-/// short edge between two offset nodes leaves and re-enters along the flow axis
-/// as a gentle S rather than a straight diagonal. A routed edge already carries
-/// interior waypoints; a bare two-point edge does not, so synthesize two control
-/// points that bend it along its dominant axis. Endpoints that share a column
-/// (or row) stay collinear and the basis curve draws straight — matching a plain
-/// vertical/horizontal link.
-fn basis_control_points(pts: &[(f64, f64)]) -> std::borrow::Cow<'_, [(f64, f64)]> {
-    use std::borrow::Cow;
-    if pts.len() != 2 {
-        return Cow::Borrowed(pts);
-    }
-    // Below this cross-axis offset the endpoints are effectively aligned; a
-    // straight line is faithful (and keeps `curveBasis` from emitting béziers).
-    const ALIGNED_EPS: f64 = 2.0;
-    let (ax, ay) = pts[0];
-    let (bx, by) = pts[1];
-    let (dx, dy) = (bx - ax, by - ay);
-    if dy.abs() >= dx.abs() {
-        // Vertical-dominant: leave/enter vertically, shift across at mid-height.
-        if dx.abs() < ALIGNED_EPS {
-            return Cow::Borrowed(pts);
-        }
-        let my = (ay + by) / 2.0;
-        Cow::Owned(vec![(ax, ay), (ax, my), (bx, my), (bx, by)])
-    } else {
-        // Horizontal-dominant: leave/enter horizontally, shift at mid-width.
-        if dy.abs() < ALIGNED_EPS {
-            return Cow::Borrowed(pts);
-        }
-        let mx = (ax + bx) / 2.0;
-        Cow::Owned(vec![(ax, ay), (mx, ay), (mx, by), (bx, by)])
     }
 }
 
@@ -243,7 +170,7 @@ fn marker_attr(start: Option<&str>, end: Option<&str>) -> String {
 
 // ---- shape clipping --------------------------------------------------------
 
-fn clip_end(from: (f64, f64), clip: &EndClip) -> (f64, f64) {
+pub(super) fn clip_end(from: (f64, f64), clip: &EndClip) -> (f64, f64) {
     match clip.shape {
         Some(shape) => clip_to_node(from, clip.center, clip.size, shape),
         None => clip_rect(from, clip.center, clip.size),

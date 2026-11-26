@@ -1,0 +1,7 @@
+flowchart TD
+  A[Order service] -->|publishes order created events to the bus| B[Event bus]
+  A -->|queries the customer record synchronously| C[Customer service]
+  B -->|delivers to every subscribed consumer group| D[Billing]
+  B -->|delivers with at least once semantics| E[Shipping]
+  C -->|returns the full customer profile| A
+  D -->|emits invoice issued| B

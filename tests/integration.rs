@@ -1,6 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
+#[path = "integration/edge_canvas.rs"]
+mod edge_canvas;
+#[path = "integration/edge_ends.rs"]
+mod edge_ends;
+#[path = "integration/svg_read.rs"]
+mod svg_read;
+
 use mermaid_svg::ast::{ArrowKind, ParticipantKind, SequenceItem};
 use mermaid_svg::{parse, render, Diagram, ParseError};
 

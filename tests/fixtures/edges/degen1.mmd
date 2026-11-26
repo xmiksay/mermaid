@@ -1,0 +1,13 @@
+flowchart TD
+  A-->A
+  subgraph s
+    B-->C
+  end
+  B-->s
+  s-->B
+  s-->s
+  A-->s
+  A((c))-->A
+  D{d}-->D
+  D-->E{e}
+  E-->D

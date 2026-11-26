@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph ingest[Ingest]
+    a[Receive] --> b[Parse]
+    b --> c[Validate]
+  end
+  subgraph store[Store]
+    d[Write] --> e[Index]
+  end
+  c --> d
+  e --> a
+  c -->|invalid| a
+  e --> b
+  x[Client] --> ingest
+  store --> x

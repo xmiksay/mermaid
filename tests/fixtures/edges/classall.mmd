@@ -1,0 +1,19 @@
+classDiagram
+  direction LR
+  class Vehicle
+  Vehicle <|-- Car : is a
+  Vehicle <|-- Truck : is a
+  Car *-- Engine : has
+  Car o-- Wheel : uses
+  Car --> Driver : driven by
+  Car ..> Fuel : needs
+  Car ..|> Drivable : implements
+  Truck *-- Engine : has
+  Truck -- Trailer : link
+  Truck .. Cargo : dash link
+  Garage "1" o-- "*" Vehicle : stores
+  Driver "1" --> "0..1" License : holds
+  Engine <|-- Diesel
+  Engine <|-- Electric
+  Electric ..> Battery : charges
+  Car <--> Garage : parks

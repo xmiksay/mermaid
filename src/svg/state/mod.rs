@@ -7,6 +7,7 @@ use crate::parse::{FlowDirection, StateDiagram};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::SvgBuilder;
+use super::geometry::fit_edges;
 use super::interact::{close_click, open_click};
 use super::theme::Theme;
 
@@ -151,10 +152,34 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         max_x = max_x.max(bx1);
         max_y = max_y.max(by1);
     }
+    // Routed polylines follow their region's stacking offset (both ends
+    // share a region, hence one offset).
+    let mut routed: HashMap<(NodeId, NodeId), Vec<(f64, f64)>> = layout
+        .edge_points
+        .iter()
+        .filter(|(_, p)| p.len() >= 2)
+        .map(|(&(u, v), p)| {
+            let (ox, oy) = node_offset.get(&u).copied().unwrap_or((0.0, 0.0));
+            let pts = p
+                .iter()
+                .map(|&q| transform(q))
+                .map(|(x, y)| (x + ox, y + oy));
+            ((u, v), pts.collect())
+        })
+        .collect();
     let shift_x = (CANVAS_PAD - min_x).max(0.0);
     let shift_y = (CANVAS_PAD - min_y).max(0.0);
+    let ((ex, ey), (width, height)) = fit_edges(
+        routed
+            .values()
+            .flatten()
+            .map(|&(x, y)| (x + shift_x, y + shift_y)),
+        (max_x + shift_x + CANVAS_PAD, max_y + shift_y + CANVAS_PAD),
+        CANVAS_PAD,
+    );
+    let (shift_x, shift_y) = (shift_x + ex, shift_y + ey);
     if shift_x != 0.0 || shift_y != 0.0 {
-        for p in pos.values_mut() {
+        for p in pos.values_mut().chain(routed.values_mut().flatten()) {
             p.0 += shift_x;
             p.1 += shift_y;
         }
@@ -170,8 +195,6 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
             }
         }
     }
-    let width = max_x + shift_x + CANVAS_PAD;
-    let height = max_y + shift_y + CANVAS_PAD;
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
     define_marker(&mut svg, theme);
@@ -197,18 +220,8 @@ pub(crate) fn render(d: &StateDiagram, theme: &Theme) -> String {
         // that is a composite cluster has no layout route, so draw a straight
         // connector clipped to the cluster box.
         let pts: Vec<(f64, f64)> = match (id_to_u32.get(&tr.from), id_to_u32.get(&tr.to)) {
-            (Some(&u), Some(&v)) => match layout.edge_points.get(&(u, v)) {
-                // Both endpoints share a region, hence the same stacking offset;
-                // shift the whole routed polyline so it tracks the moved nodes.
-                Some(p) if p.len() >= 2 => {
-                    let (ox, oy) = node_offset.get(&u).copied().unwrap_or((0.0, 0.0));
-                    p.iter()
-                        .map(|&q| {
-                            let (x, y) = transform(q);
-                            (x + ox + shift_x, y + oy + shift_y)
-                        })
-                        .collect()
-                }
+            (Some(&u), Some(&v)) => match routed.get(&(u, v)) {
+                Some(p) => p.clone(),
                 _ => vec![start.center, end.center],
             },
             _ => vec![start.center, end.center],

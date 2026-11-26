@@ -52,6 +52,43 @@ pub(super) fn subgraph_depths(
     depths
 }
 
+/// Every subgraph with its own `direction`, innermost first: its recursive
+/// member ids and whether its flow runs horizontally.
+pub(super) fn local_axes(d: &FlowchartDiagram) -> Vec<(HashSet<&str>, bool)> {
+    let sub_idx_by_id: HashMap<&str, usize> = d
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let depths = subgraph_depths(d, &sub_idx_by_id);
+    let mut order: Vec<usize> = (0..d.subgraphs.len()).collect();
+    order.sort_by(|&a, &b| depths[b].cmp(&depths[a]));
+    order
+        .into_iter()
+        .filter_map(|i| {
+            let sub = &d.subgraphs[i];
+            let local = sub.direction?;
+            let mut ids: Vec<&str> = Vec::new();
+            collect_node_ids(sub, &d.subgraphs, &sub_idx_by_id, &mut ids);
+            Some((ids.into_iter().collect(), is_horizontal(local)))
+        })
+        .collect()
+}
+
+/// Whether the edge `from → to` flows horizontally: the `direction` of the
+/// innermost subgraph holding both ends, else the diagram's.
+pub(super) fn edge_horizontal(
+    axes: &[(HashSet<&str>, bool)],
+    global_dir: FlowDirection,
+    from: &str,
+    to: &str,
+) -> bool {
+    axes.iter()
+        .find(|(ids, _)| ids.contains(from) && ids.contains(to))
+        .map_or(is_horizontal(global_dir), |&(_, h)| h)
+}
+
 /// Apply each subgraph's local `direction` by transposing its members (and
 /// their internal edges) in place about the cluster centre. Only clusters whose
 /// flow axis differs from the diagram's are affected — a TD chain inside a

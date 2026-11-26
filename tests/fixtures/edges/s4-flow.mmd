@@ -1,0 +1,19 @@
+flowchart TD
+    Start --> A1
+    subgraph Outer [Outer TD]
+      subgraph L1 [Lane one]
+        direction LR
+        A1 --> A2 --> A3
+      end
+      subgraph L2 [Lane two]
+        direction LR
+        B1 --> B2 --> B3
+      end
+      A3 --> B1
+      B3 -->|retry| A1
+    end
+    B2 -->|loop| Start
+    A2 --> Dec{ok?}
+    Dec -->|yes| End
+    Dec -->|no| A1
+    End --> Start

@@ -1,0 +1,11 @@
+flowchart LR
+  subgraph one[First]
+    a1 --> a2
+  end
+  subgraph two[Second]
+    b1 --> b2
+  end
+  one --> two
+  a2 --> b1
+  c[outside] --> one
+  two --> c

@@ -1,0 +1,23 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Active : start
+  state Active {
+    [*] --> Fetch
+    Fetch --> Decide
+    state Decide <<choice>>
+    Decide --> Parse : ok
+    Decide --> Retry : error
+    Retry --> Fetch : again
+    state Parse {
+      [*] --> Tokens
+      Tokens --> Tree : build
+      Tree --> [*]
+    }
+    Parse --> Store
+    Store --> [*]
+  }
+  Active --> Idle : stop
+  Active --> Failed : crash
+  Failed --> Idle : reset
+  Idle --> [*]
+  Failed --> [*]

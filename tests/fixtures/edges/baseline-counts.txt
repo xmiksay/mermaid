@@ -1,0 +1,12 @@
+flowchart/02-nested-subgraphs	0 0
+flowchart/03-basic-shapes-and-arrows	0 0
+flowchart/04-decision-tree	0 0
+flowchart/05-multi-source-target-fanout	0 0
+flowchart/06-v11-shape-gallery	0 0
+flowchart/07-asymmetric-and-flag-shapes	0 0
+flowchart/08-edge-ids-animate-curve	0 0
+flowchart/09-classdef-and-inline-style	0 0
+flowchart/10-click-interactions	0 0
+flowchart/11-direction-aliases-and-local-direction	0 0
+flowchart/12-long-labels-and-quoted-text	0 0
+flowchart/13-semicolons-and-inline-edge-labels	0 0

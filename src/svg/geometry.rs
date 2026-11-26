@@ -101,6 +101,38 @@ pub(super) fn polyline_midpoint_offset(pts: &[(f64, f64)], offset: f64) -> (f64,
     pts[pts.len() / 2]
 }
 
+/// Keep edge geometry on a `w`×`h` canvas. A basis curve stays inside its
+/// control points' hull, so `pts` (every edge's control points) bounds what is
+/// drawn. Where they overflow a side, the drawing is shifted / the canvas
+/// grown so they sit `pad` inside it; elsewhere nothing changes. Returns the
+/// shift `(dx, dy)` and the new canvas size.
+pub(super) fn fit_edges(
+    pts: impl IntoIterator<Item = (f64, f64)>,
+    (w, h): (f64, f64),
+    pad: f64,
+) -> ((f64, f64), (f64, f64)) {
+    let (mut lo, mut hi) = ((f64::INFINITY, f64::INFINITY), (0.0_f64, 0.0_f64));
+    for (x, y) in pts {
+        lo = (lo.0.min(x), lo.1.min(y));
+        hi = (hi.0.max(x), hi.1.max(y));
+    }
+    let fit = |lo: f64, hi: f64, extent: f64| {
+        let shift = if lo < 0.0 { pad - lo } else { 0.0 };
+        let grown = extent + shift;
+        (
+            shift,
+            if hi + shift > grown {
+                hi + shift + pad
+            } else {
+                grown
+            },
+        )
+    };
+    let (dx, w) = fit(lo.0, hi.0, w);
+    let (dy, h) = fit(lo.1, hi.1, h);
+    ((dx, dy), (w, h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +171,25 @@ mod tests {
         let p = polyline_midpoint(&[(0.0, 0.0), (10.0, 0.0)]);
         assert!((p.0 - 5.0).abs() < 1e-9);
         assert!(p.1.abs() < 1e-9);
+    }
+
+    #[test]
+    fn fit_edges_only_moves_overflowing_sides() {
+        let inside = [(5.0, 5.0), (95.0, 45.0)];
+        assert_eq!(
+            fit_edges(inside, (100.0, 50.0), 24.0),
+            ((0.0, 0.0), (100.0, 50.0))
+        );
+        // Off the left by 6 and the bottom by 10: shift right 30, grow both.
+        let out = [(-6.0, 5.0), (50.0, 60.0)];
+        assert_eq!(
+            fit_edges(out, (100.0, 50.0), 24.0),
+            ((30.0, 0.0), (130.0, 84.0))
+        );
+        assert_eq!(
+            fit_edges([], (100.0, 50.0), 24.0),
+            ((0.0, 0.0), (100.0, 50.0))
+        );
     }
 
     #[test]

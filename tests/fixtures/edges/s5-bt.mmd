@@ -1,0 +1,12 @@
+flowchart BT
+    Root --> L1 & L2 & L3
+    L1 --> M1 & M2
+    L2 --> M2
+    L3 --> M3
+    M1 --> Top
+    M2 --> Top
+    M3 --> Top
+    Top -.-> Root
+    M3 --> L1
+    D{choose} --> Root
+    L2 --> D

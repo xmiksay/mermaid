@@ -1,0 +1,20 @@
+requirementDiagram
+  requirement root {
+    id: 1
+  }
+  requirement a {
+    id: 2
+  }
+  requirement b {
+    id: 3
+  }
+  requirement c {
+    id: 4
+  }
+  element sys {
+    type: system
+  }
+  root - contains -> a
+  root - contains -> b
+  root - contains -> c
+  sys - satisfies -> root

@@ -1,0 +1,15 @@
+classDiagram
+    class Hub
+    Base <|-- Hub
+    Hub *-- Engine
+    Hub o-- Wheel
+    Hub --> Logger
+    Hub ..> Config
+    Hub ..|> IFace
+    Hub -- Peer
+    A <|-- Hub
+    Driver --> Hub
+    Owner *-- Hub
+    Fleet o-- Hub
+    Tool ..> Hub
+    X --|> Hub

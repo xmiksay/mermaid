@@ -7,7 +7,7 @@ use crate::parse::{ClassDiagram, ClassNote, FlowDirection};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{split_label_lines, SvgBuilder};
-use super::geometry::clip_rect;
+use super::geometry::{clip_rect, fit_edges};
 use super::metrics::font_scale;
 use super::theme::Theme;
 
@@ -145,6 +145,17 @@ pub(crate) fn render(d: &ClassDiagram, theme: &Theme) -> String {
         width = width.max(f.x + f.w + CANVAS_PAD);
         height = height.max(f.y + f.h + CANVAS_PAD);
     }
+    let ((dx, dy), size) = fit_edges(
+        edge_pts.values().flatten().copied(),
+        (width, height),
+        CANVAS_PAD,
+    );
+    (width, height) = size;
+    for p in pos.values_mut().chain(edge_pts.values_mut().flatten()) {
+        p.0 += dx;
+        p.1 += dy;
+    }
+    let frames = namespace::frames(d, &id_to_u32, &pos, &sizes);
 
     // Notes are laid out in a row below the diagram body; grow the canvas to fit.
     let mut notes: Vec<NoteBox> = Vec::new();

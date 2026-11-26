@@ -9,6 +9,7 @@ use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
 use super::builder::{curve_basis_path, SvgBuilder};
 use super::geometry::clip_rect;
+use super::geometry::fit_edges;
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -177,10 +178,21 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             max_y = b.y + b.h;
         }
     }
-    let width = max_x + PAD;
-    let height = max_y + PAD;
+    let ((dx, dy), (width, height)) = fit_edges(
+        layout.edge_points.values().flatten().map(|&p| transform(p)),
+        ((max_x + PAD).max(300.0), (max_y + PAD).max(120.0)),
+        PAD,
+    );
+    for b in &mut boxes {
+        b.x += dx;
+        b.y += dy;
+    }
+    let transform = move |p: (f64, f64)| {
+        let (x, y) = transform(p);
+        (x + dx, y + dy)
+    };
 
-    let mut svg = SvgBuilder::new(width.max(300.0), height.max(120.0)).theme(theme);
+    let mut svg = SvgBuilder::new(width, height).theme(theme);
 
     // Upstream's relation arrowhead is a small *open* (line) chevron, not a
     // filled triangle: a stroked `M…L…L…` V with no `fill` and no closing `z`.

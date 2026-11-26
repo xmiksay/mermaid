@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Connecting : connect
+  Connecting --> Connected : ok
+  Connecting --> Failed : timeout
+  Connected --> Idle : disconnect
+  Failed --> Idle : reset
+  Failed --> Connecting : retry
+  Connected --> Busy : request
+  Busy --> Connected : response
+  Busy --> Failed : error
+  Connected --> Connected : heartbeat
+  Idle --> [*]
+  Busy --> Idle : abort
