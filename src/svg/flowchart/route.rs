@@ -3,16 +3,18 @@
 //! canvas-measuring pass and the drawing pass.
 
 use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge, NodeShape};
+use crate::sugiyama::LayoutConfig;
 use crate::svg::builder::curve_basis_points;
+use crate::svg::geometry::clip_polyline;
 use crate::svg::style::ResolvedStyle;
 
-use super::edges::{clip_end, EdgeGeometry, EndClip};
+use super::edges::{basis_control_points, clip_end, EdgeGeometry, EndClip};
 use super::slots::slot_offsets;
 
 pub(super) type Pt = (f64, f64);
 
 /// Below this flow-axis offset two ends sit in one rank.
-const ALIGNED_EPS: f64 = 2.0;
+pub(super) const ALIGNED_EPS: f64 = 2.0;
 /// Clearance between an arrowhead's base and the point where the curve may
 /// start to turn.
 const LEAD_MARGIN: f64 = 4.0;
@@ -64,6 +66,19 @@ impl EdgeIn<'_> {
             || start.shape.is_none()
             || end.shape.is_none()
             || matches!(self.curve, EdgeCurve::Linear | EdgeCurve::Step)
+            || self.skips_ranks()
+    }
+
+    /// A two-point edge spanning more than one rank gap: the layout never
+    /// routed it (a local `direction` replaces a cross-lane route with a bare
+    /// line), so an S through the ranks it skips would run through their
+    /// nodes.
+    fn skips_ranks(&self) -> bool {
+        let (start, end, pts) = &self.geom;
+        let f = self.axes().0;
+        let half = |n: &EndClip| axes(n.size)[f] / 2.0;
+        let gap = (end.center_on(f) - start.center_on(f)).abs() - half(start) - half(end);
+        pts.len() == 2 && gap > 2.0 * LayoutConfig::default().layer_gap
     }
 
     /// The flow and cross axis indices.
@@ -189,8 +204,13 @@ fn pair_depth(start: &EndClip, end: &EndClip, f: usize, leads: (f64, f64)) -> Op
 /// A routed end's approach point, square off its face just past the lead-in.
 /// Kept that shallow (not mid-way to the waypoint) because a routed edge's
 /// last waypoint can sit far off to the side: a deep square run then swings
-/// the curve through neighbouring nodes. `None` when the waypoint is closer.
+/// the curve through neighbouring nodes. `None` when the waypoint is closer,
+/// and for an unmarked end: with no head to square up it keeps the ray from
+/// its waypoint, which leaves the node on the side it is heading for.
 fn end_approach(node: &EndClip, toward: Pt, f: usize, c: usize, lead: f64) -> Option<Approach> {
+    if lead <= 0.0 {
+        return None;
+    }
     let (o, a) = (node.center_on(f), axes(toward)[f]);
     let dir = (a - o).signum();
     let face = o + dir * axes(node.size)[f] / 2.0;
@@ -210,7 +230,7 @@ fn end_approach(node: &EndClip, toward: Pt, f: usize, c: usize, lead: f64) -> Op
 fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath {
     let (start, end, pts) = &e.geom;
     if e.plain() {
-        let label = clip_edge_polyline(pts, start, end);
+        let label = clip_polyline(pts, |p| clip_end(p, start), |p| clip_end(p, end));
         let ctrl = match e.curve {
             EdgeCurve::Linear | EdgeCurve::Step => label.clone(),
             _ => basis_control_points(&label),
@@ -223,6 +243,16 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         };
     }
     let c = e.axes().1;
+    // Ends that line up across the gap join with one straight line; when
+    // either had to move off its face centre, both move so it stays straight.
+    let aligned = pts.len() == 2
+        && ap.iter().all(Option::is_some)
+        && (start.center_on(c) - end.center_on(c)).abs() < ALIGNED_EPS;
+    let off = match off {
+        [s, t] if aligned && s.abs() >= t.abs() => [s, s],
+        [_, t] if aligned => [t, t],
+        off => off,
+    };
     // A slotted rect end keeps its square entry, so it aims at its own slot;
     // round and rhombus ends always aim at the true centre.
     let aim = |which: usize| {
@@ -242,23 +272,17 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         ap[which].as_ref().map(|a| {
             let node = e.node(which);
             let mut p = node.center;
-            // A round end's ray converges on the centre, so its approach point
-            // moves out by depth / radius to land the tip about a slot over.
-            let scale = match node.shape {
-                Some(s) if is_round(s) => {
-                    (a.depth - node.center_on(a.f)).abs() / (axes(node.size)[a.f] / 2.0)
-                }
-                _ => 1.0,
+            let depth = (a.depth - node.center_on(a.f)).abs();
+            let cross = match node.shape {
+                Some(s) if is_round(s) => round_cross(s, off[which], depth, node, a.f),
+                _ => off[which],
             };
             *axis_mut(&mut p, a.f) = a.depth;
-            *axis_mut(&mut p, c) += off[which] * scale;
+            *axis_mut(&mut p, c) += cross;
             p
         })
     };
     let (a_s, a_t) = (point(0), point(1));
-    // Ends that line up across the gap join with a plain straight line.
-    let aligned = matches!((a_s, a_t), (Some(p), Some(q))
-        if pts.len() == 2 && (axes(p)[c] - axes(q)[c]).abs() < ALIGNED_EPS);
     let mut inner: Vec<Pt> = Vec::new();
     if !aligned {
         inner.extend(a_s);
@@ -292,6 +316,21 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
 impl EndClip {
     pub(super) fn center_on(&self, axis: usize) -> f64 {
         axes(self.center)[axis]
+    }
+}
+
+/// The approach point's cross offset that lands a round end's tip at slot
+/// offset `off`: its ray aims at the centre from `depth` out on the flow
+/// axis `f`, so the outline (circle or rhombus) is solved for that ray. The
+/// slot is kept inside the outline.
+fn round_cross(shape: NodeShape, off: f64, depth: f64, node: &EndClip, f: usize) -> f64 {
+    let (hf, hc) = (axes(node.size)[f] / 2.0, axes(node.size)[1 - f] / 2.0);
+    if shape == NodeShape::Rhombus {
+        let off = off.max(-0.9 * hc).min(0.9 * hc);
+        off * depth / hf / (1.0 - off.abs() / hc)
+    } else {
+        let off = off.max(-0.9 * hf).min(0.9 * hf);
+        off * depth / (hf * hf - off * off).sqrt()
     }
 }
 
@@ -336,41 +375,6 @@ fn marker_reach(head: EdgeHead) -> Option<f64> {
         EdgeHead::Circle => Some(10.0),
         EdgeHead::Cross => Some(5.0),
         _ => None,
-    }
-}
-
-/// Clips a waypoint polyline's first/last segment to each endpoint's shape.
-fn clip_edge_polyline(pts: &[Pt], start: &EndClip, end: &EndClip) -> Vec<Pt> {
-    let n = pts.len();
-    let mut clipped = Vec::with_capacity(n);
-    clipped.push(clip_end(pts[1], start));
-    clipped.extend(&pts[1..n - 1]);
-    clipped.push(clip_end(pts[n - 2], end));
-    clipped
-}
-
-/// Upstream renders every edge through `curveBasis`, so a bare two-point edge
-/// between offset nodes leaves and re-enters along its dominant axis as a
-/// gentle S rather than a straight diagonal. Only the plain (clip-first)
-/// route uses this; aligned ends stay collinear and draw straight.
-fn basis_control_points(pts: &[Pt]) -> Vec<Pt> {
-    if pts.len() != 2 {
-        return pts.to_vec();
-    }
-    let ((ax, ay), (bx, by)) = (pts[0], pts[1]);
-    let (dx, dy) = (bx - ax, by - ay);
-    if dy.abs() >= dx.abs() {
-        if dx.abs() < ALIGNED_EPS {
-            return pts.to_vec();
-        }
-        let my = (ay + by) / 2.0;
-        vec![(ax, ay), (ax, my), (bx, my), (bx, by)]
-    } else {
-        if dy.abs() < ALIGNED_EPS {
-            return pts.to_vec();
-        }
-        let mx = (ax + bx) / 2.0;
-        vec![(ax, ay), (mx, ay), (mx, by), (bx, by)]
     }
 }
 

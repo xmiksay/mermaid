@@ -58,8 +58,9 @@ fn node_of(svg: &str, ns: &[Node], label: &str) -> usize {
         .unwrap_or_else(|| panic!("no node under {label}"))
 }
 
-/// The drawn edge `from → to` (by node label): its terminal segment and tip.
-fn edge_end(svg: &str, from: &str, to: &str) -> (Pt, Pt, Node) {
+/// The drawn edge `from → to` (by node label): its path points and the
+/// target node.
+fn edge_raw(svg: &str, from: &str, to: &str) -> (Vec<Pt>, Node) {
     let ns = nodes(svg);
     let (a, b) = (node_of(svg, &ns, from), node_of(svg, &ns, to));
     let edges = drawn(svg);
@@ -68,8 +69,13 @@ fn edge_end(svg: &str, from: &str, to: &str) -> (Pt, Pt, Node) {
         .iter()
         .position(|e| *e == [Some(a), Some(b)])
         .unwrap_or_else(|| panic!("no edge {from} -> {to}"));
-    let raw = &edges[i].raw;
-    (raw[raw.len() - 2], raw[raw.len() - 1], ns[b])
+    (edges[i].raw.clone(), ns[b])
+}
+
+/// The drawn edge `from → to`: its terminal segment and tip.
+fn edge_end(svg: &str, from: &str, to: &str) -> (Pt, Pt, Node) {
+    let (raw, node) = edge_raw(svg, from, to);
+    (raw[raw.len() - 2], raw[raw.len() - 1], node)
 }
 
 /// Asserts `from → to` ends on the target's top (`bottom == false`) or bottom
@@ -135,6 +141,21 @@ fn routed_edges_enter_top_faces_square_on() {
 
 fn dist(a: Pt, b: Pt) -> f64 {
     (a.0 - b.0).hypot(a.1 - b.1)
+}
+
+/// An aligned edge stays a straight vertical line even when a self-loop,
+/// opposite pair or cluster edge also lands on its node's face.
+#[test]
+fn aligned_edge_next_to_fixed_ends_stays_straight() {
+    for (name, from, to) in [("d2", "a", "b"), ("degen1", "B", "C")] {
+        let svg = render(&fixture(name)).expect("renders");
+        let (raw, _) = edge_raw(&svg, from, to);
+        let x = raw[0].0;
+        assert!(
+            raw.iter().all(|p| (p.0 - x).abs() < 0.01),
+            "{name} {from} -> {to} jogs sideways: {raw:?}"
+        );
+    }
 }
 
 #[test]

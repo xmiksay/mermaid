@@ -135,20 +135,23 @@ nested `<kind>/NN-slug.svg` per secondary sample (e.g.
 `flowchart/02-nested-subgraphs.svg`).
 
 Edge-geometry sweeps (#402) live in `tests/integration/edge_ends.rs`,
-`tests/integration/edge_canvas.rs` and `tests/integration/edge_heads.rs`,
+`edge_canvas.rs`, `edge_heads.rs` and `edge_cross.rs` (same directory),
 reading SVGs back through
 `tests/integration/svg_read.rs`. They run over the repro fixtures in
 `tests/fixtures/edges/*.mmd` plus the graph-shaped gallery samples: flowchart
 ends meet faces by rank relation (routed ends too) and run straight under
-every marker, no edge leaves the viewBox (flowchart/state/class/ER/
-requirement), output is deterministic, and three baselines captured before
-#402 guard against regressions: `baseline-paths.txt` (class/ER/requirement/
-state edge points, compared up to one translation), `baseline-counts.txt`
-(flowchart edge-through-node crossings and label collisions) and
-`baseline-heads.txt` (flowchart different-kind heads closer than 12px, and
-bare ends within 3px of an arrowhead tip); the counts may only drop.
-`EDGE_BASELINE_WRITE=1 make test-integration` rewrites them after an intended
-change.
+every marker, aligned edges stay straight, no edge leaves the viewBox
+(flowchart/state/class/ER/requirement), output is deterministic, and
+baselines captured before #402 guard against regressions:
+`baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
+one translation), `baseline-crossings.txt` (per flowchart case, each
+`edge:node` pair where an edge runs through a rect, circle or rhombus it does
+not end on — compared per edge, so a swap still fails; accepted exceptions
+are listed with their reason in `crossing-waivers.txt`), `baseline-counts.txt`
+(flowchart sample label collisions) and `baseline-heads.txt` (flowchart
+different-kind heads closer than 12px, and bare ends within 3px of an
+arrowhead tip); counts may only drop. `EDGE_BASELINE_WRITE=1 make
+test-integration` rewrites the baselines after an intended change.
 
 ## Themes — internal contract
 

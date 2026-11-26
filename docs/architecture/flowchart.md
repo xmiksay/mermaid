@@ -32,14 +32,17 @@ drawing both use them.
     boxes cannot flip an inter-rank edge onto a side face. Forward and back
     edges bend mid-way through the gap between the facing faces
     (`pair_depth`); same-rank ends join straight;
-  - a routed edge's end gets its approach point on the node's own column,
-    just past its lead-in (`end_approach`). It stays that shallow, not
-    mid-way to the dummy, because the last dummy can sit far to the side and
-    a deep square run would swing the curve through neighbouring nodes.
+  - a routed edge's marked end gets its approach point on the node's own
+    column, just past its lead-in (`end_approach`). It stays that shallow,
+    not mid-way to the dummy, because the last dummy can sit far to the side
+    and a deep square run would swing the curve through neighbouring nodes.
+    An unmarked routed end has no head to square up and keeps the ray from
+    its dummy, leaving the node on the side it heads for.
 
   Each end is then clipped from its approach point: a rect is entered
   square-on, so same-kind heads on one face coincide exactly; a circle or
   rhombus end is clipped on the ray toward the true centre.
+  Ends without an approach point keep the plain clip from their neighbour.
 - **Straight under the marker.** Each marked end gets one collinear lead-in
   point on its clip ray, marker reach × stroke width + 4px out from the face
   (`marker_reach` mirrors the marker defs). In a tight gap the bend moves
@@ -51,15 +54,25 @@ drawing both use them.
   Same-kind ends coincide, as upstream (fan-ins meet in one arrowhead).
   Different kinds sit side by side, centred on the face, neighbours half of
   each one's marker width + 4 apart, ordered by the mean cross coordinate
-  their edges come from so they do not cross. The offset moves the approach
-  point, lead-in and clip together; a round end's approach moves out by
-  depth / radius so its tip lands about a slot over while still aiming at the
-  centre. Plain-route ends that land on the face (below) reserve their own
-  slot in that order without moving. Kinds that do not fit on the face all
-  stay centred.
+  their edges come from so they do not cross. Different kinds are never
+  stacked: on a face too narrow the spacing is compressed to fit, down to
+  half the wider marker, and below that the row overruns the face evenly
+  (`row`). The offset moves the approach point, lead-in and clip together; a
+  round end's approach offset is solved for its outline (`round_cross`) so
+  the tip lands on the slot while still aiming at the centre.
+  **Fixed ends** — ends without an approach point (plain route, straight,
+  unmarked routed) — keep their place and take no slot: the movable row is
+  laid out as if they were absent and only moves aside, just far enough,
+  where a slot would land within both half-widths + 4 of where a fixed end
+  actually lands (`clear_fixed`). A lone movable end therefore stays centred,
+  and an aligned edge whose end had to move takes its other end along so it
+  stays straight.
 - **Unchanged (clip-first, master's route):** opposite pairs (the
-  `bow_opposite_pairs` routes), self-loops, cluster (subgraph-id) ends and
-  `linear`/`step` curves keep `clip_edge_polyline` + the dominant-axis
+  `bow_opposite_pairs` routes), self-loops, cluster (subgraph-id) ends,
+  `linear`/`step` curves, and two-point edges spanning more than two layer
+  gaps (`skips_ranks`: a local `direction` replaced a cross-lane route with a
+  bare line, and an S through the skipped ranks would run through their
+  nodes) keep the clip-first `geometry::clip_polyline` + the dominant-axis
   `basis_control_points`.
 
 ## Canvas & subgraph frame sizing
