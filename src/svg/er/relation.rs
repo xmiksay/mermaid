@@ -6,7 +6,7 @@ use crate::parse::{Cardinality, ErRelation};
 use crate::sugiyama::NodeId;
 
 use crate::svg::builder::{curve_basis_path, SvgBuilder};
-use crate::svg::geometry::clip_rect;
+use crate::svg::geometry::clip_rect_ends;
 use crate::svg::theme::Theme;
 
 pub(super) const CARD_GAP: f64 = 14.0; // distance from node boundary to where the cardinality glyph sits
@@ -50,15 +50,7 @@ pub(super) fn draw_relation(
     if n < 2 {
         return Vec::new();
     }
-    let first = clip_rect(pts[1], pts[0], sizes[src]);
-    let last = clip_rect(pts[n - 2], pts[n - 1], sizes[dst]);
-
-    let mut clipped = Vec::with_capacity(n);
-    clipped.push(first);
-    for p in &pts[1..n - 1] {
-        clipped.push(*p);
-    }
-    clipped.push(last);
+    let clipped = clip_rect_ends(pts, sizes[src], sizes[dst]);
 
     let dash = if rel.identifying { "" } else { "4 3" };
     let dash_attr = if dash.is_empty() {

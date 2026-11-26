@@ -7,7 +7,7 @@ use crate::parse::{ClassRelation, ClassRelationKind};
 use crate::sugiyama::NodeId;
 
 use super::super::builder::{curve_basis_path, SvgBuilder};
-use super::super::geometry::clip_rect;
+use super::super::geometry::clip_rect_ends;
 use super::super::theme::Theme;
 
 /// Draws the relation's path/markers/cardinality glyphs, returning its
@@ -26,15 +26,7 @@ pub(super) fn draw_relation(
     let src = id_to_u32[&rel.from] as usize;
     let dst = id_to_u32[&rel.to] as usize;
     let n = pts.len();
-    let first = clip_rect(pts[1], pts[0], sizes[src]);
-    let last = clip_rect(pts[n - 2], pts[n - 1], sizes[dst]);
-
-    let mut clipped = Vec::with_capacity(n);
-    clipped.push(first);
-    for p in &pts[1..n - 1] {
-        clipped.push(*p);
-    }
-    clipped.push(last);
+    let clipped = clip_rect_ends(pts, sizes[src], sizes[dst]);
 
     let (dash, mut marker_end, mut marker_start) = style_for(rel.kind, rel.reversed);
     // Two-way relation: `kind` marked the `from` end (reversed), so the mirror

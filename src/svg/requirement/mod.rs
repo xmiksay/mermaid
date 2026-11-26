@@ -7,9 +7,8 @@ use crate::parse::ast::FlowDirection;
 use crate::parse::{ReqRelationKind, RequirementDiagram, RequirementKind};
 use crate::sugiyama::{layout_with, Graph, LayoutConfig, NodeId};
 
-use super::builder::{curve_basis_path, SvgBuilder};
-use super::geometry::clip_rect;
-use super::geometry::fit_edges;
+use super::builder::{curve_basis_path, curve_basis_points, SvgBuilder};
+use super::geometry::{clip_rect_ends, fit_edges};
 use super::style::resolve_style;
 use super::theme::Theme;
 
@@ -178,19 +177,50 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
             max_y = b.y + b.h;
         }
     }
+    let by_name: HashMap<String, (f64, f64, f64, f64)> = boxes
+        .iter()
+        .map(|b| (b.name.clone(), (b.x, b.y, b.w, b.h)))
+        .collect();
+    // Each relation's clipped polyline, measured for the canvas before any
+    // drawing and then drawn as is.
+    let mut lines: Vec<Option<Vec<(f64, f64)>>> = d
+        .relations
+        .iter()
+        .map(|rel| {
+            let (a, b) = (by_name.get(&rel.from)?, by_name.get(&rel.to)?);
+            let (ac, bc) = (
+                (a.0 + a.2 / 2.0, a.1 + a.3 / 2.0),
+                (b.0 + b.2 / 2.0, b.1 + b.3 / 2.0),
+            );
+            let raw = match (name_to_id.get(&rel.from), name_to_id.get(&rel.to)) {
+                (Some(&u), Some(&v)) => layout.edge_points.get(&(u, v)),
+                _ => None,
+            };
+            let mut pts = vec![ac];
+            if let Some(raw) = raw {
+                pts.extend(
+                    raw[1..raw.len().saturating_sub(1)]
+                        .iter()
+                        .map(|&p| transform(p)),
+                );
+            }
+            pts.push(bc);
+            Some(clip_rect_ends(&pts, (a.2, a.3), (b.2, b.3)))
+        })
+        .collect();
     let ((dx, dy), (width, height)) = fit_edges(
-        layout.edge_points.values().flatten().map(|&p| transform(p)),
+        lines.iter().flatten().flat_map(|l| curve_basis_points(l)),
         ((max_x + PAD).max(300.0), (max_y + PAD).max(120.0)),
         PAD,
     );
+    for p in lines.iter_mut().flatten().flatten() {
+        p.0 += dx;
+        p.1 += dy;
+    }
     for b in &mut boxes {
         b.x += dx;
         b.y += dy;
     }
-    let transform = move |p: (f64, f64)| {
-        let (x, y) = transform(p);
-        (x + dx, y + dy)
-    };
 
     let mut svg = SvgBuilder::new(width, height).theme(theme);
 
@@ -208,60 +238,14 @@ pub(crate) fn render(d: &RequirementDiagram, theme: &Theme) -> String {
          <path d=\"M1,10 L19,10 M10,1 L10,19\" stroke=\"{edge}\" stroke-width=\"1\"/></marker>"
     ));
 
-    let by_name: HashMap<String, (f64, f64, f64, f64)> = boxes
-        .iter()
-        .map(|b| (b.name.clone(), (b.x, b.y, b.w, b.h)))
-        .collect();
-
     // Draw every relation's path first, collecting each one's clipped
     // polyline plus its `<<kind>>` label and background size, then resolve
     // all label positions in one pass so two unrelated relations whose
     // labels would collide land apart.
     let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
     let mut rel_labels: Vec<(String, f64)> = Vec::new();
-    for rel in &d.relations {
-        let (Some(a), Some(b)) = (by_name.get(&rel.from), by_name.get(&rel.to)) else {
-            continue;
-        };
-        let acx = a.0 + a.2 / 2.0;
-        let acy = a.1 + a.3 / 2.0;
-        let bcx = b.0 + b.2 / 2.0;
-        let bcy = b.1 + b.3 / 2.0;
-
-        let pts: Vec<(f64, f64)> =
-            if let (Some(&u), Some(&v)) = (name_to_id.get(&rel.from), name_to_id.get(&rel.to)) {
-                layout
-                    .edge_points
-                    .get(&(u, v))
-                    .map(|raw| {
-                        let mut v: Vec<(f64, f64)> = Vec::with_capacity(raw.len());
-                        v.push((acx, acy));
-                        for &p in &raw[1..raw.len().saturating_sub(1)] {
-                            v.push(transform(p));
-                        }
-                        v.push((bcx, bcy));
-                        v
-                    })
-                    .unwrap_or_else(|| vec![(acx, acy), (bcx, bcy)])
-            } else {
-                vec![(acx, acy), (bcx, bcy)]
-            };
-
-        // Router always returns both endpoints; guard the invariant so a
-        // regression skips the edge instead of underflowing `pts.len() - 1`.
-        if pts.len() < 2 {
-            continue;
-        }
-        let first = clip_rect(pts[1], (acx, acy), (a.2, a.3));
-        let last_idx = pts.len() - 1;
-        let last = clip_rect(pts[last_idx - 1], (bcx, bcy), (b.2, b.3));
-        let mut clipped: Vec<(f64, f64)> = Vec::with_capacity(pts.len());
-        clipped.push(first);
-        for p in &pts[1..last_idx] {
-            clipped.push(*p);
-        }
-        clipped.push(last);
-
+    for (rel, clipped) in d.relations.iter().zip(lines) {
+        let Some(clipped) = clipped else { continue };
         let kind_word = match rel.kind {
             ReqRelationKind::Contains => "contains",
             ReqRelationKind::Copies => "copies",

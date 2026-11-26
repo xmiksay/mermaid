@@ -23,8 +23,9 @@ Parser: `src/parse/state/` · Renderer: `src/svg/state/`.
   measure-then-shift pass) and shifts the whole drawing (`pos`/`boxes`/
   `dividers`, plus routed edge points) back into a positive `CANVAS_PAD`
   margin so the title band and notes are never clipped by the viewBox edges
-  (issues #242, #367). Routed transition points (`routed`, self-loops
-  included) then go through `geometry::fit_edges`, which shifts further /
+  (issues #242, #367). Each transition's drawn curve (`transition_line`,
+  shared with the drawing; self-loops included) then goes through
+  `geometry::fit_edges`, which shifts further /
   grows the canvas only where an edge would leave it (#402). Synthesized `__start_N`/`__end_N`/`__hist_N` ids are
   registered in `existing` by `push_pseudo` so region-tracking counts them as
   members and their circles render inside the frame. Pseudo-state (start/end/
