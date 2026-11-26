@@ -13,6 +13,7 @@ use super::theme::Theme;
 mod directions;
 mod edges;
 mod nodes;
+mod round;
 mod route;
 mod shapes;
 mod slots;
@@ -283,7 +284,11 @@ fn route_edges(
             })
         })
         .collect();
-    route_all(ins)
+    let nodes: Vec<((f64, f64), (f64, f64))> = pos
+        .iter()
+        .map(|(u, &c)| (c, node_sizes[*u as usize]))
+        .collect();
+    route_all(ins, &nodes)
 }
 
 #[cfg(test)]

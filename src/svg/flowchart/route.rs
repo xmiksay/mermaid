@@ -2,13 +2,14 @@
 //! in centre space and clipped to the end shapes last. Shared by the
 //! canvas-measuring pass and the drawing pass.
 
-use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge, NodeShape};
+use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge};
 use crate::sugiyama::LayoutConfig;
 use crate::svg::builder::curve_basis_points;
 use crate::svg::geometry::clip_polyline;
 use crate::svg::style::ResolvedStyle;
 
 use super::edges::{basis_control_points, clip_end, EdgeGeometry, EndClip};
+use super::round::{clear_of_nodes, is_round, round_cross};
 use super::slots::slot_offsets;
 
 pub(super) type Pt = (f64, f64);
@@ -134,10 +135,15 @@ pub(super) struct Approach {
 }
 
 /// Route every edge; `None` stays `None` (invisible or unresolved).
-pub(super) fn route_all(ins: Vec<Option<EdgeIn>>) -> Vec<Option<EdgePath>> {
+/// `nodes` are every node's `(centre, size)`, the obstacles a round end's
+/// approach must not cross.
+pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, nodes: &[(Pt, Pt)]) -> Vec<Option<EdgePath>> {
     let aps: Vec<[Option<Approach>; 2]> = ins
         .iter()
-        .map(|e| e.as_ref().map_or([None, None], approaches))
+        .map(|e| {
+            e.as_ref()
+                .map_or([None, None], |e| clear_of_nodes(e, approaches(e), nodes))
+        })
         .collect();
     let offsets = slot_offsets(&ins, &aps);
     ins.into_iter()
@@ -248,9 +254,13 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
     let aligned = pts.len() == 2
         && ap.iter().all(Option::is_some)
         && (start.center_on(c) - end.center_on(c)).abs() < ALIGNED_EPS;
+    // The shared shift stays on the narrower of the two faces.
+    let room = (axes(start.size)[c].min(axes(end.size)[c]) / 2.0 - 4.0).max(0.0);
     let off = match off {
-        [s, t] if aligned && s.abs() >= t.abs() => [s, s],
-        [_, t] if aligned => [t, t],
+        [s, t] if aligned => {
+            let o = if s.abs() >= t.abs() { s } else { t };
+            [o.max(-room).min(room); 2]
+        }
         off => off,
     };
     // A slotted rect end keeps its square entry, so it aims at its own slot;
@@ -268,17 +278,36 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         }
     };
     let (aim_s, aim_t) = (aim(0), aim(1));
+    // A round end aims from its slot on the face line, so the tip lands on
+    // the slot with the head pointing at the centre; its approach point sits
+    // on that radial ray just past the lead-in (held within the node's cross
+    // extent), so the run under the marker stays straight.
+    let round_tip = |which: usize| -> Option<(Pt, Pt)> {
+        let (node, a) = (e.node(which), ap[which].as_ref()?);
+        let shape = node.shape.filter(|&s| is_round(s))?;
+        let mut q = node.center;
+        *axis_mut(&mut q, a.f) +=
+            (a.depth - node.center_on(a.f)).signum() * axes(node.size)[a.f] / 2.0;
+        *axis_mut(&mut q, c) += round_cross(shape, off[which], node, a.f);
+        let t = clip_end(q, node);
+        let (dx, dy) = (t.0 - node.center.0, t.1 - node.center.1);
+        Some((t, (dx / dx.hypot(dy), dy / dx.hypot(dy))))
+    };
+    let tips = [round_tip(0), round_tip(1)];
     let point = |which: usize| {
         ap[which].as_ref().map(|a| {
             let node = e.node(which);
+            if let Some((t, u)) = tips[which] {
+                let r = e.lead(which) + 2.0;
+                let mut p = (t.0 + u.0 * r, t.1 + u.1 * r);
+                let hc = axes(node.size)[c] / 2.0;
+                let x = axes(p)[c] - node.center_on(c);
+                *axis_mut(&mut p, c) = node.center_on(c) + x.max(-hc).min(hc);
+                return p;
+            }
             let mut p = node.center;
-            let depth = (a.depth - node.center_on(a.f)).abs();
-            let cross = match node.shape {
-                Some(s) if is_round(s) => round_cross(s, off[which], depth, node, a.f),
-                _ => off[which],
-            };
             *axis_mut(&mut p, a.f) = a.depth;
-            *axis_mut(&mut p, c) += cross;
+            *axis_mut(&mut p, c) += off[which];
             p
         })
     };
@@ -289,14 +318,24 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         inner.extend(&pts[1..pts.len() - 1]);
         inner.extend(a_t);
     }
+    // An end's tip, and the point its straight lead-in heads for: the next
+    // control point, or straight out from the centre for a round end.
+    let end = |which: usize, from: Pt| -> (Pt, Pt) {
+        match tips[which] {
+            Some((t, u)) => (t, (t.0 + u.0 * 1e3, t.1 + u.1 * 1e3)),
+            None => (
+                clip_end(from, if which == 0 { &aim_s } else { &aim_t }),
+                from,
+            ),
+        }
+    };
     let ctrl = match (inner.first(), inner.last()) {
         (Some(&first), Some(&last)) => {
-            let p_s = clip_end(first, &aim_s);
-            let p_t = clip_end(last, &aim_t);
+            let ((p_s, out_s), (p_t, out_t)) = (end(0, first), end(1, last));
             let mut ctrl = vec![p_s];
-            ctrl.extend(lead_in(p_s, first, e.lead(0)));
+            ctrl.extend(lead_in(p_s, out_s, e.lead(0)));
             ctrl.extend(&inner);
-            ctrl.extend(lead_in(p_t, last, e.lead(1)));
+            ctrl.extend(lead_in(p_t, out_t, e.lead(1)));
             ctrl.push(p_t);
             ctrl
         }
@@ -317,32 +356,6 @@ impl EndClip {
     pub(super) fn center_on(&self, axis: usize) -> f64 {
         axes(self.center)[axis]
     }
-}
-
-/// The approach point's cross offset that lands a round end's tip at slot
-/// offset `off`: its ray aims at the centre from `depth` out on the flow
-/// axis `f`, so the outline (circle or rhombus) is solved for that ray. The
-/// slot is kept inside the outline.
-fn round_cross(shape: NodeShape, off: f64, depth: f64, node: &EndClip, f: usize) -> f64 {
-    let (hf, hc) = (axes(node.size)[f] / 2.0, axes(node.size)[1 - f] / 2.0);
-    if shape == NodeShape::Rhombus {
-        let off = off.max(-0.9 * hc).min(0.9 * hc);
-        off * depth / hf / (1.0 - off.abs() / hc)
-    } else {
-        let off = off.max(-0.9 * hf).min(0.9 * hf);
-        off * depth / (hf * hf - off * off).sqrt()
-    }
-}
-
-pub(super) fn is_round(shape: NodeShape) -> bool {
-    matches!(
-        shape,
-        NodeShape::Circle
-            | NodeShape::DoubleCircle
-            | NodeShape::FilledCircle
-            | NodeShape::CrossedCircle
-            | NodeShape::Rhombus
-    )
 }
 
 pub(super) fn axes(p: Pt) -> [f64; 2] {

@@ -8,6 +8,7 @@ use mermaid_svg::render;
 use crate::edge_canvas::baseline;
 use crate::edge_ends::graph_sources;
 use crate::svg_read::{drawn, Pt};
+use crate::svg_shapes::{frames, shape_boxes};
 
 /// Every drawn end: its point and its marker (`None` for a bare end).
 fn ends(svg: &str) -> Vec<(Pt, Option<String>)> {
@@ -70,4 +71,34 @@ fn flowchart_heads_stay_apart_and_clear_of_lines() {
         }
     }
     assert!(bad.is_empty(), "arrowhead defects:\n{}", bad.join("\n"));
+}
+
+/// Every arrowhead, circle and cross tip sits on a node — within 1px of a
+/// node shape's box — or on a cluster frame's outline: a head is never
+/// detached from its node, however wide its marker. Zero-length edges (a
+/// cluster linked to itself) have no direction and are skipped.
+#[test]
+fn flowchart_marker_tips_stay_on_their_node() {
+    let mut bad = Vec::new();
+    for (name, src) in graph_sources(&["flowchart"]) {
+        let svg = render(&src).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (boxes, frames) = (shape_boxes(&svg), frames(&svg));
+        let near = |p: Pt, b: &(f64, f64, f64, f64)| {
+            p.0 >= b.0 - 1.0 && p.0 <= b.2 + 1.0 && p.1 >= b.1 - 1.0 && p.1 <= b.3 + 1.0
+        };
+        for d in drawn(&svg) {
+            let (s, e) = (d.raw[0], d.raw[d.raw.len() - 1]);
+            if dist(s, e) < 0.01 {
+                continue;
+            }
+            for (tip, mark) in [(s, &d.marks[0]), (e, &d.marks[1])] {
+                let attached =
+                    boxes.iter().any(|b| near(tip, b)) || frames.iter().any(|f| f.on_outline(tip));
+                if mark.is_some() && !attached {
+                    bad.push(format!("{name}: tip {tip:?} on no node"));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "detached heads:\n{}", bad.join("\n"));
 }

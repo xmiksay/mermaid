@@ -1,4 +1,6 @@
+use super::super::round::round_cross;
 use super::*;
+use crate::parse::NodeShape;
 use crate::parse::{Diagram, FlowchartDiagram};
 use crate::svg::style::resolve_edge_style;
 
@@ -160,4 +162,43 @@ fn stroke_width_accepts_only_finite_non_negative_overrides() {
             "{bad}: thick default"
         );
     }
+}
+
+#[test]
+fn round_cross_lands_the_tip_on_the_slot_and_stays_bounded() {
+    let circle = EndClip {
+        center: (0.0, 0.0),
+        size: (60.0, 60.0),
+        shape: Some(NodeShape::Circle),
+    };
+    // Tip 6 across on a radius-30 circle, aimed from the face line 30 out:
+    // x = 6·30/√(900 − 36).
+    let x = round_cross(NodeShape::Circle, 6.0, &circle, 1);
+    assert!((x - 6.0 * 30.0 / 864f64.sqrt()).abs() < 1e-9);
+    // A far slot is held to 0.6 of the radius: x = 18·30/24.
+    assert_eq!(round_cross(NodeShape::Circle, 50.0, &circle, 1), 22.5);
+    assert_eq!(round_cross(NodeShape::Circle, -50.0, &circle, 1), -22.5);
+    let rhombus = EndClip {
+        center: (0.0, 0.0),
+        size: (40.0, 30.0),
+        shape: Some(NodeShape::Rhombus),
+    };
+    // Small rhombus: the 1/(1 − |off|/hc) blow-up stops at hc = 20.
+    assert_eq!(round_cross(NodeShape::Rhombus, 19.0, &rhombus, 1), 20.0);
+    assert_eq!(round_cross(NodeShape::Rhombus, 0.0, &rhombus, 1), 0.0);
+}
+
+#[test]
+fn skips_ranks_only_for_bare_lines_across_more_than_two_layer_gaps() {
+    let d = flow("flowchart TD\na --> b");
+    let near = edge_in(&d.edges[0], "1.5", vec![(0.0, 0.0), (50.0, 120.0)]);
+    assert!(!near.skips_ranks(), "one layer gap");
+    let far = edge_in(&d.edges[0], "1.5", vec![(0.0, 0.0), (50.0, 300.0)]);
+    assert!(far.skips_ranks(), "a 260px gap skips ranks");
+    let routed = edge_in(
+        &d.edges[0],
+        "1.5",
+        vec![(0.0, 0.0), (20.0, 150.0), (50.0, 300.0)],
+    );
+    assert!(!routed.skips_ranks(), "the layout routed it");
 }

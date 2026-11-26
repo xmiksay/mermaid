@@ -19,7 +19,7 @@ fn str_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     Some(&tag[s..e])
 }
 
-fn tags<'a>(svg: &'a str, open: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+pub(crate) fn tags<'a>(svg: &'a str, open: &'a str) -> impl Iterator<Item = &'a str> + 'a {
     svg.match_indices(open).map(move |(i, _)| {
         let end = i + svg[i..].find('>').expect("closed tag");
         &svg[i..end]
@@ -93,7 +93,15 @@ pub(crate) fn drawn(svg: &str) -> Vec<Drawn> {
                 raw: numbers(d),
                 curve: flatten(d),
                 marks: [mark("marker-start"), mark("marker-end")],
-                stroke: attr(t, "stroke-width").unwrap_or(1.5),
+                // An unusable width (`inf`, `NaN`, negative) falls back to
+                // SVG's initial value, as a browser draws it.
+                stroke: attr(t, "stroke-width").map_or(1.5, |w| {
+                    if w.is_finite() && w >= 0.0 {
+                        w
+                    } else {
+                        1.0
+                    }
+                }),
             }
         })
         .filter(|d| d.raw.len() >= 2)
