@@ -1,8 +1,9 @@
 //! Round (circle family, rhombus) edge ends (#402). They take no face slot:
 //! each is clipped on the ray from its neighbouring control point toward the
 //! centre, as upstream does, so arrows spread around the shape by where they
-//! come from. Only different-kind tips that would land on each other are
-//! nudged apart, by a small turn around the centre.
+//! come from. Afterwards, on every edge except self-loops (master-route ones
+//! included), different-kind ends that would land on each other are turned
+//! apart around the centre in 1° steps until clear.
 
 use std::collections::BTreeMap;
 
@@ -43,10 +44,11 @@ pub(super) struct RoundEnd<'a> {
 }
 
 /// Turn each round-node end that would land within both half-widths plus a
-/// margin of an earlier, different-kind end on the same node just far
-/// enough around the centre to clear it. Marked heads are placed before bare
-/// line ends, so a line never leaves from a head's tip. Its lead-in
-/// moves along onto the new ray. Same-kind tips may coincide.
+/// margin of an earlier, different-kind end on the same node around the
+/// centre in 1° steps until clear (up to 90°, nearest angle first). Marked
+/// heads are placed before bare line ends, so a line never leaves from a
+/// head's tip. Its lead-in moves along onto the new ray. Same-kind tips may
+/// coincide. Self-loops keep their shape.
 pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]) {
     let mut by_node: BTreeMap<&str, Vec<&RoundEnd>> = BTreeMap::new();
     for end in ends {
@@ -58,7 +60,8 @@ pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]
         group.sort_by_key(|end| end.width == 0.0);
     }
     for group in by_node.values() {
-        let mut placed: Vec<(Pt, u32, f64)> = Vec::new();
+        let Some(first) = group.first() else { continue };
+        let mut placed = Placed::new(&first.node);
         for end in group {
             let Some(path) = paths[end.edge].as_mut() else {
                 continue;
@@ -66,14 +69,9 @@ pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]
             let n = path.ctrl.len();
             let at = if end.which == 0 { 0 } else { n - 1 };
             let tip = path.ctrl[at];
-            let clash = |t: Pt| {
-                placed.iter().find(|(p, k, w)| {
-                    *k != end.kind && dist(*p, t) < (w + end.width) / 2.0 + HEAD_MARGIN
-                })
-            };
-            let new_tip = match clash(tip) {
-                Some(&(other, ..)) if end.movable => {
-                    turned_clear(end, tip, other, &|t| clash(t).is_some())
+            let new_tip = match placed.clash(end, tip) {
+                Some((other, _)) if end.movable => {
+                    turned_clear(end, tip, other, &|t| placed.clash(end, t))
                 }
                 _ => None,
             };
@@ -84,28 +82,136 @@ pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]
                 }
                 None => tip,
             };
-            placed.push((tip, end.kind, end.width));
+            placed.add(tip, end.kind, end.width);
         }
     }
 }
 
-/// The nearest tip on the outline, turning degree by degree — first away
-/// from `other`, the head it landed on, then the other way — that no longer
-/// `clashes` with a placed head.
-fn turned_clear(end: &RoundEnd, tip: Pt, other: Pt, clashes: &dyn Fn(Pt) -> bool) -> Option<Pt> {
+/// Angular buckets per head kind.
+const BUCKETS: usize = 360;
+
+/// The tips placed on one round node, bucketed by kind and by angle around
+/// its centre, so a clash check only looks at different-kind tips nearby.
+struct Placed {
+    center: Pt,
+    /// The smallest distance from the centre to the outline: any two tips
+    /// a chord `d` apart are at most `2·asin(d / 2r)` apart in angle.
+    inner: f64,
+    /// `[kind][bucket]` → `(tip, width)`, and the widest marker per kind.
+    tips: Vec<Vec<Vec<(Pt, f64)>>>,
+    widest: Vec<f64>,
+}
+
+impl Placed {
+    fn new(node: &EndClip) -> Self {
+        let (hw, hh) = (node.size.0 / 2.0, node.size.1 / 2.0);
+        let inner = if node.shape == Some(NodeShape::Rhombus) {
+            hw * hh / hw.hypot(hh)
+        } else {
+            hw.min(hh)
+        };
+        Self {
+            center: node.center,
+            inner: inner.max(1e-6),
+            tips: Vec::new(),
+            widest: Vec::new(),
+        }
+    }
+
+    fn bucket(&self, t: Pt) -> usize {
+        let a = (t.1 - self.center.1)
+            .atan2(t.0 - self.center.0)
+            .to_degrees();
+        (a.rem_euclid(360.0) as usize).min(BUCKETS - 1)
+    }
+
+    fn add(&mut self, t: Pt, kind: u32, width: f64) {
+        let k = kind as usize;
+        if self.tips.len() <= k {
+            self.tips.resize_with(k + 1, || vec![Vec::new(); BUCKETS]);
+            self.widest.resize(k + 1, 0.0);
+        }
+        let b = self.bucket(t);
+        // A tip within 1px of a no-narrower same-kind one changes no clash
+        // check by more than that pixel; skipping it keeps crowded nodes fast.
+        let dup = self.tips[k][b]
+            .iter()
+            .any(|&(p, w)| w >= width && dist(p, t) < 1.0);
+        if !dup {
+            self.tips[k][b].push((t, width));
+        }
+        self.widest[k] = self.widest[k].max(width);
+    }
+
+    /// The first placed tip of another kind that `t` would land on, with
+    /// its marker width.
+    fn clash(&self, end: &RoundEnd, t: Pt) -> Option<(Pt, f64)> {
+        let b = self.bucket(t) as i64;
+        for (k, by_angle) in self.tips.iter().enumerate() {
+            if k as u32 == end.kind {
+                continue;
+            }
+            let clear = (self.widest[k] + end.width) / 2.0 + HEAD_MARGIN;
+            let reach = 2.0 * (clear / (2.0 * self.inner)).min(1.0).asin().to_degrees();
+            let span = (reach.ceil() as i64 + 1).min(BUCKETS as i64 / 2);
+            for step in 0..=span {
+                for b in [b + step, b - step] {
+                    let tips = &by_angle[b.rem_euclid(BUCKETS as i64) as usize];
+                    let hit = tips
+                        .iter()
+                        .find(|(p, w)| dist(*p, t) < (w + end.width) / 2.0 + HEAD_MARGIN);
+                    if let Some(&hit) = hit {
+                        return Some(hit);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// The nearest clear tip on the outline, turning in 1° steps on each side —
+/// away from `other`, the head it landed on, first on a tie — up to 90°.
+/// A step that lands on a head jumps straight past that head's blocked arc
+/// (still on whole degrees), so a crowded node costs a few checks, not 180.
+fn turned_clear(
+    end: &RoundEnd,
+    tip: Pt,
+    other: Pt,
+    clash: &dyn Fn(Pt) -> Option<(Pt, f64)>,
+) -> Option<Pt> {
     let c = end.node.center;
-    let (a0, ao) = (
-        (tip.1 - c.1).atan2(tip.0 - c.0),
-        (other.1 - c.1).atan2(other.0 - c.0),
-    );
-    let away = if (a0 - ao).sin() >= 0.0 { 1.0 } else { -1.0 };
-    (1..=MAX_TURN_DEG).find_map(|deg| {
-        [away, -away].into_iter().find_map(|side| {
-            let a = a0 + side * f64::from(deg).to_radians();
+    let angle = |p: Pt| (p.1 - c.1).atan2(p.0 - c.0);
+    let a0 = angle(tip);
+    let away = if (a0 - angle(other)).sin() >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let side = |s: f64| -> Option<(u32, Pt)> {
+        let mut deg = 1;
+        while deg <= MAX_TURN_DEG {
+            let a = a0 + s * f64::from(deg).to_radians();
             let t = clip_end((c.0 + a.cos() * 1e4, c.1 + a.sin() * 1e4), &end.node);
-            (!clashes(t)).then_some(t)
-        })
-    })
+            let Some((p, w)) = clash(t) else {
+                return Some((deg, t));
+            };
+            // p blocks the outline within this angle of itself (exact on a
+            // circle, near enough on a rhombus).
+            let r = dist(t, c).min(dist(p, c)).max(1e-6);
+            let clear = (w + end.width) / 2.0 + HEAD_MARGIN;
+            let blocked = 2.0 * (clear / (2.0 * r)).min(1.0).asin();
+            let ahead = (s * (angle(p) - a0)).to_degrees();
+            let ahead = (ahead + 180.0).rem_euclid(360.0) - 180.0;
+            let past = (ahead + blocked.to_degrees()).ceil().max(0.0) as u32;
+            deg = past.clamp(deg + 1, MAX_TURN_DEG + 1);
+        }
+        None
+    };
+    match (side(away), side(-away)) {
+        (Some((d1, t1)), Some((d2, t2))) => Some(if d1 <= d2 { t1 } else { t2 }),
+        (one, two) => one.or(two).map(|(_, t)| t),
+    }
 }
 
 /// Put the end's tip at `t`. A lead-in, if it has one, moves onto the line
@@ -124,11 +230,16 @@ fn move_tip(path: &mut EdgePath, end: &RoundEnd, at: usize, t: Pt) {
     path.ctrl[at] = t;
     if has_lead {
         let toward = path.ctrl[beyond];
-        let d = dist(toward, t).max(1e-9);
-        path.ctrl[lead_at] = (
-            t.0 + (toward.0 - t.0) / d * end.lead,
-            t.1 + (toward.1 - t.1) / d * end.lead,
-        );
+        let d = dist(toward, t);
+        if d > end.lead + 1.0 {
+            path.ctrl[lead_at] = (
+                t.0 + (toward.0 - t.0) / d * end.lead,
+                t.1 + (toward.1 - t.1) / d * end.lead,
+            );
+        } else {
+            // As `lead_in`: too close for a lead-in; the run is straight.
+            path.ctrl.remove(lead_at);
+        }
     }
     path.label = path.ctrl.clone();
 }

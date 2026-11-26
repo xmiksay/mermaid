@@ -130,3 +130,26 @@ fn graph_renders_are_deterministic() {
         assert_eq!(a, b, "{name}: two renders differ");
     }
 }
+
+/// One circle hub with 3000 mixed-kind edges into it (#402): the round-tip
+/// nudge must stay near-linear, not O(E²·180). Time-boxed generously for
+/// a debug build (~0.5s there; the quadratic nudge took tens of seconds).
+#[test]
+fn crowded_round_hub_renders_in_bounded_time() {
+    let path = format!(
+        "{}/tests/fixtures/perf/round-hub.mmd",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let t = std::time::Instant::now();
+        let svg = render(&src).map(|s| s.len());
+        let _ = tx.send((svg, t.elapsed()));
+    });
+    let (svg, took) = rx
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("render finished");
+    assert!(svg.expect("renders") > 0);
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+}
