@@ -40,31 +40,34 @@ drawing both use them.
     its dummy, leaving the node on the side it heads for.
 
   Each end is then clipped from its approach point: a rect is entered
-  square-on, so same-kind heads on one face coincide exactly. A circle or
-  rhombus end aims from its slot on the face line at the true centre, so its
-  head is radial; its approach point sits on that ray just past the lead-in,
-  never further across than the node itself reaches (`round_cross` in
-  `src/svg/flowchart/round.rs`). Where the run from its neighbouring control
-  point into that approach would cross another node, the round end drops its
-  approach and keeps the plain ray from the neighbour instead
-  (`clear_of_nodes`) — a single-end choice. Ends without an approach point
-  keep the plain clip from their neighbour.
+  square-on, so same-kind heads on one face coincide exactly. Ends without an
+  approach point keep the plain clip from their neighbour.
+- **Round ends** (circle family, rhombus; `src/svg/flowchart/round.rs`) take
+  no approach point and no face slot. As upstream, each is clipped on the ray
+  from its neighbouring control point toward the centre, so arrows spread
+  around the shape by where they come from instead of hooking into the top
+  arc; its lead-in lies on that same ray. Afterwards `nudge_round_tips`
+  turns an end that would land within both half-widths + 4 of an earlier,
+  different-kind end on the same node just far enough around the centre to
+  clear it (nearest angle first, up to 90°), its lead-in following onto the
+  line to its neighbour. Heads are placed before bare line ends, so a line
+  turns away from a head, never the reverse. Same-kind tips may coincide.
 - **Straight under the marker.** Each marked end gets one collinear lead-in
   point on its clip ray, marker reach × stroke width + 4px out from the face
   (`marker_reach` mirrors the marker defs). In a tight gap the bend moves
   toward an unmarked end to make room; a gap too tight for both lead-ins draws
   straight. Unmarked ends get no lead-in. The stroke width comes from
   `linkStyle` only when it is a finite number ≥ 0 (`EdgeIn::stroke`).
-- **Slots by kind** (`src/svg/flowchart/slots.rs`). Ends on one face of one
-  node are grouped by kind: the marker (arrow / circle / cross) or bare.
+- **Slots by kind** (`src/svg/flowchart/slots.rs`, rect-like nodes). Ends on
+  one face of one node are grouped by kind: the marker (arrow / circle / cross) or bare.
   Same-kind ends coincide, as upstream (fan-ins meet in one arrowhead).
   Different kinds sit side by side, centred on the face, neighbours half of
   each one's marker width + 4 apart, ordered by the mean cross coordinate
   their edges come from so they do not cross. Different kinds are never
   stacked, and no tip ever leaves its node: on a face too narrow the spacing
   is compressed as far as needed to keep every slot centre 4px inside the
-  face's corners (on a circle or rhombus, within 0.6 of its half-extent), so
-  markers wider than the face overlap rather than detach (`row`). For this,
+  face's corners, so markers wider than the face overlap rather than detach
+  (`row`). For this,
   a marker's width is capped at 1e4px, so an absurd `linkStyle`
   `stroke-width` cannot overflow the arithmetic. The offset moves the
   approach point, lead-in and clip together.

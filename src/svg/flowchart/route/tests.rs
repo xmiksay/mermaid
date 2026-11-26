@@ -1,4 +1,3 @@
-use super::super::round::round_cross;
 use super::*;
 use crate::parse::NodeShape;
 use crate::parse::{Diagram, FlowchartDiagram};
@@ -129,17 +128,17 @@ fn slot_offset_moves_rect_end_but_round_end_aims_at_centre() {
         "square-on in its slot"
     );
 
-    let mut e = edge_in(&d.edges[0], "1.5", vec![(0.0, 0.0), (0.0, 200.0)]);
+    // A round end takes no approach point: it is clipped on the ray from its
+    // neighbouring control point toward its centre, lead-in on that ray.
+    let mut e = edge_in(&d.edges[0], "1.5", vec![(0.0, 0.0), (60.0, 200.0)]);
     e.geom.1.shape = Some(NodeShape::Circle);
     let ap = approaches(&e);
-    let path = route_edge(e, &ap, [0.0, 11.0]);
-    let (tip, lead) = (
-        path.ctrl[path.ctrl.len() - 1],
-        path.ctrl[path.ctrl.len() - 2],
-    );
-    // Tip and lead-in on one ray through the centre (0, 200).
-    let cross = (lead.0 - tip.0) * (200.0 - tip.1) - (lead.1 - tip.1) * (0.0 - tip.0);
-    assert!(cross.abs() < 1e-9, "round end aims at the centre");
+    assert!(ap[1].is_none() && ap[0].is_some());
+    let path = route_edge(e, &ap, [0.0, 0.0]);
+    let n = path.ctrl.len();
+    let (from, lead, tip) = (path.ctrl[n - 3], path.ctrl[n - 2], path.ctrl[n - 1]);
+    let off_ray = |p: Pt| (p.0 - tip.0) * (200.0 - tip.1) - (p.1 - tip.1) * (60.0 - tip.0);
+    assert!(off_ray(lead).abs() < 1e-6 && off_ray(from).abs() < 1e-6);
 }
 
 #[test]
@@ -162,30 +161,6 @@ fn stroke_width_accepts_only_finite_non_negative_overrides() {
             "{bad}: thick default"
         );
     }
-}
-
-#[test]
-fn round_cross_lands_the_tip_on_the_slot_and_stays_bounded() {
-    let circle = EndClip {
-        center: (0.0, 0.0),
-        size: (60.0, 60.0),
-        shape: Some(NodeShape::Circle),
-    };
-    // Tip 6 across on a radius-30 circle, aimed from the face line 30 out:
-    // x = 6·30/√(900 − 36).
-    let x = round_cross(NodeShape::Circle, 6.0, &circle, 1);
-    assert!((x - 6.0 * 30.0 / 864f64.sqrt()).abs() < 1e-9);
-    // A far slot is held to 0.6 of the radius: x = 18·30/24.
-    assert_eq!(round_cross(NodeShape::Circle, 50.0, &circle, 1), 22.5);
-    assert_eq!(round_cross(NodeShape::Circle, -50.0, &circle, 1), -22.5);
-    let rhombus = EndClip {
-        center: (0.0, 0.0),
-        size: (40.0, 30.0),
-        shape: Some(NodeShape::Rhombus),
-    };
-    // Small rhombus: the 1/(1 − |off|/hc) blow-up stops at hc = 20.
-    assert_eq!(round_cross(NodeShape::Rhombus, 19.0, &rhombus, 1), 20.0);
-    assert_eq!(round_cross(NodeShape::Rhombus, 0.0, &rhombus, 1), 0.0);
 }
 
 #[test]

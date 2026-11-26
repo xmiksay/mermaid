@@ -9,8 +9,8 @@ use crate::svg::geometry::clip_polyline;
 use crate::svg::style::ResolvedStyle;
 
 use super::edges::{basis_control_points, clip_end, EdgeGeometry, EndClip};
-use super::round::{clear_of_nodes, is_round, round_cross};
-use super::slots::slot_offsets;
+use super::round::{is_round, nudge_round_tips, RoundEnd};
+use super::slots::{kind, marker_width, slot_offsets};
 
 pub(super) type Pt = (f64, f64);
 
@@ -135,21 +135,41 @@ pub(super) struct Approach {
 }
 
 /// Route every edge; `None` stays `None` (invisible or unresolved).
-/// `nodes` are every node's `(centre, size)`, the obstacles a round end's
-/// approach must not cross.
-pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, nodes: &[(Pt, Pt)]) -> Vec<Option<EdgePath>> {
+pub(super) fn route_all(ins: Vec<Option<EdgeIn>>) -> Vec<Option<EdgePath>> {
     let aps: Vec<[Option<Approach>; 2]> = ins
         .iter()
-        .map(|e| {
-            e.as_ref()
-                .map_or([None, None], |e| clear_of_nodes(e, approaches(e), nodes))
-        })
+        .map(|e| e.as_ref().map_or([None, None], approaches))
         .collect();
     let offsets = slot_offsets(&ins, &aps);
-    ins.into_iter()
+    let round: Vec<RoundEnd> = ins
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| Some((i, e.as_ref()?)))
+        .flat_map(|(i, e)| (0..2).filter_map(move |which| round_end(i, e, which)))
+        .collect();
+    let mut paths: Vec<Option<EdgePath>> = ins
+        .into_iter()
         .zip(aps.iter().zip(offsets))
         .map(|(e, (ap, off))| e.map(|e| route_edge(e, ap, off)))
-        .collect()
+        .collect();
+    nudge_round_tips(&round, &mut paths);
+    paths
+}
+
+/// End `which` of edge `i` when it lands on a round node.
+fn round_end<'a>(i: usize, e: &EdgeIn<'a>, which: usize) -> Option<RoundEnd<'a>> {
+    let node = e.node(which);
+    node.shape.filter(|&s| is_round(s))?;
+    Some(RoundEnd {
+        edge: i,
+        which,
+        id: if which == 0 { &e.edge.from } else { &e.edge.to },
+        node: *node,
+        kind: kind(e.head(which)),
+        width: (marker_width(e.head(which)) * e.stroke()).min(1e4),
+        lead: e.lead(which),
+        movable: e.edge.from != e.edge.to,
+    })
 }
 
 /// Each end's approach point. Ends in different ranks (forward or back
@@ -174,14 +194,15 @@ fn approaches(e: &EdgeIn) -> [Option<Approach>; 2] {
         return [None, None];
     };
     let dir = end.center_on(f) > start.center_on(f);
+    let square = |n: &EndClip| !n.shape.is_some_and(is_round);
     [
-        Some(Approach {
+        square(start).then_some(Approach {
             f,
             depth: mid,
             side: dir,
             from_cross: end.center_on(c),
         }),
-        Some(Approach {
+        square(end).then_some(Approach {
             f,
             depth: mid,
             side: !dir,
@@ -214,7 +235,7 @@ fn pair_depth(start: &EndClip, end: &EndClip, f: usize, leads: (f64, f64)) -> Op
 /// and for an unmarked end: with no head to square up it keeps the ray from
 /// its waypoint, which leaves the node on the side it is heading for.
 fn end_approach(node: &EndClip, toward: Pt, f: usize, c: usize, lead: f64) -> Option<Approach> {
-    if lead <= 0.0 {
+    if lead <= 0.0 || node.shape.is_some_and(is_round) {
         return None;
     }
     let (o, a) = (node.center_on(f), axes(toward)[f]);
@@ -263,14 +284,11 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         }
         off => off,
     };
-    // A slotted rect end keeps its square entry, so it aims at its own slot;
-    // round and rhombus ends always aim at the true centre.
+    // A slotted end aims at its own slot, so a rect is entered square-on.
     let aim = |which: usize| {
         let node = e.node(which);
         let mut center = node.center;
-        if !matches!(node.shape, Some(s) if is_round(s)) {
-            *axis_mut(&mut center, c) += off[which];
-        }
+        *axis_mut(&mut center, c) += off[which];
         EndClip {
             center,
             size: node.size,
@@ -278,64 +296,27 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
         }
     };
     let (aim_s, aim_t) = (aim(0), aim(1));
-    // A round end aims from its slot on the face line, so the tip lands on
-    // the slot with the head pointing at the centre; its approach point sits
-    // on that radial ray just past the lead-in (held within the node's cross
-    // extent), so the run under the marker stays straight.
-    let round_tip = |which: usize| -> Option<(Pt, Pt)> {
-        let (node, a) = (e.node(which), ap[which].as_ref()?);
-        let shape = node.shape.filter(|&s| is_round(s))?;
-        let mut q = node.center;
-        *axis_mut(&mut q, a.f) +=
-            (a.depth - node.center_on(a.f)).signum() * axes(node.size)[a.f] / 2.0;
-        *axis_mut(&mut q, c) += round_cross(shape, off[which], node, a.f);
-        let t = clip_end(q, node);
-        let (dx, dy) = (t.0 - node.center.0, t.1 - node.center.1);
-        Some((t, (dx / dx.hypot(dy), dy / dx.hypot(dy))))
-    };
-    let tips = [round_tip(0), round_tip(1)];
     let point = |which: usize| {
         ap[which].as_ref().map(|a| {
-            let node = e.node(which);
-            if let Some((t, u)) = tips[which] {
-                let r = e.lead(which) + 2.0;
-                let mut p = (t.0 + u.0 * r, t.1 + u.1 * r);
-                let hc = axes(node.size)[c] / 2.0;
-                let x = axes(p)[c] - node.center_on(c);
-                *axis_mut(&mut p, c) = node.center_on(c) + x.max(-hc).min(hc);
-                return p;
-            }
-            let mut p = node.center;
+            let mut p = e.node(which).center;
             *axis_mut(&mut p, a.f) = a.depth;
             *axis_mut(&mut p, c) += off[which];
             p
         })
     };
-    let (a_s, a_t) = (point(0), point(1));
     let mut inner: Vec<Pt> = Vec::new();
     if !aligned {
-        inner.extend(a_s);
+        inner.extend(point(0));
         inner.extend(&pts[1..pts.len() - 1]);
-        inner.extend(a_t);
+        inner.extend(point(1));
     }
-    // An end's tip, and the point its straight lead-in heads for: the next
-    // control point, or straight out from the centre for a round end.
-    let end = |which: usize, from: Pt| -> (Pt, Pt) {
-        match tips[which] {
-            Some((t, u)) => (t, (t.0 + u.0 * 1e3, t.1 + u.1 * 1e3)),
-            None => (
-                clip_end(from, if which == 0 { &aim_s } else { &aim_t }),
-                from,
-            ),
-        }
-    };
     let ctrl = match (inner.first(), inner.last()) {
         (Some(&first), Some(&last)) => {
-            let ((p_s, out_s), (p_t, out_t)) = (end(0, first), end(1, last));
+            let (p_s, p_t) = (clip_end(first, &aim_s), clip_end(last, &aim_t));
             let mut ctrl = vec![p_s];
-            ctrl.extend(lead_in(p_s, out_s, e.lead(0)));
+            ctrl.extend(lead_in(p_s, first, e.lead(0)));
             ctrl.extend(&inner);
-            ctrl.extend(lead_in(p_t, out_t, e.lead(1)));
+            ctrl.extend(lead_in(p_t, last, e.lead(1)));
             ctrl.push(p_t);
             ctrl
         }
