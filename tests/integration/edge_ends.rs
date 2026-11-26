@@ -115,6 +115,28 @@ fn td_fan_outer_edges_enter_top_faces() {
     }
 }
 
+/// A routed (multi-rank) edge enters square-on too, and its head coincides
+/// with the same-kind head from the node above.
+#[test]
+fn routed_edges_enter_top_faces_square_on() {
+    let svg = render(&fixture("long-side")).expect("renders");
+    for (to, above) in [("c1", "b1"), ("d1", "c1"), ("e1", "d1")] {
+        assert_vertical_entry(&svg, "Source node", to, false);
+        let (long, short) = (
+            edge_end(&svg, "Source node", to).1,
+            edge_end(&svg, above, to).1,
+        );
+        assert!(
+            dist(long, short) < 0.01,
+            "{to}: heads {long:?} / {short:?} do not coincide"
+        );
+    }
+}
+
+fn dist(a: Pt, b: Pt) -> f64 {
+    (a.0 - b.0).hypot(a.1 - b.1)
+}
+
 #[test]
 fn td_back_edges_enter_bottom_faces() {
     let svg = render(&fixture("td-back")).expect("renders");

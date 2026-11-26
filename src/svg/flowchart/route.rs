@@ -2,15 +2,16 @@
 //! in centre space and clipped to the end shapes last. Shared by the
 //! canvas-measuring pass and the drawing pass.
 
-use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge};
+use crate::parse::{EdgeCurve, EdgeHead, EdgeLine, FlowEdge, NodeShape};
+use crate::svg::builder::curve_basis_points;
 use crate::svg::style::ResolvedStyle;
 
 use super::edges::{clip_end, EdgeGeometry, EndClip};
+use super::slots::slot_offsets;
 
-type Pt = (f64, f64);
+pub(super) type Pt = (f64, f64);
 
-/// Below this cross-axis offset two ends are effectively aligned and the
-/// edge draws straight.
+/// Below this flow-axis offset two ends sit in one rank.
 const ALIGNED_EPS: f64 = 2.0;
 /// Clearance between an arrowhead's base and the point where the curve may
 /// start to turn.
@@ -33,97 +34,288 @@ impl EdgePath {
             p.1 += dy;
         }
     }
+
+    /// Points on the drawn curve (sampled for basis), what the canvas
+    /// measures so only a real overflow moves it.
+    pub(super) fn drawn_points(&self) -> Vec<Pt> {
+        match self.curve {
+            EdgeCurve::Linear | EdgeCurve::Step => self.ctrl.clone(),
+            _ => curve_basis_points(&self.ctrl),
+        }
+    }
 }
 
-/// Resolve an edge's drawn control points. `paired` marks a self-loop or one
-/// half of an opposite pair: those, cluster ends and linear/step curves keep
-/// the plain clip-first route.
-pub(super) fn route_edge(
-    (start, end, pts): EdgeGeometry,
-    edge: &FlowEdge,
-    curve: EdgeCurve,
-    style: ResolvedStyle,
-    horizontal: bool,
-    paired: bool,
-) -> EdgePath {
-    let plain = paired
-        || start.shape.is_none()
-        || end.shape.is_none()
-        || matches!(curve, EdgeCurve::Linear | EdgeCurve::Step);
-    if plain {
-        let label = clip_edge_polyline(&pts, &start, &end);
-        let ctrl = match curve {
+/// One edge as the router needs it. `paired` marks a self-loop or one half of
+/// an opposite pair: those, cluster ends and linear/step curves keep the plain
+/// clip-first route.
+pub(super) struct EdgeIn<'a> {
+    pub(super) geom: EdgeGeometry,
+    pub(super) edge: &'a FlowEdge,
+    pub(super) curve: EdgeCurve,
+    pub(super) style: ResolvedStyle,
+    pub(super) horizontal: bool,
+    pub(super) paired: bool,
+}
+
+impl EdgeIn<'_> {
+    fn plain(&self) -> bool {
+        let (start, end, _) = &self.geom;
+        self.paired
+            || start.shape.is_none()
+            || end.shape.is_none()
+            || matches!(self.curve, EdgeCurve::Linear | EdgeCurve::Step)
+    }
+
+    /// The flow and cross axis indices.
+    pub(super) fn axes(&self) -> (usize, usize) {
+        if self.horizontal {
+            (0, 1)
+        } else {
+            (1, 0)
+        }
+    }
+
+    /// The marker at end `which` (0 start, 1 end).
+    pub(super) fn head(&self, which: usize) -> EdgeHead {
+        [self.edge.tail, self.edge.head][which]
+    }
+
+    pub(super) fn node(&self, which: usize) -> &EndClip {
+        if which == 0 {
+            &self.geom.0
+        } else {
+            &self.geom.1
+        }
+    }
+
+    fn lead(&self, which: usize) -> f64 {
+        marker_reach(self.head(which)).map_or(0.0, |r| r * self.stroke() + LEAD_MARGIN)
+    }
+
+    /// The stroke width: a usable `linkStyle` override, else the line kind's.
+    pub(super) fn stroke(&self) -> f64 {
+        let default = if self.edge.line == EdgeLine::Thick {
+            3.0
+        } else {
+            1.5
+        };
+        self.style
+            .stroke_width
+            .as_deref()
+            .and_then(|w| w.trim().parse::<f64>().ok())
+            .filter(|w| w.is_finite() && *w >= 0.0)
+            .unwrap_or(default)
+    }
+}
+
+/// One end's square-on approach point, before slotting: its depth on the flow
+/// axis `f`, the face it enters (`side`: the face toward +`f`), and the cross
+/// coordinate its edge comes from (orders the slots on a face).
+pub(super) struct Approach {
+    pub(super) f: usize,
+    pub(super) depth: f64,
+    pub(super) side: bool,
+    pub(super) from_cross: f64,
+}
+
+/// Route every edge; `None` stays `None` (invisible or unresolved).
+pub(super) fn route_all(ins: Vec<Option<EdgeIn>>) -> Vec<Option<EdgePath>> {
+    let aps: Vec<[Option<Approach>; 2]> = ins
+        .iter()
+        .map(|e| e.as_ref().map_or([None, None], approaches))
+        .collect();
+    let offsets = slot_offsets(&ins, &aps);
+    ins.into_iter()
+        .zip(aps.iter().zip(offsets))
+        .map(|(e, (ap, off))| e.map(|e| route_edge(e, ap, off)))
+        .collect()
+}
+
+/// Each end's approach point. Ends in different ranks (forward or back
+/// edges) approach across the flow axis, so they meet their flow face
+/// square-on however wide the boxes are; the axis comes from the rank
+/// relation, never from the geometry. Ends in one rank join straight.
+fn approaches(e: &EdgeIn) -> [Option<Approach>; 2] {
+    if e.plain() {
+        return [None, None];
+    }
+    let (start, end, pts) = &e.geom;
+    let (f, c) = e.axes();
+    let leads = (e.lead(0), e.lead(1));
+    let n = pts.len();
+    if n > 2 {
+        return [
+            end_approach(start, pts[1], f, c, leads.0),
+            end_approach(end, pts[n - 2], f, c, leads.1),
+        ];
+    }
+    let Some(mid) = pair_depth(start, end, f, leads) else {
+        return [None, None];
+    };
+    let dir = end.center_on(f) > start.center_on(f);
+    [
+        Some(Approach {
+            f,
+            depth: mid,
+            side: dir,
+            from_cross: end.center_on(c),
+        }),
+        Some(Approach {
+            f,
+            depth: mid,
+            side: !dir,
+            from_cross: start.center_on(c),
+        }),
+    ]
+}
+
+/// The flow-axis depth of a two-point edge's S bend: mid-way through the gap
+/// between the facing faces, moved toward an unmarked end when that leaves
+/// each marked end room for its straight lead-in (`leads`). `None` for ends in
+/// one rank or a gap too tight for both lead-ins: those draw straight, aimed
+/// at the centres, which is straight under any marker.
+fn pair_depth(start: &EndClip, end: &EndClip, f: usize, leads: (f64, f64)) -> Option<f64> {
+    let (s, t) = (start.center_on(f), end.center_on(f));
+    if (t - s).abs() <= ALIGNED_EPS {
+        return None;
+    }
+    let dir = (t - s).signum();
+    let lo = s + dir * axes(start.size)[f] / 2.0;
+    let gap = (t - dir * axes(end.size)[f] / 2.0 - lo) * dir;
+    let (min_s, min_t) = (leads.0 + 2.0, leads.1 + 2.0);
+    (gap >= min_s + min_t).then(|| lo + dir * (gap / 2.0).max(min_s).min(gap - min_t))
+}
+
+/// A routed end's approach point, square off its face just past the lead-in.
+/// Kept that shallow (not mid-way to the waypoint) because a routed edge's
+/// last waypoint can sit far off to the side: a deep square run then swings
+/// the curve through neighbouring nodes. `None` when the waypoint is closer.
+fn end_approach(node: &EndClip, toward: Pt, f: usize, c: usize, lead: f64) -> Option<Approach> {
+    let (o, a) = (node.center_on(f), axes(toward)[f]);
+    let dir = (a - o).signum();
+    let face = o + dir * axes(node.size)[f] / 2.0;
+    let gap = (a - face) * dir;
+    let d = lead + 2.0;
+    (d + 1.0 < gap).then(|| Approach {
+        f,
+        depth: face + dir * d,
+        side: dir > 0.0,
+        from_cross: axes(toward)[c],
+    })
+}
+
+/// Build an edge's control points: approach points (moved across by the
+/// end's slot `off`), the routed waypoints, one straight lead-in per marked
+/// end, then the clip onto each end shape.
+fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath {
+    let (start, end, pts) = &e.geom;
+    if e.plain() {
+        let label = clip_edge_polyline(pts, start, end);
+        let ctrl = match e.curve {
             EdgeCurve::Linear | EdgeCurve::Step => label.clone(),
             _ => basis_control_points(&label),
         };
         return EdgePath {
             ctrl,
             label,
-            curve,
-            style,
+            curve: e.curve,
+            style: e.style,
         };
     }
-
-    let width = stroke_width(edge, &style);
-    let lead = |head: EdgeHead| marker_reach(head).map_or(0.0, |r| r * width + LEAD_MARGIN);
-    let leads = (lead(edge.tail), lead(edge.head));
-    let inner: Vec<Pt> = if pts.len() == 2 {
-        s_points(&start, &end, horizontal, leads)
-    } else {
-        pts[1..pts.len() - 1].to_vec()
+    let c = e.axes().1;
+    // A slotted rect end keeps its square entry, so it aims at its own slot;
+    // round and rhombus ends always aim at the true centre.
+    let aim = |which: usize| {
+        let node = e.node(which);
+        let mut center = node.center;
+        if !matches!(node.shape, Some(s) if is_round(s)) {
+            *axis_mut(&mut center, c) += off[which];
+        }
+        EndClip {
+            center,
+            size: node.size,
+            shape: node.shape,
+        }
     };
+    let (aim_s, aim_t) = (aim(0), aim(1));
+    let point = |which: usize| {
+        ap[which].as_ref().map(|a| {
+            let node = e.node(which);
+            let mut p = node.center;
+            // A round end's ray converges on the centre, so its approach point
+            // moves out by depth / radius to land the tip about a slot over.
+            let scale = match node.shape {
+                Some(s) if is_round(s) => {
+                    (a.depth - node.center_on(a.f)).abs() / (axes(node.size)[a.f] / 2.0)
+                }
+                _ => 1.0,
+            };
+            *axis_mut(&mut p, a.f) = a.depth;
+            *axis_mut(&mut p, c) += off[which] * scale;
+            p
+        })
+    };
+    let (a_s, a_t) = (point(0), point(1));
+    // Ends that line up across the gap join with a plain straight line.
+    let aligned = matches!((a_s, a_t), (Some(p), Some(q))
+        if pts.len() == 2 && (axes(p)[c] - axes(q)[c]).abs() < ALIGNED_EPS);
+    let mut inner: Vec<Pt> = Vec::new();
+    if !aligned {
+        inner.extend(a_s);
+        inner.extend(&pts[1..pts.len() - 1]);
+        inner.extend(a_t);
+    }
     let ctrl = match (inner.first(), inner.last()) {
         (Some(&first), Some(&last)) => {
-            let p_s = clip_end(first, &start);
-            let p_t = clip_end(last, &end);
+            let p_s = clip_end(first, &aim_s);
+            let p_t = clip_end(last, &aim_t);
             let mut ctrl = vec![p_s];
-            ctrl.extend(lead_in(p_s, first, leads.0));
+            ctrl.extend(lead_in(p_s, first, e.lead(0)));
             ctrl.extend(&inner);
-            ctrl.extend(lead_in(p_t, last, leads.1));
+            ctrl.extend(lead_in(p_t, last, e.lead(1)));
             ctrl.push(p_t);
             ctrl
         }
-        _ => vec![clip_end(end.center, &start), clip_end(start.center, &end)],
+        _ => vec![
+            clip_end(aim_t.center, &aim_s),
+            clip_end(aim_s.center, &aim_t),
+        ],
     };
     EdgePath {
         label: ctrl.clone(),
         ctrl,
-        curve,
-        style,
+        curve: e.curve,
+        style: e.style,
     }
 }
 
-/// The two S-bend points `[A_s, A_t]` of a two-point edge. The bend axis
-/// comes from the rank relation, not the geometry: ends in different ranks
-/// (a forward or a back edge) bend across the flow axis, so each end meets
-/// its flow face square-on however wide the boxes are. Ends in one rank share
-/// the flow coordinate and join straight between their side faces.
-///
-/// The bend sits mid-way through the gap between the two facing faces, moved
-/// toward an unmarked end when that is what leaves each marked end room for
-/// its straight lead-in (`leads`, start and end). A gap too tight for both
-/// draws straight, aimed at the centres, which is straight under any marker.
-fn s_points(start: &EndClip, end: &EndClip, horizontal: bool, leads: (f64, f64)) -> Vec<Pt> {
-    let (f, c) = if horizontal { (0, 1) } else { (1, 0) };
-    let (s, t) = (axes(start.center), axes(end.center));
-    if (t[f] - s[f]).abs() <= ALIGNED_EPS || (t[c] - s[c]).abs() < ALIGNED_EPS {
-        return Vec::new();
+impl EndClip {
+    pub(super) fn center_on(&self, axis: usize) -> f64 {
+        axes(self.center)[axis]
     }
-    let (sh, th) = (axes(start.size)[f] / 2.0, axes(end.size)[f] / 2.0);
-    let dir = (t[f] - s[f]).signum();
-    let lo = s[f] + dir * sh;
-    let gap = (t[f] - dir * th - lo) * dir;
-    let (min_s, min_t) = (leads.0 + 2.0, leads.1 + 2.0);
-    if gap < min_s + min_t {
-        return Vec::new();
-    }
-    let mid = lo + dir * (gap / 2.0).clamp(min_s, gap - min_t);
-    let at = |cross: f64| if f == 0 { (mid, cross) } else { (cross, mid) };
-    vec![at(s[c]), at(t[c])]
 }
 
-fn axes(p: Pt) -> [f64; 2] {
+pub(super) fn is_round(shape: NodeShape) -> bool {
+    matches!(
+        shape,
+        NodeShape::Circle
+            | NodeShape::DoubleCircle
+            | NodeShape::FilledCircle
+            | NodeShape::CrossedCircle
+            | NodeShape::Rhombus
+    )
+}
+
+pub(super) fn axes(p: Pt) -> [f64; 2] {
     [p.0, p.1]
+}
+
+fn axis_mut(p: &mut Pt, axis: usize) -> &mut f64 {
+    if axis == 0 {
+        &mut p.0
+    } else {
+        &mut p.1
+    }
 }
 
 /// A point `len` out from the face point `face` toward `toward`, so the last
@@ -145,20 +337,6 @@ fn marker_reach(head: EdgeHead) -> Option<f64> {
         EdgeHead::Cross => Some(5.0),
         _ => None,
     }
-}
-
-/// The edge's stroke width: a `linkStyle` override, else the line kind's.
-fn stroke_width(edge: &FlowEdge, style: &ResolvedStyle) -> f64 {
-    let default = if edge.line == EdgeLine::Thick {
-        3.0
-    } else {
-        1.5
-    };
-    style
-        .stroke_width
-        .as_deref()
-        .and_then(|w| w.trim().parse().ok())
-        .unwrap_or(default)
 }
 
 /// Clips a waypoint polyline's first/last segment to each endpoint's shape.
@@ -197,114 +375,4 @@ fn basis_control_points(pts: &[Pt]) -> Vec<Pt> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parse::NodeShape;
-
-    const NO_LEADS: (f64, f64) = (0.0, 0.0);
-
-    fn rect(center: Pt, size: Pt) -> EndClip {
-        EndClip {
-            center,
-            size,
-            shape: Some(NodeShape::Rect),
-        }
-    }
-
-    #[test]
-    fn wide_boxes_in_later_rank_bend_on_flow_axis() {
-        // dx > dy, but the ranks differ: the S must bend vertically.
-        let (s, t) = (
-            rect((0.0, 0.0), (300.0, 40.0)),
-            rect((205.0, 125.0), (200.0, 40.0)),
-        );
-        assert_eq!(
-            s_points(&s, &t, false, NO_LEADS),
-            vec![(0.0, 62.5), (205.0, 62.5)]
-        );
-    }
-
-    #[test]
-    fn same_rank_and_aligned_ends_draw_straight() {
-        let s = rect((0.0, 0.0), (60.0, 40.0));
-        assert!(s_points(&s, &rect((200.0, 1.0), (60.0, 40.0)), false, NO_LEADS).is_empty());
-        assert!(s_points(&s, &rect((1.0, 200.0), (60.0, 40.0)), false, NO_LEADS).is_empty());
-    }
-
-    #[test]
-    fn horizontal_flow_bends_on_x() {
-        let (s, t) = (
-            rect((0.0, 0.0), (60.0, 40.0)),
-            rect((200.0, 100.0), (60.0, 40.0)),
-        );
-        assert_eq!(
-            s_points(&s, &t, true, NO_LEADS),
-            vec![(100.0, 0.0), (100.0, 100.0)]
-        );
-    }
-
-    #[test]
-    fn back_edge_bends_between_opposite_faces() {
-        let (s, t) = (
-            rect((100.0, 200.0), (60.0, 40.0)),
-            rect((0.0, 0.0), (60.0, 40.0)),
-        );
-        assert_eq!(
-            s_points(&s, &t, false, NO_LEADS),
-            vec![(100.0, 100.0), (0.0, 100.0)]
-        );
-    }
-
-    #[test]
-    fn overlapping_faces_draw_straight() {
-        let (s, t) = (
-            rect((0.0, 0.0), (60.0, 200.0)),
-            rect((100.0, 90.0), (60.0, 40.0)),
-        );
-        assert!(s_points(&s, &t, false, NO_LEADS).is_empty());
-    }
-
-    #[test]
-    fn tight_gap_moves_the_bend_off_the_marked_end() {
-        // A 43px gap: the mid-gap bend would leave the arrow 21.5px, under
-        // its 22px lead-in, so the bend moves toward the unmarked source.
-        let (s, t) = (
-            rect((0.0, 0.0), (60.0, 40.0)),
-            rect((50.0, 83.0), (60.0, 40.0)),
-        );
-        assert_eq!(
-            s_points(&s, &t, false, (0.0, 22.0)),
-            vec![(0.0, 39.0), (50.0, 39.0)]
-        );
-        assert_eq!(
-            s_points(&s, &t, false, NO_LEADS),
-            vec![(0.0, 41.5), (50.0, 41.5)]
-        );
-        // Too tight for both leads: straight.
-        assert!(s_points(&s, &t, false, (22.0, 22.0)).is_empty());
-    }
-
-    #[test]
-    fn lead_in_sits_on_the_clip_ray() {
-        assert_eq!(lead_in((0.0, 0.0), (0.0, -40.0), 22.0), Some((0.0, -22.0)));
-        assert_eq!(lead_in((0.0, 0.0), (0.0, -20.0), 22.0), None);
-        assert_eq!(lead_in((0.0, 0.0), (0.0, -40.0), 0.0), None, "unmarked end");
-    }
-
-    #[test]
-    fn stroke_width_reads_link_style_override() {
-        let crate::parse::Diagram::Flowchart(d) =
-            crate::parse::parse("flowchart TD\na ==> b").expect("parses")
-        else {
-            panic!("expected flowchart");
-        };
-        let edge = &d.edges[0];
-        let none = crate::svg::style::resolve_edge_style(&Vec::new(), None);
-        assert_eq!(stroke_width(edge, &none), 3.0, "thick default");
-        let style = crate::svg::style::resolve_edge_style(
-            &vec![("stroke-width".into(), "4px".into())],
-            None,
-        );
-        assert_eq!(stroke_width(edge, &style), 4.0);
-    }
-}
+mod tests;

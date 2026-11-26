@@ -1,0 +1,11 @@
+flowchart TD
+  Top[Top] --> In1
+  subgraph G [Local LR]
+    direction LR
+    In1[In one] --> In2{In two} --> In3((In three))
+  end
+  In3 --> Bottom[Bottom]
+  Bottom --> Top
+  Bottom --> In1
+  In2 --> Top
+  Bottom --> G

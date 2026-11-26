@@ -1,0 +1,10 @@
+flowchart BT
+  S((start)) --> D{Is it wide enough to matter?}
+  D -->|yes| W([stadium wide target node])
+  D -->|no| C((c))
+  W --o X[Rect x]
+  C --x X
+  X <--> S
+  W ==> S
+  D --> D2{d2}
+  D2 --> S

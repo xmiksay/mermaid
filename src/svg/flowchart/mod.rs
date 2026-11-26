@@ -15,11 +15,12 @@ mod edges;
 mod nodes;
 mod route;
 mod shapes;
+mod slots;
 
 use directions::*;
 use edges::*;
 use nodes::*;
-use route::{route_edge, EdgePath};
+use route::{route_all, EdgeIn, EdgePath};
 
 pub(super) const CHAR_W: f64 = 7.5;
 pub(super) const LINE_H: f64 = 20.0;
@@ -150,9 +151,9 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         min_y = min_y.min(by0);
         max_y = max_y.max(by1);
     }
-    // The basis curve stays inside its control points' hull, so measuring
-    // those keeps every drawn edge on the canvas.
-    for &(x, y) in paths.iter().flatten().flat_map(|p| &p.ctrl) {
+    // Measure the drawn curves, not their control points, so the canvas
+    // only moves for an edge that really overflows.
+    for (x, y) in paths.iter().flatten().flat_map(|p| p.drawn_points()) {
         min_x = min_x.min(x);
         max_x = max_x.max(x);
         min_y = min_y.min(y);
@@ -246,7 +247,8 @@ fn route_edges(
     edge_pts: &HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
 ) -> Vec<Option<EdgePath>> {
     let axes = local_axes(d);
-    d.edges
+    let ins = d
+        .edges
         .iter()
         .enumerate()
         .map(|(ei, fedge)| {
@@ -271,9 +273,17 @@ fn route_edges(
                 _ => false,
             };
             let horizontal = edge_horizontal(&axes, d.direction, &fedge.from, &fedge.to);
-            Some(route_edge(geom, fedge, curve, style, horizontal, paired))
+            Some(EdgeIn {
+                geom,
+                edge: fedge,
+                curve,
+                style,
+                horizontal,
+                paired,
+            })
         })
-        .collect()
+        .collect();
+    route_all(ins)
 }
 
 #[cfg(test)]
