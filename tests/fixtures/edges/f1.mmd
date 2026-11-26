@@ -1,0 +1,16 @@
+flowchart BT
+  src((Source)) -->|alpha path| t1[Target one]
+  src -->|beta path| t2[Target two]
+  src -->|gamma| t3{Decide}
+  src -->|delta path long| t4[Target four]
+  src -->|eps| t5((five))
+  t1 -->|again| t3
+  t1 -->|again| t3
+  subgraph side [Side lane]
+    direction RL
+    s1[Side A] --> s2[Side B] --> s3[Side C]
+  end
+  t4 --> s1
+  s3 -->|back home| src
+  t2 -.-> t5
+  t2 ==> t4

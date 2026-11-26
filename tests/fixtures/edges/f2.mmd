@@ -1,0 +1,15 @@
+classDiagram
+  direction RL
+  class Order
+  Order "1" *-- "many" LineItem : contains
+  Order o-- Customer : placed by
+  Order --> Payment : paid with
+  Order ..> Invoice : produces
+  Order <|-- RushOrder
+  Order <|-- GiftOrder
+  Order -- Shipment : ships as
+  Order .. Coupon : discounted by
+  Payment <|-- CardPayment
+  Payment <|-- BankPayment
+  Customer "1" --> "*" Address : lives at
+  Shipment --> Address : to

@@ -1,0 +1,6 @@
+erDiagram
+  USER ||--o{ ORDER : places
+  USER ||--o{ ORDER : approves
+  USER |o--o{ ORDER : cancels
+  ORDER }o--|| USER : "assigned to"
+  USER ||--|| PROFILE : has

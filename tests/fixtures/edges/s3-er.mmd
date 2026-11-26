@@ -1,0 +1,14 @@
+erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    CUSTOMER ||--|{ ADDRESS : has
+    CUSTOMER }|..|{ ACCOUNT : uses
+    CUSTOMER ||--o| PROFILE : owns
+    CUSTOMER |o--o{ TICKET : opens
+    ORDER ||--|{ LINE : contains
+    ORDER }o--|| ADDRESS : ships_to
+    LINE }o--|| PRODUCT : refs
+    PRODUCT }|--|| CATEGORY : in
+    TICKET }o--|| AGENT : assigned
+    AGENT ||--o{ ORDER : reviews
+    ACCOUNT ||--o{ PAYMENT : makes
+    PAYMENT }o--|| ORDER : settles

@@ -30,7 +30,7 @@ src/
 ├── svg/             Diagram AST → SVG string
 │   ├── mod.rs       render*/render_diagram* dispatchers, RenderError, pub Theme
 │   ├── builder/    string-based SVG writer (escape, fnum, SvgBuilder, def_arrow_marker, curves, text)
-│   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus) + polyline_midpoint
+│   ├── geometry.rs  shared edge-clip (clip_rect/circle/rhombus), polyline_midpoint, fit_edges (viewBox)
 │   ├── color.rs     readable_text_color: contrast-aware label color for filled shapes
 │   ├── label.rs     decode_label: `#…;` entity codes (markdown emphasis → markup.rs)
 │   ├── markup.rs    inline-HTML labels → styled tspans (b/i/u/span/a); strip_tags
@@ -133,6 +133,19 @@ per `SAMPLES` entry in `gallery_build.rs` — one per primary diagram kind
 `architecture.svg`, `kanban.svg`, `treemap.svg`, `zenuml.svg`), plus one
 nested `<kind>/NN-slug.svg` per secondary sample (e.g.
 `flowchart/02-nested-subgraphs.svg`).
+
+Edge-geometry sweeps (#402) live in `tests/integration/edge_ends.rs` and
+`tests/integration/edge_canvas.rs`, reading SVGs back through
+`tests/integration/svg_read.rs`. They run over the repro fixtures in
+`tests/fixtures/edges/*.mmd` plus the graph-shaped gallery samples: flowchart
+ends meet faces by rank relation and run straight under every marker, no edge
+leaves the viewBox (flowchart/state/class/ER/requirement), output is
+deterministic, and two baselines captured before #402 —
+`baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
+one translation) and `baseline-counts.txt` (flowchart edge-through-node
+crossings and label collisions, which may only drop) — guard against
+regressions. `EDGE_BASELINE_WRITE=1 make test-integration` rewrites both after
+an intended change.
 
 ## Themes — internal contract
 
@@ -244,6 +257,12 @@ effective theme. `Theme::responsive` (default `true`) is cleared by
 - **Output is responsive**: `SvgBuilder::finish()` emits `width="100%"` +
   `style="max-width: {w}px;"` + `viewBox` and **no fixed height** (upstream
   shape). Tests must not assert a root `height="…"`.
+- **The canvas includes edges** in flowchart, state, class, ER and
+  requirement: a basis curve stays inside its control points' hull, so the
+  routed/control points are measured. Flowchart folds them into its
+  measure-then-shift pass; the other four call `geometry::fit_edges` after
+  their own sizing, which shifts the drawing / grows the canvas only on a side
+  where an edge would leave it, padded to the renderer's canvas padding.
 - **Label text is decoded** in `SvgBuilder::text()` via `decode_label`
   (`src/svg/label.rs`), which strips KaTeX `$$…$$` math fences (`strip_math`:
   `$$x^2$$` → `x^2` — full KaTeX layout is out of scope, so the raw delimiters

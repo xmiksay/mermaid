@@ -1,0 +1,24 @@
+flowchart TD
+    internet["Internet"]
+    subgraph k8s["Kubernetes kubeadm 1.37"]
+        cp["k8s-cp-1: control plane, etcd, Traefik"]
+        w1["k8s-worker-1: workloady"]
+        w2["k8s-worker-2: workloady"]
+    end
+    runner["forgejo-runner VM"]
+    pg["postgres VM"]
+    rp["redpanda VM"]
+    bao["openbao VM"]
+    garage["garage VM"]
+    git["git.sc-l.eu, později Forgejo v clusteru"]
+    internet -->|"80, 443, 2222"| cp
+    cp --> w1
+    cp --> w2
+    w1 --> pg
+    w1 --> rp
+    w1 --> bao
+    w1 --> garage
+    w2 --> pg
+    w2 --> rp
+    runner --> cp
+    w1 -->|"ArgoCD čte manifesty"| git

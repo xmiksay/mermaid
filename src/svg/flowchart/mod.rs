@@ -13,11 +13,13 @@ use super::theme::Theme;
 mod directions;
 mod edges;
 mod nodes;
+mod route;
 mod shapes;
 
 use directions::*;
 use edges::*;
 use nodes::*;
+use route::{route_edge, EdgePath};
 
 pub(super) const CHAR_W: f64 = 7.5;
 pub(super) const LINE_H: f64 = 20.0;
@@ -116,33 +118,20 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     // at `CANVAS_PAD` before the canvas is created — this is what keeps
     // negative-coordinate content (issue: subgraph/label clipping) from ever
     // reaching the SVG.
-    let measured_slots: Vec<super::label_layout::LabelSlot> = d
-        .edges
-        .iter()
-        .filter(|e| e.line != EdgeLine::Invisible)
-        .filter_map(|fedge| {
-            let (start, end, pts) = resolve_edge_geometry(
-                fedge,
-                &id_to_u32,
-                &d.nodes,
-                &node_sizes,
-                &pos,
-                &boxes,
-                &edge_pts,
-            )?;
-            let label = fedge.label.as_ref()?;
-            let clipped = clip_edge_polyline(&pts, &start, &end);
-            if clipped.is_empty() {
-                return None;
-            }
+    let mut paths = route_edges(d, &id_to_u32, &node_sizes, &pos, &boxes, &edge_pts);
+    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
+    let mut labels: Vec<&str> = Vec::new();
+    for (fedge, path) in d.edges.iter().zip(&paths) {
+        if let (Some(label), Some(path)) = (&fedge.label, path) {
             let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
-            Some(super::label_layout::LabelSlot {
-                polyline: clipped,
+            label_slots.push(super::label_layout::LabelSlot {
+                polyline: path.label.clone(),
                 size: (w, 18.0),
-            })
-        })
-        .collect();
-    let measured_label_pos = super::label_layout::layout_edge_labels(&measured_slots);
+            });
+            labels.push(label);
+        }
+    }
+    let mut label_pos = super::label_layout::layout_edge_labels(&label_slots);
 
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -161,7 +150,15 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         min_y = min_y.min(by0);
         max_y = max_y.max(by1);
     }
-    for (slot, &(cx, cy)) in measured_slots.iter().zip(&measured_label_pos) {
+    // The basis curve stays inside its control points' hull, so measuring
+    // those keeps every drawn edge on the canvas.
+    for &(x, y) in paths.iter().flatten().flat_map(|p| &p.ctrl) {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    for (slot, &(cx, cy)) in label_slots.iter().zip(&label_pos) {
         let (w, h) = slot.size;
         min_x = min_x.min(cx - w / 2.0);
         max_x = max_x.max(cx + w / 2.0);
@@ -178,11 +175,12 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
         v.0 += shift_x;
         v.1 += shift_y;
     }
-    for pts in edge_pts.values_mut() {
-        for p in pts.iter_mut() {
-            p.0 += shift_x;
-            p.1 += shift_y;
-        }
+    for path in paths.iter_mut().flatten() {
+        path.shift(shift_x, shift_y);
+    }
+    for p in &mut label_pos {
+        p.0 += shift_x;
+        p.1 += shift_y;
     }
     for b in boxes.values_mut() {
         b.0 += shift_x;
@@ -217,56 +215,13 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     // Subgraph frames (drawn first so they sit under nodes/edges).
     draw_subgraphs(&mut svg, d, &boxes, theme);
 
-    // Edges: draw every path first, collecting each labeled edge's clipped
-    // polyline, then resolve all label positions in one pass so two unrelated
-    // edges whose labels would collide land apart instead of overlapping.
-    let mut label_slots: Vec<super::label_layout::LabelSlot> = Vec::new();
-    let mut labels: Vec<&str> = Vec::new();
-    for (ei, fedge) in d.edges.iter().enumerate() {
-        let edge_style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
-        // Curve precedence: per-edge `@{ curve }`, then `linkStyle N interpolate`,
-        // then `linkStyle default interpolate`, then the `config.flowchart.curve`
-        // diagram default, else the default basis.
-        let curve = fedge
-            .curve
-            .or_else(|| d.edge_interpolate.get(&ei).copied())
-            .or(d.default_interpolate)
-            .or(d.config_curve)
-            .unwrap_or_default();
-        let Some((start, end, pts)) = resolve_edge_geometry(
-            fedge,
-            &id_to_u32,
-            &d.nodes,
-            &node_sizes,
-            &pos,
-            &boxes,
-            &edge_pts,
-        ) else {
-            continue;
-        };
-        let clipped = draw_edge(
-            &mut svg,
-            &pts,
-            fedge,
-            curve,
-            &edge_style,
-            &start,
-            &end,
-            theme,
-        );
-        if let Some(label) = &fedge.label {
-            if !clipped.is_empty() {
-                let w = crate::svg::metrics::text_width(label, 7.0, theme.font_size) + 8.0;
-                label_slots.push(super::label_layout::LabelSlot {
-                    polyline: clipped,
-                    size: (w, 18.0),
-                });
-                labels.push(label);
-            }
+    // Edges first, then their labels on top.
+    for (fedge, path) in d.edges.iter().zip(&paths) {
+        if let Some(path) = path {
+            draw_edge(&mut svg, path, fedge, theme);
         }
     }
-    let label_positions = super::label_layout::layout_edge_labels(&label_slots);
-    for (pos, text) in label_positions.into_iter().zip(labels) {
+    for (pos, text) in label_pos.into_iter().zip(labels) {
         crate::svg::label::draw_edge_label(&mut svg, pos, text, theme);
     }
 
@@ -278,6 +233,47 @@ pub(crate) fn render(d: &FlowchartDiagram, theme: &Theme) -> String {
     }
 
     svg.finish()
+}
+
+/// Resolve every edge's drawn geometry once, for both the canvas measurement
+/// and the drawing; `None` for an invisible link or an unknown endpoint.
+fn route_edges(
+    d: &FlowchartDiagram,
+    id_to_u32: &HashMap<String, NodeId>,
+    node_sizes: &[(f64, f64)],
+    pos: &HashMap<NodeId, (f64, f64)>,
+    boxes: &HashMap<String, (f64, f64, f64, f64)>,
+    edge_pts: &HashMap<(NodeId, NodeId), Vec<(f64, f64)>>,
+) -> Vec<Option<EdgePath>> {
+    let axes = local_axes(d);
+    d.edges
+        .iter()
+        .enumerate()
+        .map(|(ei, fedge)| {
+            if fedge.line == EdgeLine::Invisible {
+                return None;
+            }
+            let geom = resolve_edge_geometry(
+                fedge, id_to_u32, &d.nodes, node_sizes, pos, boxes, edge_pts,
+            )?;
+            let style = resolve_edge_style(&d.link_style_default, d.edge_styles.get(&ei));
+            // Curve precedence: per-edge `@{ curve }`, then `linkStyle N
+            // interpolate`, then `linkStyle default interpolate`, then the
+            // `config.flowchart.curve` diagram default, else basis.
+            let curve = fedge
+                .curve
+                .or_else(|| d.edge_interpolate.get(&ei).copied())
+                .or(d.default_interpolate)
+                .or(d.config_curve)
+                .unwrap_or_default();
+            let paired = match (id_to_u32.get(&fedge.from), id_to_u32.get(&fedge.to)) {
+                (Some(&u), Some(&v)) => u == v || edge_pts.contains_key(&(v, u)),
+                _ => false,
+            };
+            let horizontal = edge_horizontal(&axes, d.direction, &fedge.from, &fedge.to);
+            Some(route_edge(geom, fedge, curve, style, horizontal, paired))
+        })
+        .collect()
 }
 
 #[cfg(test)]

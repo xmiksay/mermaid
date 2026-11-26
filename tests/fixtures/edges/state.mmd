@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Running
+  Idle --> Paused
+  Idle --> Stopped
+  Idle --> Error
+  Running --> [*]
+  state c <<choice>>
+  Paused --> c
+  c --> Idle
+  c --> Stopped

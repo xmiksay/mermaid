@@ -1,0 +1,23 @@
+stateDiagram-v2
+  direction LR
+  [*] --> Draft
+  Draft --> Review : submit
+  Review --> Draft : changes requested
+  Review --> Approved : approve
+  Review --> Rejected : reject
+  state check <<choice>>
+  Approved --> check
+  check --> Published : auto
+  check --> Scheduled : later
+  Scheduled --> Published : time reached
+  note right of Review
+    reviewers are assigned round-robin
+  end note
+  state Published {
+    direction TB
+    Live --> Archived : expire
+    Archived --> Live : restore
+  }
+  Rejected --> [*]
+  Published --> [*]
+  note left of Scheduled : waits for cron

@@ -1,0 +1,10 @@
+flowchart RL
+    A[Wide source node with long text] --> B & C & D
+    B --> E((circle))
+    C --> E
+    D --> F{rhombus}
+    E --> F
+    F -->|back| A
+    C -.->|dotted| A
+    D ==> G[Sink]
+    G --> A

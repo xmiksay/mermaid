@@ -1,0 +1,10 @@
+flowchart TD
+  A[Start] --> B{Choose}
+  B -->|yes| C((Done))
+  B -->|no| D[Retry step]
+  D --> B
+  D --> E[(Database)]
+  E --> F([Stadium])
+  F --> C
+  B --> G>Flag]
+  G --> C

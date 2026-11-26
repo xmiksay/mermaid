@@ -1,0 +1,23 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Auth : login
+    Auth --> Idle : fail
+    Auth --> Menu : ok
+    Menu --> Browse : browse
+    Menu --> Search : search
+    Menu --> Cart : cart
+    Browse --> Item : pick
+    Search --> Item : pick
+    Item --> Cart : add
+    Item --> Menu : back
+    Cart --> Checkout : pay
+    Cart --> Menu : continue
+    Checkout --> check
+    state check <<choice>>
+    check --> Done : paid
+    check --> Cart : declined
+    check --> Error : timeout
+    Error --> Idle : reset
+    Error --> Checkout : retry
+    Done --> [*]
+    Menu --> Idle : logout

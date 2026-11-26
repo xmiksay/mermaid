@@ -15,11 +15,40 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
 - rhombus: `t = 1 / (|dx|/hw + |dy|/hh)`
 - other shapes fall back to rect
 
+## Edge geometry (#402)
+
+`route_edges` (`mod.rs`) resolves every edge once into an `EdgePath`
+(`src/svg/flowchart/route.rs`: drawn control points, label polyline, curve,
+style); the canvas measurement and the drawing both use it.
+
+- **Centre space first, clip last.** Control points start from the routed
+  polyline (node centres plus dummy waypoints). A two-point edge gets the S
+  points `[S, A_s, A_t, T]` from `s_points`: the bend axis comes from the
+  **rank relation** (flow-axis comparison of the centres, with the flow axis
+  of the innermost subgraph holding both ends — `edge_horizontal` in
+  `directions.rs` — else the diagram's), never from the geometry, so wide
+  boxes cannot flip an inter-rank edge onto a side face. Forward and back
+  edges bend across the flow axis mid-way through the gap between the facing
+  faces; same-rank or aligned ends draw straight. Each end is then clipped
+  from its adjacent control point toward the node centre: rects are entered
+  square-on, circles and rhombi are aimed at the centre.
+- **Straight under the marker.** Each marked end gets one collinear lead-in
+  point on its clip ray, marker reach × stroke width + 4px out from the face
+  (`marker_reach` mirrors the marker defs). In a tight gap the bend moves
+  toward an unmarked end to make room; a gap too tight for both lead-ins draws
+  straight. Unmarked ends get no lead-in.
+- Same-kind fan-ins meet in one arrowhead, as upstream.
+- **Unchanged (clip-first, master's route):** opposite pairs (the
+  `bow_opposite_pairs` routes), self-loops, cluster (subgraph-id) ends and
+  `linear`/`step` curves keep `clip_edge_polyline` + the dominant-axis
+  `basis_control_points`.
+
 ## Canvas & subgraph frame sizing
 
-- Canvas sizing is a proper **measure-then-shift** pass: every edge's clipped
-  polyline and label position is resolved before drawing, a true bounding box
-  is computed over node, subgraph-frame, and label rects, then everything is
+- Canvas sizing is a proper **measure-then-shift** pass: every edge's
+  `EdgePath` and label position is resolved before drawing, a true bounding
+  box is computed over node, subgraph-frame, label rects and every edge's
+  control points (the basis curve stays inside their hull), then everything is
   shifted so the measured minimum lands at `CANVAS_PAD` — otherwise a
   local-`direction`-shifted subgraph frame or a BOW-routed back-edge label
   could land at a negative/overflowing coordinate and get clipped by the
@@ -126,13 +155,10 @@ Edge clipping (`clip_to_node`, in `src/svg/flowchart/edges.rs`) has per-shape va
     `curve_linear_path` (straight segments), and `curve_step_path` (orthogonal
     right-angle steps) in `src/svg/builder/curves.rs` build the path. Any other
     upstream curve name (`cardinal`, `natural`, …) falls back to basis.
-  - Under the default basis curve, a *bare two-point* edge (adjacent layers, no
-    routed waypoints) between horizontally/vertically offset nodes gets two
-    synthesized control points from `basis_control_points` (`edges.rs`) so it
-    leaves and re-enters along its dominant flow axis as a gentle S — matching
-    upstream instead of a straight diagonal (#331). Endpoints that share a
-    column/row stay collinear, so the curve draws straight. Linear/step curves
-    are unaffected.
+  - Under the default basis curve, a *bare two-point* edge between offset
+    nodes leaves and re-enters its faces as a gentle S, matching upstream
+    instead of a straight diagonal (#331); see "Edge geometry (#402)" above
+    for how the S is built. Endpoints that share a column/row draw straight.
   - `direction X` inside a subgraph body fills `Subgraph.direction`. The
     renderer works in screen space and, for a cluster whose flow axis differs
     from the diagram's, transposes just that cluster's members (and their

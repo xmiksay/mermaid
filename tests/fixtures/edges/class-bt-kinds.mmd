@@ -1,0 +1,15 @@
+classDiagram
+  direction BT
+  class Shape
+  class Circle
+  class Square
+  class Triangle
+  class Polygon
+  Circle --|> Shape
+  Square --|> Polygon
+  Triangle --|> Polygon
+  Polygon --|> Shape
+  Shape *-- Point
+  Shape o-- Style
+  Circle ..> Point
+  Square ..> Style
