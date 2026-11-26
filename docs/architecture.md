@@ -136,11 +136,12 @@ nested `<kind>/NN-slug.svg` per secondary sample (e.g.
 
 Edge-geometry sweeps (#402) live in `tests/integration/edge_ends.rs`,
 `edge_canvas.rs`, `edge_heads.rs` and `edge_cross.rs` (same directory),
-reading SVGs back through
+reading SVGs back through `svg_shapes.rs` (shape boxes, cluster frames) and
 `tests/integration/svg_read.rs`. They run over the repro fixtures in
 `tests/fixtures/edges/*.mmd` plus the graph-shaped gallery samples: flowchart
 ends meet faces by rank relation (routed ends too) and run straight under
-every marker, aligned edges stay straight, no edge leaves the viewBox
+every marker, aligned edges stay straight, every marker tip stays on its
+node, small round targets keep edges in their band, no edge leaves the viewBox
 (flowchart/state/class/ER/requirement), output is deterministic, and
 baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to

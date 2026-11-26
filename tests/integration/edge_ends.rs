@@ -216,3 +216,35 @@ fn flowchart_lines_run_straight_under_markers() {
     }
     assert!(bad.is_empty(), "bent under the marker:\n{}", bad.join("\n"));
 }
+
+/// Whether two segments properly cross (touching at a shared end is fine).
+fn segments_cross(a: Pt, b: Pt, c: Pt, d: Pt) -> bool {
+    let side = |p: Pt, q: Pt, r: Pt| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
+    side(a, b, c) * side(a, b, d) < -1e-9 && side(c, d, a) * side(c, d, b) < -1e-9
+}
+
+/// Small round and rhombus targets with several end kinds: every edge stays
+/// in the column band between its two ends and never loops over itself.
+#[test]
+fn small_round_targets_keep_edges_in_their_band() {
+    for name in ["rh4", "n-zero"] {
+        let svg = render(&fixture(name)).expect("renders");
+        for (i, d) in drawn(&svg).iter().enumerate() {
+            let (a, b) = (d.curve[0], d.curve[d.curve.len() - 1]);
+            let (lo, hi) = (a.0.min(b.0) - 1.0, a.0.max(b.0) + 1.0);
+            assert!(
+                d.curve.iter().all(|p| p.0 >= lo && p.0 <= hi),
+                "{name} edge {i} leaves its band {lo}..{hi}"
+            );
+            let segs: Vec<(Pt, Pt)> = d.curve.windows(2).map(|w| (w[0], w[1])).collect();
+            for j in 0..segs.len() {
+                for k in j + 2..segs.len() {
+                    assert!(
+                        !segments_cross(segs[j].0, segs[j].1, segs[k].0, segs[k].1),
+                        "{name} edge {i} crosses itself"
+                    );
+                }
+            }
+        }
+    }
+}

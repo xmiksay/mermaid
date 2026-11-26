@@ -11,6 +11,8 @@ mod edge_ends;
 mod edge_heads;
 #[path = "integration/svg_read.rs"]
 mod svg_read;
+#[path = "integration/svg_shapes.rs"]
+mod svg_shapes;
 
 use mermaid_svg::ast::{ArrowKind, ParticipantKind, SequenceItem};
 use mermaid_svg::{parse, render, Diagram, ParseError};
