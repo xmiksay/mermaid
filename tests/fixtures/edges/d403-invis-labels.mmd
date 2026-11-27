@@ -1,0 +1,9 @@
+flowchart TD
+  A --> B --> C --> D
+  A ~~~ D
+  A -->|a long label on a detoured edge| D
+  A -- inline label text --> C
+  B -.->|dotted| D
+  X((x)) --> B
+  A --> X
+  X --> D

@@ -95,11 +95,12 @@ drawing both use them.
 `detour_all` (`src/svg/flowchart/detour.rs`) runs in `route_all` after the
 routes are built and **before** the round-tip nudge (so a re-aimed round end
 is nudged like any other), on every edge but self-loops — every curve kind
-and the plain routes included. Modules: `detour/body.rs` (node outlines,
-segment tests, the outline's reach past a line), `detour/scene.rs` (nodes
-and markers, indexed), `detour/index.rs` (bands about one box thick, as rows
-and columns, each sorted along the other axis; a plain list below 48 boxes),
-`detour/cands.rs` (the ways round), `detour/room.rs` (end runs, re-aiming),
+and the plain routes included. Modules: `detour/search.rs` (the rounds and
+the scoring), `detour/cands.rs` (the ways round), `detour/room.rs` (end
+runs, re-aiming), `detour/body.rs` (node outlines, segment tests, the
+outline's reach past a line), `detour/scene.rs` (nodes and markers,
+indexed), `detour/index.rs` (bands about one box thick, as rows and
+columns, each sorted along the other axis; a plain list below 48 boxes),
 `detour/lines.rs` (other edges and frame borders, for scoring).
 
 - **Trigger.** An edge whose control points' bounding box (a basis curve
@@ -116,37 +117,47 @@ and columns, each sorted along the other axis; a plain list below 48 boxes),
   node's outline reaches past that chord *near the crossing* plus half a
   node gap (`LayoutConfig::node_gap`) — clipping a wide node's corner moves
   the curve by the corner, not by half the node; then a gap out. Only when
-  none of those works: 2 gaps out, and waypoints out from the node's
-  corners (one corner, or a side past two) — what reaches a far end sitting
-  behind a wide node, going round its end. Step curves instead get a pair of
-  waypoints on one vertical (or horizontal) line, a clearance off the
-  node's box, which makes that line the step's leg. Waypoints replace at
-  most one existing control point, clamped so the curve never runs
-  backwards and never within 10px of a kept point.
+  none of those clears the node without coming close to another: 2 gaps
+  out, and waypoints out from the node's corners (one corner, or a side
+  past two) — what reaches a far end sitting behind a wide node, going
+  round its end. Step curves instead get a pair of waypoints on one
+  vertical (or horizontal) line, a clearance off the node's box, which makes
+  that line the step's leg. Waypoints replace at most one existing control
+  point, clamped so the curve never runs backwards and never within 10px of
+  a kept point.
 - **End runs.** A marked rect end keeps its face point, lead-in and the
   point beyond, plus points on the same ray out to two lead-ins (straight
   under the marker; dropped again when the detour does not start right
-  after them). A free end — round, or unmarked — is clipped again on the ray
-  from its new neighbour (`reaim`), with its lead-ins on that ray, so the
-  curve leaves heading where it goes. Linear and step curves keep only the
-  tips.
-- **Rules.** A candidate may not hit a node the curve did not hit, nor
+  after them). A run that would come within 6px of a foreign node (a thick
+  stroke's lead-ins grow with it) is dropped and laid again, full length,
+  on the ray toward the detour — the head then meets its face at an angle
+  but stays straight. A free end — round, or unmarked — is clipped again on
+  the ray from its new neighbour (`reaim`), lead-ins on that ray; a rect
+  tip stays 8px off the corners, and a bare rect end keeps its old tip when
+  the new way out would come within 6px of a node or land on a head already
+  there. Linear and step curves keep only the tips.
+- **Rules.** A candidate may not run through a node the curve did not, nor
   (step, linear) come within 6px of one; may not run back against the flow
   axis by more than 10px more than before (round a wide node's end it may
   run back *across* the flow), nor grow past twice the edge's length plus a
   gap. Only the stretch that changed is re-tested. When no candidate is
   clean, one that trades the node for a single node not passed before is
-  taken and the next round goes round that one; an edge gets at most 6
-  rounds.
-- **Score** = sideways movement + 40 per node newly grazed (within 6px) +
-  150 per other edge's marker newly run over + 4 per px of running along
-  another edge or a frame border (within 6px, nearly parallel, stretches of
-  30px or more, near the node only). The shorter side wins unless it traces
-  another line; one clean crossing beats a traced stretch. Candidates are
-  built and scored lazily, best bound first.
-- Markers are stale-proofed: after a detour the edge's marker discs are
-  replaced in the scene. Iteration is in edge and node order, so output is
-  deterministic. The label polyline becomes the detoured control points.
+  taken (also over a clean one that comes close to a node) and the next
+  round goes round that one; an edge gets at most 6 rounds. The result is
+  kept only if it runs through fewer nodes than the input (or as many and
+  grazes fewer).
+- **Score** = sideways movement + 1000 per node the moved stretch comes
+  within 4px of (rhombi grown face by face) + 40 per node newly grazed
+  within 6px + 150 per other edge's marker newly run over + 4 per px of
+  running along another edge (near the node) or any frame border (within
+  6px, nearly parallel, stretches of 30px or more). A way that comes within
+  4px is pushed off what it comes close to, 3 to 22px, before it is
+  accepted. The shorter side wins unless it traces another line; one clean
+  crossing beats a traced stretch. Candidates are built and scored lazily,
+  best bound first.
+- After a detour the edge's marker discs are replaced in the scene.
+  Iteration is in edge and node order, so output is deterministic. The
+  label polyline becomes the detoured control points.
 
 ## Canvas & subgraph frame sizing
 

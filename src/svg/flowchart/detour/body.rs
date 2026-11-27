@@ -8,8 +8,9 @@ use super::super::edges::EndClip;
 use super::super::round::is_round;
 use super::super::route::Pt;
 
-/// Steps per basis bezier when testing a curve: finer than the canvas
-/// measurement, so a corner cut between two samples is not missed.
+/// Steps per basis bezier when testing a curve, as many as the canvas
+/// measurement takes: a 1px chord sag between two samples is within the
+/// clearance kept.
 pub(super) const SAMPLES: usize = 8;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -55,7 +56,12 @@ impl Body {
 
     /// The outline grown by `m` on every side.
     pub(super) fn grown(&self, m: f64) -> Self {
-        let (hw, hh) = (self.hw + m, self.hh + m);
+        // A rhombus scales about its centre so each face moves out by `m`.
+        let k = 1.0 + m * (1.0 / (self.hw * self.hw) + 1.0 / (self.hh * self.hh)).sqrt();
+        let (hw, hh) = match self.outline {
+            Outline::Rhombus => (self.hw * k, self.hh * k),
+            _ => (self.hw + m, self.hh + m),
+        };
         let c = self.c;
         Self {
             hw,
@@ -144,6 +150,16 @@ impl Body {
 
     pub(super) fn overlaps(&self, b: &[f64; 4]) -> bool {
         b[0] < self.bbox[2] && b[2] > self.bbox[0] && b[1] < self.bbox[3] && b[3] > self.bbox[1]
+    }
+
+    /// Whether `p` lies inside the outline.
+    pub(super) fn contains(&self, p: Pt) -> bool {
+        let (dx, dy) = ((p.0 - self.c.0).abs(), (p.1 - self.c.1).abs());
+        match self.outline {
+            Outline::Rect => dx < self.hw && dy < self.hh,
+            Outline::Circle => dx.hypot(dy) < self.hw,
+            Outline::Rhombus => dx / self.hw + dy / self.hh < 1.0,
+        }
     }
 
     /// Whether segment `a`–`b` runs strictly inside the outline (touching
@@ -269,5 +285,17 @@ mod tests {
         assert!(!d.cuts((25.0, -100.0), (25.0, -10.0)));
         assert!(!r.cuts((f64::NAN, 0.0), (100.0, 0.0)));
         assert!(Body::new(&clip((f64::INFINITY, 0.0), (10.0, 10.0), NodeShape::Rect)).is_none());
+    }
+
+    #[test]
+    fn a_grown_rhombus_moves_each_face_out_by_the_margin() {
+        let d = Body::new(&clip((0.0, 0.0), (80.0, 40.0), NodeShape::Rhombus)).expect("rhombus");
+        let g = d.grown(6.0);
+        // The outward unit normal of the upper-right face.
+        let n = (20.0 / 40.0_f64.hypot(20.0), 40.0 / 40.0_f64.hypot(20.0));
+        // The face's midpoint (20, -10) on the original, pushed out along it.
+        let out = |k: f64| (20.0 + n.0 * k, -10.0 - n.1 * k);
+        assert!(g.contains(out(5.9)));
+        assert!(!g.contains(out(6.1)));
     }
 }

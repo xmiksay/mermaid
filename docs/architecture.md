@@ -45,7 +45,7 @@ src/
 │   ├── {sequence,flowchart,state,class,c4,block,timeline}/  multi-file per-diagram renderers (mod + submodules)
 │   │                flowchart/ edge geometry: route.rs (control points), slots.rs (face slots),
 │   │                round.rs (round ends), detour/ (steers edges around nodes they cross, #403:
-│   │                body, scene, index, cands, room, lines)
+│   │                search, cands, room, body, scene, index, lines)
 │   └── {pie,er,gantt,journey,sankey,quadrant,xychart,radar,packet,
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
@@ -152,7 +152,9 @@ node it does not end on (strict, no baseline or waivers — #403; nodes are
 read back by structure in `flow_nodes.rs`, whatever their colours, by their
 real outline when straight-sided or round, else their box; a subgraph end
 owns the nodes inside its frame only when the other end lies inside it too;
-the `d403-*` fixtures are the adversarial cases), output is
+the `d403-*` fixtures are the adversarial cases), no detour leaves an
+edge within 3px of a node it does not end on (`baseline-grazes.txt`: the
+grazes there were without detours, written with detours off), output is
 deterministic, and baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
 one translation), `baseline-counts.txt`
