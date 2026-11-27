@@ -9,6 +9,8 @@ mod edge_cross;
 mod edge_ends;
 #[path = "integration/edge_heads.rs"]
 mod edge_heads;
+#[path = "integration/flow_nodes.rs"]
+mod flow_nodes;
 #[path = "integration/svg_read.rs"]
 mod svg_read;
 #[path = "integration/svg_shapes.rs"]

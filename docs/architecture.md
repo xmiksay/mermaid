@@ -44,7 +44,8 @@ src/
 │   ├── sankey_layout.rs  d3-sankey column assignment + ordering relaxation
 │   ├── {sequence,flowchart,state,class,c4,block,timeline}/  multi-file per-diagram renderers (mod + submodules)
 │   │                flowchart/ edge geometry: route.rs (control points), slots.rs (face slots),
-│   │                round.rs (round ends), detour/ (steers edges around nodes they cross, #403)
+│   │                round.rs (round ends), detour/ (steers edges around nodes they cross, #403:
+│   │                body, scene, index, cands, room, lines)
 │   └── {pie,er,gantt,journey,sankey,quadrant,xychart,radar,packet,
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
@@ -138,7 +139,8 @@ nested `<kind>/NN-slug.svg` per secondary sample (e.g.
 
 Edge-geometry sweeps (#402) live in `tests/integration/edge_ends.rs`,
 `edge_canvas.rs`, `edge_heads.rs` and `edge_cross.rs` (same directory),
-reading SVGs back through `svg_shapes.rs` (shape boxes, cluster frames) and
+reading SVGs back through `svg_shapes.rs` (shape boxes, cluster frames),
+`flow_nodes.rs` (flowchart node outlines) and
 `tests/integration/svg_read.rs`. They run over the repro fixtures in
 `tests/fixtures/edges/*.mmd` plus the graph-shaped gallery samples: flowchart
 ends meet faces by rank relation (routed ends too) and run straight under
@@ -146,8 +148,11 @@ every marker, aligned edges stay straight, every marker tip stays on its
 node (on a circle's or rhombus's actual outline), edges never hook into their
 heads, small round targets keep edges in their band, no edge leaves the viewBox
 (flowchart/state/class/ER/requirement), no flowchart edge runs through a
-rect, circle or rhombus it does not end on (a subgraph end owns the nodes
-inside its frame; strict, no baseline or waivers — #403), output is
+node it does not end on (strict, no baseline or waivers — #403; nodes are
+read back by structure in `flow_nodes.rs`, whatever their colours, by their
+real outline when straight-sided or round, else their box; a subgraph end
+owns the nodes inside its frame only when the other end lies inside it too;
+the `d403-*` fixtures are the adversarial cases), output is
 deterministic, and baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
 one translation), `baseline-counts.txt`

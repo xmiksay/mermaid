@@ -92,40 +92,61 @@ drawing both use them.
 
 ## Detours (#403)
 
-`detour_all` (`src/svg/flowchart/detour.rs`; outline tests in
-`detour/body.rs`, the obstacle index in `detour/scene.rs`) runs last in
-`route_all`, after the round-tip nudge, on every edge but self-loops — every
-curve kind and the plain routes included. It samples the drawn curve (basis
-at 16 steps per bezier, step curves as drawn) and tests each sample segment
-against the outline (rect, circle, rhombus) of every node the edge does not
-end on. A subgraph end owns the nodes inside its frame. Obstacles are kept
-in bands about one node thick, both as rows and as columns, each band sorted
-along the other axis; a run of 16 segments looks its bbox up with a binary
-search per band (rows or columns, whichever it crosses fewer of) and tests
-its segments only against what overlaps the run. Markers are looked at only
-once the edge hits a node.
+`detour_all` (`src/svg/flowchart/detour.rs`) runs in `route_all` after the
+routes are built and **before** the round-tip nudge (so a re-aimed round end
+is nudged like any other), on every edge but self-loops — every curve kind
+and the plain routes included. Modules: `detour/body.rs` (node outlines,
+segment tests, the outline's reach past a line), `detour/scene.rs` (nodes
+and markers, indexed), `detour/index.rs` (bands about one box thick, as rows
+and columns, each sorted along the other axis; a plain list below 48 boxes),
+`detour/cands.rs` (the ways round), `detour/room.rs` (end runs, re-aiming),
+`detour/lines.rs` (other edges and frame borders, for scoring).
 
-- For the first node hit, waypoints go beside it, perpendicular to the
-  travel direction there, half a node gap (`LayoutConfig::node_gap`) beyond
-  its outline: one waypoint first, then a run of two along the node. The
-  shorter side — the one the curve already leans toward — first, then the
-  other, then 1 and 2 node gaps out. They replace at most one existing
-  control point between the two ends' runs, shortest result first, clamped
-  so the curve never runs backwards and never within 10px of a kept point
-  (that would bend it to a corner).
-- **End runs stay put.** A rect end keeps its face point, lead-in and the
-  point beyond, plus points on the same ray out to two lead-ins (so the line
-  stays straight under the marker); an unmarked end keeps an 8px run. A
-  round end drops its run and is clipped again on the ray from its new
-  neighbour toward the centre, lead-ins on that ray (`reaim`).
-- A candidate is kept only if it clears that node and hits no node — and no
-  other edge's marker (a disc over its length, +4px) — the current curve did
-  not. Markers never trigger a detour themselves. An edge gets at most 6
-  rounds (one node each, at most 24 candidates); a node no candidate clears
-  is left as is. Iteration is in edge
-  and node order, so output is deterministic.
-- The label polyline becomes the detoured control points, so the label
-  follows the new route.
+- **Trigger.** An edge whose control points' bounding box (a basis curve
+  stays inside it) overlaps no node it does not own is skipped without
+  sampling. Otherwise the drawn curve (basis at 8 steps per bezier, step
+  curves as drawn) is tested segment by segment against the outline (rect,
+  circle, rhombus) of every node it does not end on. A subgraph end owns
+  the nodes inside its frame only when the other end lies inside that frame
+  too (a member to its own frame, nested frames): an edge from outside to a
+  subgraph keeps off its members.
+- **Ways round** the first node hit, least sideways movement first:
+  one waypoint or a pair beside the stretch the curve crosses it on,
+  perpendicular to that crossing (entry–exit chord), moved by how far the
+  node's outline reaches past that chord *near the crossing* plus half a
+  node gap (`LayoutConfig::node_gap`) — clipping a wide node's corner moves
+  the curve by the corner, not by half the node; then a gap out. Only when
+  none of those works: 2 gaps out, and waypoints out from the node's
+  corners (one corner, or a side past two) — what reaches a far end sitting
+  behind a wide node, going round its end. Step curves instead get a pair of
+  waypoints on one vertical (or horizontal) line, a clearance off the
+  node's box, which makes that line the step's leg. Waypoints replace at
+  most one existing control point, clamped so the curve never runs
+  backwards and never within 10px of a kept point.
+- **End runs.** A marked rect end keeps its face point, lead-in and the
+  point beyond, plus points on the same ray out to two lead-ins (straight
+  under the marker; dropped again when the detour does not start right
+  after them). A free end — round, or unmarked — is clipped again on the ray
+  from its new neighbour (`reaim`), with its lead-ins on that ray, so the
+  curve leaves heading where it goes. Linear and step curves keep only the
+  tips.
+- **Rules.** A candidate may not hit a node the curve did not hit, nor
+  (step, linear) come within 6px of one; may not run back against the flow
+  axis by more than 10px more than before (round a wide node's end it may
+  run back *across* the flow), nor grow past twice the edge's length plus a
+  gap. Only the stretch that changed is re-tested. When no candidate is
+  clean, one that trades the node for a single node not passed before is
+  taken and the next round goes round that one; an edge gets at most 6
+  rounds.
+- **Score** = sideways movement + 40 per node newly grazed (within 6px) +
+  150 per other edge's marker newly run over + 4 per px of running along
+  another edge or a frame border (within 6px, nearly parallel, stretches of
+  30px or more, near the node only). The shorter side wins unless it traces
+  another line; one clean crossing beats a traced stretch. Candidates are
+  built and scored lazily, best bound first.
+- Markers are stale-proofed: after a detour the edge's marker discs are
+  replaced in the scene. Iteration is in edge and node order, so output is
+  deterministic. The label polyline becomes the detoured control points.
 
 ## Canvas & subgraph frame sizing
 

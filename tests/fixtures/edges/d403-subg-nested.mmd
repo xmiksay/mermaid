@@ -1,0 +1,12 @@
+flowchart TD
+  subgraph O
+    P --> Q
+    subgraph I
+      R --> T
+    end
+  end
+  P --> I
+  I --> O
+  T --> O
+  Z --> I
+  P --> Z

@@ -301,7 +301,15 @@ fn route_edges(
             })
         })
         .collect();
-    route_all(ins, &obstacles)
+    let mut frames: Vec<[f64; 4]> = boxes.values().map(|b| [b.0, b.1, b.2, b.3]).collect();
+    frames.sort_by(|a, b| {
+        a.iter()
+            .zip(b)
+            .fold(std::cmp::Ordering::Equal, |o, (x, y)| {
+                o.then(x.total_cmp(y))
+            })
+    });
+    route_all(ins, &obstacles, &frames)
 }
 
 #[cfg(test)]

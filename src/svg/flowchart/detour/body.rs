@@ -10,9 +10,9 @@ use super::super::route::Pt;
 
 /// Steps per basis bezier when testing a curve: finer than the canvas
 /// measurement, so a corner cut between two samples is not missed.
-pub(super) const SAMPLES: usize = 16;
+pub(super) const SAMPLES: usize = 8;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Outline {
     Rect,
     Circle,
@@ -20,6 +20,7 @@ enum Outline {
 }
 
 /// A node's outline in a form cheap to test segments against.
+#[derive(Clone, Copy, Debug)]
 pub(super) struct Body {
     pub(super) c: Pt,
     hw: f64,
@@ -52,14 +53,93 @@ impl Body {
         })
     }
 
-    /// How far the outline reaches from the centre along unit `dir`.
-    pub(super) fn support(&self, dir: Pt) -> f64 {
-        let (x, y) = (dir.0.abs() * self.hw, dir.1.abs() * self.hh);
-        match self.outline {
-            Outline::Rect => x + y,
-            Outline::Circle => self.hw,
-            Outline::Rhombus => x.max(y),
+    /// The outline grown by `m` on every side.
+    pub(super) fn grown(&self, m: f64) -> Self {
+        let (hw, hh) = (self.hw + m, self.hh + m);
+        let c = self.c;
+        Self {
+            hw,
+            hh,
+            bbox: [c.0 - hw, c.1 - hh, c.0 + hw, c.1 + hh],
+            ..*self
         }
+    }
+
+    /// The outline's corners, each with the way out of it (a circle has
+    /// none: going round it beside the crossing is enough).
+    pub(super) fn corners(&self) -> Vec<(Pt, Pt)> {
+        if self.outline == Outline::Circle {
+            return Vec::new();
+        }
+        self.polygon()
+            .into_iter()
+            .map(|v| {
+                let out = ((v.0 - self.c.0).signum(), (v.1 - self.c.1).signum());
+                let snap = |o: f64, d: f64| if d.abs() < 1e-9 { 0.0 } else { o };
+                (
+                    v,
+                    (snap(out.0, v.0 - self.c.0), snap(out.1, v.1 - self.c.1)),
+                )
+            })
+            .collect()
+    }
+
+    /// The outline as a polygon (a circle as the 16-gon around it).
+    fn polygon(&self) -> Vec<Pt> {
+        let (c, hw, hh) = (self.c, self.hw, self.hh);
+        match self.outline {
+            Outline::Rect => vec![
+                (c.0 - hw, c.1 - hh),
+                (c.0 + hw, c.1 - hh),
+                (c.0 + hw, c.1 + hh),
+                (c.0 - hw, c.1 + hh),
+            ],
+            Outline::Rhombus => vec![
+                (c.0, c.1 - hh),
+                (c.0 + hw, c.1),
+                (c.0, c.1 + hh),
+                (c.0 - hw, c.1),
+            ],
+            Outline::Circle => {
+                let r = hw / (std::f64::consts::PI / 16.0).cos();
+                (0..16)
+                    .map(|k| {
+                        let a = f64::from(k) * std::f64::consts::PI / 8.0;
+                        (c.0 + r * a.cos(), c.1 + r * a.sin())
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// How far the outline reaches past the line through `mid` along unit
+    /// `d`, toward unit normal `n`, within the stretch `±w` of `mid` along
+    /// `d` — how far a curve crossing there has to move toward `n` to pass
+    /// it. `None` when the outline misses that stretch.
+    pub(super) fn reach(&self, mid: Pt, d: Pt, n: Pt, w: f64) -> Option<f64> {
+        let rel = |p: Pt| (p.0 - mid.0, p.1 - mid.1);
+        let mut poly = self.polygon();
+        // Sutherland–Hodgman against `s·along ≤ w` for both signs.
+        for s in [1.0, -1.0] {
+            let f = |p: Pt| s * dot(rel(p), d) - w;
+            let mut out = Vec::with_capacity(poly.len() + 2);
+            for (k, &a) in poly.iter().enumerate() {
+                let b = poly.get(k + 1).or(poly.first()).copied().unwrap_or(a);
+                let (fa, fb) = (f(a), f(b));
+                if fa <= 0.0 {
+                    out.push(a);
+                }
+                if (fa < 0.0) != (fb < 0.0) && fa != fb {
+                    let t = fa / (fa - fb);
+                    out.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+                }
+            }
+            poly = out;
+            if poly.is_empty() {
+                return None;
+            }
+        }
+        poly.iter().map(|&p| dot(rel(p), n)).reduce(f64::max)
     }
 
     pub(super) fn overlaps(&self, b: &[f64; 4]) -> bool {
