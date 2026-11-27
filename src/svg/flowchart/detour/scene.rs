@@ -125,11 +125,16 @@ pub(super) struct Scene<'a> {
     marks: Layer<(&'a str, Body)>,
 }
 
-/// What a curve touches: nodes cut, nodes grazed, markers cut.
+/// Closer than this to a node, a curve all but touches it.
+pub(super) const CLOSE: f64 = 4.0;
+
+/// What a curve touches: nodes cut, nodes grazed (and of those, the ones
+/// come `CLOSE`), markers cut.
 #[derive(Default)]
 pub(super) struct Touch {
     pub(super) cut: Vec<Ob>,
     pub(super) grazed: Vec<Ob>,
+    pub(super) close: Vec<Ob>,
     pub(super) marks: Vec<Ob>,
 }
 
@@ -244,7 +249,8 @@ impl<'a> Scene<'a> {
     }
 
     /// In one pass: the nodes the sampled curve cuts, the nodes it comes
-    /// within `grow` of, and the markers it cuts — but those `skip` names.
+    /// within `grow` of, and within `CLOSE` of, and the markers it cuts —
+    /// but those `skip` names.
     pub(super) fn touches(
         &self,
         samples: &[Pt],
@@ -271,10 +277,13 @@ impl<'a> Scene<'a> {
                     if !body.overlaps(&area) || skip(id, body.c) {
                         continue;
                     }
-                    let wide = body.grown(grow);
+                    let (wide, close) = (body.grown(grow), body.grown(CLOSE.min(grow)));
                     for w in run.windows(2) {
                         if kind && wide.cuts(w[0], w[1]) {
                             t.grazed.push((kind, i));
+                            if close.cuts(w[0], w[1]) {
+                                t.close.push((kind, i));
+                            }
                         }
                         if body.cuts(w[0], w[1]) {
                             if kind { &mut t.cut } else { &mut t.marks }.push((kind, i));
@@ -283,7 +292,7 @@ impl<'a> Scene<'a> {
                 }
             }
         }
-        for v in [&mut t.cut, &mut t.grazed, &mut t.marks] {
+        for v in [&mut t.cut, &mut t.grazed, &mut t.close, &mut t.marks] {
             v.sort_unstable();
             v.dedup();
         }
@@ -306,6 +315,18 @@ impl<'a> Scene<'a> {
             !other
         });
         other
+    }
+
+    /// Whether `p` lies on a marker at the node `id`.
+    pub(super) fn head_at(&self, id: &str, p: Pt) -> bool {
+        let mut near = Vec::new();
+        self.marks.near(&[p.0, p.1, p.0, p.1], &mut near);
+        near.iter().any(|&i| {
+            self.marks
+                .items
+                .get(i)
+                .is_some_and(|(m, b)| *m == id && b.contains(p))
+        })
     }
 
     /// `edge` moved: its markers are now these.

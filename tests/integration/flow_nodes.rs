@@ -1,8 +1,9 @@
 //! Reading a rendered flowchart's nodes back by structure, not colour: the
 //! nodes are the shapes drawn after the edge paths, one node per run of
 //! shapes closed by its (non-edge-label) text, so `classDef`/`style` nodes
-//! and every theme count. Each keeps its real outline where that is cheap —
-//! rect, circle, straight-sided polygon — and its bounding box otherwise.
+//! (`fill:none` ones too) and every theme count. Each keeps its real outline
+//! where that is cheap — rect (with its corner radius), circle,
+//! straight-sided polygon — and its bounding box otherwise.
 
 use crate::svg_read::{attr, body, Pt};
 
@@ -19,6 +20,8 @@ pub(crate) struct FlowNode {
     /// Bounding box `(x0, y0, x1, y1)`.
     pub(crate) b: (f64, f64, f64, f64),
     pub(crate) outline: Outline,
+    /// A rect's corner radius.
+    pub(crate) rx: f64,
 }
 
 fn dist_to_segment(p: Pt, a: Pt, b: Pt) -> f64 {
@@ -58,6 +61,34 @@ impl FlowNode {
                     })
                     .count();
                 crossings % 2 == 1 && edges().all(|(a, b)| dist_to_segment(p, *a, *b) > inset)
+            }
+        }
+    }
+
+    /// Signed distance from `p` to the outline: negative inside.
+    pub(crate) fn sdist(&self, p: Pt) -> f64 {
+        let (x0, y0, x1, y1) = self.b;
+        let c = self.center();
+        match &self.outline {
+            Outline::Circle => (p.0 - c.0).hypot(p.1 - c.1) - (x1 - x0) / 2.0,
+            Outline::Rect => {
+                let r = self.rx.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+                let q = (
+                    (p.0 - c.0).abs() - ((x1 - x0) / 2.0 - r),
+                    (p.1 - c.1).abs() - ((y1 - y0) / 2.0 - r),
+                );
+                q.0.max(0.0).hypot(q.1.max(0.0)) + q.0.max(q.1).min(0.0) - r
+            }
+            Outline::Polygon(pts) => {
+                let edges = || pts.iter().zip(pts.iter().cycle().skip(1));
+                let d = edges()
+                    .map(|(a, b)| dist_to_segment(p, *a, *b))
+                    .fold(f64::INFINITY, f64::min);
+                if self.inside(p, 0.0) {
+                    -d
+                } else {
+                    d
+                }
             }
         }
     }
@@ -104,6 +135,7 @@ fn shape(tag: &str) -> Option<FlowNode> {
         return Some(FlowNode {
             b,
             outline: Outline::Rect,
+            rx: attr(tag, "rx").unwrap_or(0.0),
         });
     }
     if tag.starts_with("<circle ") || tag.starts_with("<ellipse ") {
@@ -118,7 +150,11 @@ fn shape(tag: &str) -> Option<FlowNode> {
         } else {
             Outline::Rect
         };
-        return Some(FlowNode { b, outline });
+        return Some(FlowNode {
+            b,
+            outline,
+            rx: 0.0,
+        });
     }
     let d = tag.strip_prefix("<path d=\"")?;
     let cmds = commands(&d[..d.find('"')?]);
@@ -165,7 +201,11 @@ fn shape(tag: &str) -> Option<FlowNode> {
     } else {
         Outline::Rect
     };
-    (b.0 < b.2 && b.1 < b.3).then_some(FlowNode { b, outline })
+    (b.0 < b.2 && b.1 < b.3).then_some(FlowNode {
+        b,
+        outline,
+        rx: 0.0,
+    })
 }
 
 fn union(a: &FlowNode, b: &FlowNode) -> FlowNode {
@@ -183,6 +223,7 @@ fn union(a: &FlowNode, b: &FlowNode) -> FlowNode {
         } else {
             Outline::Rect
         },
+        rx: 0.0,
     }
 }
 
@@ -221,7 +262,7 @@ pub(crate) fn flow_nodes(svg: &str) -> Vec<FlowNode> {
                     out.push(node);
                 }
             }
-        } else if let Some(s) = shape(t).filter(|_| !t.contains("fill=\"none\"")) {
+        } else if let Some(s) = shape(t) {
             pending = Some(match pending.take() {
                 Some(p) if touches(&p, &s) => union(&p, &s),
                 Some(p) => {

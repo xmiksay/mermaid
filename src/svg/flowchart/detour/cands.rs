@@ -28,15 +28,51 @@ pub(super) enum Way {
     Step { i: usize, a: Pt, z: Pt },
 }
 
+impl Way {
+    /// The same way with its waypoints moved by `v`.
+    pub(super) fn shifted(&self, v: Pt) -> Way {
+        let mv = |p: Pt| (p.0 + v.0, p.1 + v.1);
+        match self {
+            Way::Beside { side, d, w, single } => Way::Beside {
+                side: mv(*side),
+                d: *d,
+                w: *w,
+                single: *single,
+            },
+            Way::Corners(run) => Way::Corners(run.iter().map(|&p| mv(p)).collect()),
+            Way::Step { i, a, z } => Way::Step {
+                i: *i,
+                a: mv(*a),
+                z: mv(*z),
+            },
+        }
+    }
+
+    /// Where its waypoints sit, on average.
+    pub(super) fn centre(&self) -> Pt {
+        match self {
+            Way::Beside { side, .. } => *side,
+            Way::Corners(run) => {
+                let k = run.len().max(1) as f64;
+                let s = run.iter().fold((0.0, 0.0), |m, p| (m.0 + p.0, m.1 + p.1));
+                (s.0 / k, s.1 / k)
+            }
+            Way::Step { a, z, .. } => ((a.0 + z.0) / 2.0, (a.1 + z.1) / 2.0),
+        }
+    }
+}
+
 /// The ways round one node, least sideways movement first: the close ones,
 /// then — tried only when none of those works — the wide ones.
-pub(super) struct Plan {
+pub(super) struct Plan<'c> {
     pub(super) ways: [Vec<(f64, Way)>; 2],
     room: Option<Room>,
     runs: bool,
+    /// Whether a re-aimed bare end `(which, tip, next)` may leave there.
+    free_ok: &'c dyn Fn(usize, Pt, Pt) -> bool,
 }
 
-impl Plan {
+impl Plan<'_> {
     /// The control points of `way` built on `ctrl`.
     pub(super) fn build(&self, ctrl: &[Pt], way: &Way, edge: &DetourEdge) -> Option<Vec<Pt>> {
         match way {
@@ -49,33 +85,43 @@ impl Plan {
             Way::Beside { side, d, w, single } => {
                 let room = self.room.as_ref()?;
                 let c = insert(&room.pts, (room.lo, room.hi), *side, *d, *w, *single)?;
-                Some(room.finish(c, edge, self.runs))
+                Some(room.finish(c, edge, self.runs, self.free_ok))
             }
             Way::Corners(run) => {
                 let room = self.room.as_ref()?;
                 let c = insert_run(&room.pts, (room.lo, room.hi), run)?;
-                Some(room.finish(c, edge, self.runs))
+                Some(room.finish(c, edge, self.runs, self.free_ok))
             }
         }
     }
 }
 
+/// What a plan asks of the scene: whether a straight stretch keeps clear of
+/// every foreign node, and whether a re-aimed bare end `(which, tip, next)`
+/// may leave there.
+pub(super) struct Checks<'c> {
+    pub(super) clear: &'c dyn Fn(Pt, Pt) -> bool,
+    pub(super) free_ok: &'c dyn Fn(usize, Pt, Pt) -> bool,
+}
+
 /// Every way round the node `body` the curve runs through at `h`, least
 /// sideways movement first.
-pub(super) fn candidates(
+pub(super) fn candidates<'c>(
     ctrl: &[Pt],
     samples: &[Pt],
     h: &Hit,
     body: &Body,
     edge: &DetourEdge,
-    curve: EdgeCurve,
-    gap: f64,
-) -> Plan {
+    (curve, gap): (EdgeCurve, f64),
+    checks: Checks<'c>,
+) -> Plan<'c> {
+    let Checks { clear, free_ok } = checks;
     let runs = curve != EdgeCurve::Linear;
     let mut plan = Plan {
         ways: [Vec::new(), Vec::new()],
         room: None,
         runs,
+        free_ok,
     };
     let (Some(&entry), Some(&exit)) = (
         samples.get(h.first),
@@ -87,7 +133,7 @@ pub(super) fn candidates(
     if curve == EdgeCurve::Step {
         plan.ways = [close, wide].map(|o| steps(ctrl, (entry, exit), h, body, gap, o));
     } else if let Some(d) = unit(entry, exit) {
-        plan.room = room(ctrl, edge, runs);
+        plan.room = room(ctrl, edge, runs, clear);
         plan.ways = [close, wide].map(|o| beside(ctrl, (entry, exit), d, body, gap, o));
         plan.ways[1].extend(corners(ctrl, (entry, exit), d, body, edge, gap));
     }

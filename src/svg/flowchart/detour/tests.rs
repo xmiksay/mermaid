@@ -1,4 +1,7 @@
+use super::body::{dist, drawn};
+use super::search::{measure, BACKTRACK};
 use super::*;
+use crate::parse::EdgeCurve;
 use crate::svg::style::resolve_edge_style;
 
 fn clip(center: Pt, size: (f64, f64), shape: NodeShape) -> EndClip {

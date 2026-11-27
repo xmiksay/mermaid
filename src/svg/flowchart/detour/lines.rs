@@ -1,4 +1,4 @@
-//! The other edges' lines and the subgraph frame borders near a detour, and
+//! The other edges' lines near a detour and every subgraph frame border, and
 //! how long a candidate curve runs along them.
 
 use super::super::route::Pt;
@@ -17,8 +17,6 @@ pub(super) struct Lines {
     /// `NEAR`.
     segs: Vec<(Pt, Pt, f64, [f64; 4])>,
     index: Index,
-    /// Where the lines were gathered: only stretches there are scored.
-    region: [f64; 4],
 }
 
 fn overlap(a: &[f64; 4], b: &[f64; 4]) -> bool {
@@ -26,7 +24,7 @@ fn overlap(a: &[f64; 4], b: &[f64; 4]) -> bool {
 }
 
 impl Lines {
-    pub(super) fn new(segs: Vec<(Pt, Pt)>, region: [f64; 4]) -> Self {
+    pub(super) fn new(segs: Vec<(Pt, Pt)>) -> Self {
         let segs: Vec<(Pt, Pt, f64, [f64; 4])> = segs
             .into_iter()
             .filter_map(|(p, q)| {
@@ -38,7 +36,6 @@ impl Lines {
         Self {
             index: Index::new(&boxes),
             segs,
-            region,
         }
     }
 
@@ -61,16 +58,7 @@ impl Lines {
     /// `NEAR`, nearly parallel), counting only stretches of at least `RUN`.
     /// Lines are narrowed to the curve's box, then to each run of segments'.
     pub(super) fn along(&self, samples: &[Pt]) -> f64 {
-        let (b, r) = (bbox(samples), self.region);
-        let b = [
-            b[0].max(r[0]),
-            b[1].max(r[1]),
-            b[2].min(r[2]),
-            b[3].min(r[3]),
-        ];
-        if b[0] > b[2] || b[1] > b[3] {
-            return 0.0;
-        }
+        let b = bbox(samples);
         let mut local = Vec::new();
         if self.index.near(&b, &mut local).is_none() {
             local = (0..self.segs.len()).collect();
@@ -123,8 +111,7 @@ mod tests {
 
     #[test]
     fn running_along_a_line_counts_a_crossing_does_not() {
-        let region = [-1000.0, -1000.0, 1000.0, 1000.0];
-        let lines = Lines::new(vec![((0.0, 0.0), (0.0, 200.0))], region);
+        let lines = Lines::new(vec![((0.0, 0.0), (0.0, 200.0))]);
         let walk = |x0: f64, y0: f64, x1: f64, y1: f64| -> Vec<Pt> {
             (0..=40)
                 .map(|k| {
@@ -140,11 +127,5 @@ mod tests {
         assert_eq!(lines.along(&walk(-100.0, 100.0, 100.0, 100.0)), 0.0);
         // Beside it for less than `RUN`: nothing either.
         assert_eq!(lines.along(&walk(3.0, 20.0, 3.0, 40.0)), 0.0);
-        // Out of the region it was gathered for: not scored.
-        let far = Lines::new(
-            vec![((0.0, 0.0), (0.0, 200.0))],
-            [500.0, 500.0, 600.0, 600.0],
-        );
-        assert_eq!(far.along(&walk(3.0, 20.0, 3.0, 170.0)), 0.0);
     }
 }
