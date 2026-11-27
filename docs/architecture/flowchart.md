@@ -88,7 +88,44 @@ drawing both use them.
   gaps (`skips_ranks`: a local `direction` replaced a cross-lane route with a
   bare line, and an S through the skipped ranks would run through their
   nodes) keep the clip-first `geometry::clip_polyline` + the dominant-axis
-  `basis_control_points`.
+  `basis_control_points` (then detoured like every other edge, below).
+
+## Detours (#403)
+
+`detour_all` (`src/svg/flowchart/detour.rs`; outline tests in
+`detour/body.rs`, the obstacle index in `detour/scene.rs`) runs last in
+`route_all`, after the round-tip nudge, on every edge but self-loops — every
+curve kind and the plain routes included. It samples the drawn curve (basis
+at 16 steps per bezier, step curves as drawn) and tests each sample segment
+against the outline (rect, circle, rhombus) of every node the edge does not
+end on. A subgraph end owns the nodes inside its frame. Obstacles are kept
+in bands about one node thick, both as rows and as columns, each band sorted
+along the other axis; a run of 16 segments looks its bbox up with a binary
+search per band (rows or columns, whichever it crosses fewer of) and tests
+its segments only against what overlaps the run. Markers are looked at only
+once the edge hits a node.
+
+- For the first node hit, waypoints go beside it, perpendicular to the
+  travel direction there, half a node gap (`LayoutConfig::node_gap`) beyond
+  its outline: one waypoint first, then a run of two along the node. The
+  shorter side — the one the curve already leans toward — first, then the
+  other, then 1 and 2 node gaps out. They replace at most one existing
+  control point between the two ends' runs, shortest result first, clamped
+  so the curve never runs backwards and never within 10px of a kept point
+  (that would bend it to a corner).
+- **End runs stay put.** A rect end keeps its face point, lead-in and the
+  point beyond, plus points on the same ray out to two lead-ins (so the line
+  stays straight under the marker); an unmarked end keeps an 8px run. A
+  round end drops its run and is clipped again on the ray from its new
+  neighbour toward the centre, lead-ins on that ray (`reaim`).
+- A candidate is kept only if it clears that node and hits no node — and no
+  other edge's marker (a disc over its length, +4px) — the current curve did
+  not. Markers never trigger a detour themselves. An edge gets at most 6
+  rounds (one node each, at most 24 candidates); a node no candidate clears
+  is left as is. Iteration is in edge
+  and node order, so output is deterministic.
+- The label polyline becomes the detoured control points, so the label
+  follows the new route.
 
 ## Canvas & subgraph frame sizing
 

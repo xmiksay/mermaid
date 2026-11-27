@@ -94,18 +94,22 @@ pub(crate) fn curve_basis_path(pts: &[(f64, f64)]) -> String {
 }
 
 /// The `curveBasis` curve through `pts` flattened to a polyline (each bezier
-/// sampled at `BASIS_SAMPLES` steps) — what a renderer tests label placement
+/// sampled at 8 steps) — what a renderer tests label placement
 /// against, since the drawn curve departs from its control polygon.
 pub(crate) fn curve_basis_points(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    const BASIS_SAMPLES: usize = 8;
+    curve_basis_samples(pts, 8)
+}
+
+/// [`curve_basis_points`] with `samples` steps per bezier.
+pub(crate) fn curve_basis_samples(pts: &[(f64, f64)], samples: usize) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
     for seg in basis_segments(pts) {
         match seg {
             BasisSeg::Move(p) | BasisSeg::Line(p) => out.push(p),
             BasisSeg::Cubic(c1, c2, p) => {
                 let Some(&p0) = out.last() else { continue };
-                for k in 1..=BASIS_SAMPLES {
-                    let t = k as f64 / BASIS_SAMPLES as f64;
+                for k in 1..=samples {
+                    let t = k as f64 / samples as f64;
                     let u = 1.0 - t;
                     let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
                     out.push((

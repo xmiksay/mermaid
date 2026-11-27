@@ -1,3 +1,0 @@
-# Accepted edge-through-node crossings that #402 introduces, by case and
-# edge:node (drawing order), with the reason. Keep this list short.
-faninout.mmd 1:5 Beta->Hub nicks Y1 by ~2px at its rounded corner: the square approach into Hub moves 4px to clear the opposite pair.
