@@ -19,6 +19,7 @@ fn edge(a: EndClip, c: EndClip) -> DetourEdge<'static> {
         ends: ["a", "c"],
         clips: [a, c],
         leads: [0.0, 22.0],
+        flow: 1,
     }
 }
 
@@ -38,7 +39,7 @@ fn run(ctrl: Vec<Pt>, curve: EdgeCurve, e: DetourEdge, nodes: &[(&str, EndClip)]
         .map(|&(id, node)| Obstacle { id, node })
         .collect();
     let mut paths = vec![path(ctrl, curve)];
-    detour_all(&mut paths, &[Some(e)], &obstacles);
+    detour_all(&mut paths, &[Some(e)], &obstacles, &[]);
     paths.pop().flatten().expect("path")
 }
 
@@ -48,7 +49,7 @@ fn hit_count(p: &EdgePath, nodes: &[(&str, EndClip)]) -> usize {
         .filter_map(|&(id, n)| Some((id, Body::new(&n)?)))
         .collect();
     Scene::new(bodies, Vec::new())
-        .hits(&drawn(&p.ctrl, p.curve), true, |_| false)
+        .hits(&drawn(&p.ctrl, p.curve), true, 0.0, |_, _| false)
         .len()
 }
 
@@ -71,8 +72,15 @@ fn edge_through_a_node_goes_round_it_on_the_shorter_side() {
         assert_eq!(hit_count(&p, &nodes[1..2]), 0, "{curve:?} clears B");
         // B sits right of the line, so the detour passes on its left.
         assert!(p.ctrl.iter().all(|q| q.0 <= 0.0), "{curve:?}: {:?}", p.ctrl);
-        assert_eq!(p.ctrl.first(), ctrl.first());
+        // The marked end keeps its tip; the bare one may leave A's outline
+        // elsewhere, heading for the detour.
         assert_eq!(p.ctrl.last(), ctrl.last());
+        let start = p.ctrl.first().copied().expect("start");
+        let on_a = (start.0.abs() - 30.0).abs() < 1e-6 || (start.1.abs() - 20.0).abs() < 1e-6;
+        assert!(
+            on_a && start.0.abs() <= 30.0 && start.1.abs() <= 20.0,
+            "{start:?}"
+        );
         assert_eq!(p.label, p.ctrl, "the label follows the detour");
     }
 }
@@ -133,19 +141,29 @@ fn a_round_end_is_aimed_again_from_its_new_neighbour() {
 }
 
 #[test]
-fn a_subgraph_end_owns_the_nodes_inside_its_frame() {
+fn a_subgraph_end_owns_its_members_only_for_a_member() {
     let (ctrl, nodes) = column();
-    let frame = EndClip {
-        center: (0.0, 200.0),
+    let frame = |center: Pt| EndClip {
+        center,
         size: (200.0, 200.0),
         shape: None,
     };
-    let e = DetourEdge {
+    let to = |g: EndClip| DetourEdge {
         ends: ["a", "g"],
-        clips: [nodes[0].1, frame],
+        clips: [nodes[0].1, g],
         leads: [0.0, 22.0],
+        flow: 1,
     };
-    assert_eq!(run(ctrl.clone(), EdgeCurve::Basis, e, &nodes).ctrl, ctrl);
+    // A sits inside the frame too: B is part of where the edge goes.
+    let inner = to(frame((0.0, 100.0)));
+    assert_eq!(
+        run(ctrl.clone(), EdgeCurve::Basis, inner, &nodes).ctrl,
+        ctrl
+    );
+    // From outside, the edge still keeps off the frame's members.
+    let outer = to(frame((0.0, 200.0)));
+    let p = run(ctrl, EdgeCurve::Basis, outer, &nodes);
+    assert_eq!(hit_count(&p, &nodes[1..2]), 0);
 }
 
 #[test]
@@ -161,12 +179,13 @@ fn other_markers_are_kept_clear_of_but_never_trigger_a_detour() {
         ends: ["x", "y"],
         clips: [nodes[0].1, nodes[2].1],
         leads: [0.0, 22.0],
+        flow: 1,
     };
     let far: Vec<Obstacle> = [("a", nodes[0].1), ("c", nodes[2].1)]
         .iter()
         .map(|&(id, node)| Obstacle { id, node })
         .collect();
-    detour_all(&mut paths, &[Some(e()), Some(other)], &far);
+    detour_all(&mut paths, &[Some(e()), Some(other)], &far, &[]);
     assert_eq!(paths[0].as_ref().expect("path").ctrl, ctrl);
 }
 
@@ -182,6 +201,7 @@ fn a_detour_keeps_clear_of_other_markers() {
         ends: ["x", "b"],
         clips: [nodes[0].1, nodes[1].1],
         leads: [0.0, 22.0],
+        flow: 1,
     };
     let obstacles: Vec<Obstacle> = nodes
         .iter()
@@ -191,9 +211,55 @@ fn a_detour_keeps_clear_of_other_markers() {
         &mut paths,
         &[Some(edge(nodes[0].1, nodes[2].1)), Some(other)],
         &obstacles,
+        &[],
     );
     let p = paths[0].as_ref().expect("path");
     let head = clip((-34.0, 150.0), (26.0, 26.0), NodeShape::Circle);
     assert_eq!(hit_count(p, &nodes[1..2]), 0);
     assert_eq!(hit_count(p, &[("h", head)]), 0, "{:?}", p.ctrl);
+}
+
+#[test]
+fn a_far_end_behind_a_wide_node_is_reached_round_its_end() {
+    // A wide node right between A and D, D under its right part: no move
+    // across the crossing clears it, only going round its right end.
+    let a = rect((0.0, 0.0));
+    let wide = clip((300.0, 150.0), (700.0, 44.0), NodeShape::Rect);
+    let d = rect((500.0, 300.0));
+    let nodes = [("a", a), ("b", wide), ("c", d)];
+    let ctrl = vec![(30.0, 10.0), (500.0, 236.0), (500.0, 258.0), (500.0, 280.0)];
+    let p = run(ctrl, EdgeCurve::Basis, edge(a, d), &nodes);
+    assert_eq!(hit_count(&p, &nodes[1..2]), 0, "{:?}", p.ctrl);
+    assert!(
+        p.ctrl.iter().any(|q| q.0 > 650.0),
+        "round the end: {:?}",
+        p.ctrl
+    );
+    let (_, back) = measure(&drawn(&p.ctrl, p.curve), 1, ((30.0, 10.0), (500.0, 280.0)));
+    assert!(back <= BACKTRACK, "never back up the flow: {back}");
+}
+
+#[test]
+fn a_step_detour_puts_its_leg_on_the_clearance_line() {
+    let (ctrl, nodes) = column();
+    let p = run(ctrl, EdgeCurve::Step, edge(nodes[0].1, nodes[2].1), &nodes);
+    // B spans x -20..40: the vertical leg runs half a gap clear of it.
+    let gap = LayoutConfig::default().node_gap;
+    let legs: Vec<f64> = p
+        .ctrl
+        .windows(2)
+        .filter(|w| w[0].0 == w[1].0)
+        .map(|w| w[0].0)
+        .collect();
+    assert!(legs.contains(&(-20.0 - gap / 2.0)), "{:?}", p.ctrl);
+}
+
+#[test]
+fn backtrack_counts_only_travel_against_the_flow() {
+    let tips = ((0.0, 0.0), (0.0, 100.0));
+    // Out sideways and back is fine; up against a top-down flow is not.
+    let sideways = [(0.0, 0.0), (80.0, 50.0), (0.0, 100.0)];
+    assert_eq!(measure(&sideways, 1, tips).1, 0.0);
+    let hook = [(0.0, 0.0), (0.0, -30.0), (0.0, 100.0)];
+    assert_eq!(measure(&hook, 1, tips).1, 30.0);
 }

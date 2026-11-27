@@ -136,8 +136,14 @@ pub(super) struct Approach {
 }
 
 /// Route every edge; `None` stays `None` (invisible or unresolved). Edges
-/// that would run through one of the `obstacles` are detoured last.
-pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, obstacles: &[Obstacle]) -> Vec<Option<EdgePath>> {
+/// that would run through one of the `obstacles` are detoured (kept off the
+/// subgraph `frames` borders) before the round tips are nudged apart, so a
+/// re-aimed round end is nudged too.
+pub(super) fn route_all(
+    ins: Vec<Option<EdgeIn>>,
+    obstacles: &[Obstacle],
+    frames: &[[f64; 4]],
+) -> Vec<Option<EdgePath>> {
     let aps: Vec<[Option<Approach>; 2]> = ins
         .iter()
         .map(|e| e.as_ref().map_or([None, None], approaches))
@@ -156,6 +162,7 @@ pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, obstacles: &[Obstacle]) -> Vec
                 ends: [e.edge.from.as_str(), e.edge.to.as_str()],
                 clips: [e.geom.0, e.geom.1],
                 leads: [e.lead(0), e.lead(1)],
+                flow: e.axes().0,
             })
         })
         .collect();
@@ -164,8 +171,8 @@ pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, obstacles: &[Obstacle]) -> Vec
         .zip(aps.iter().zip(offsets))
         .map(|(e, (ap, off))| e.map(|e| route_edge(e, ap, off)))
         .collect();
+    detour_all(&mut paths, &detours, obstacles, frames);
     nudge_round_tips(&round, &mut paths);
-    detour_all(&mut paths, &detours, obstacles);
     paths
 }
 

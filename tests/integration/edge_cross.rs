@@ -6,34 +6,36 @@ use mermaid_svg::render;
 
 use crate::edge_canvas::baseline;
 use crate::edge_ends::graph_sources;
-use crate::svg_read::{drawn, labels, node_at, nodes, Kind, Node, Pt};
+use crate::flow_nodes::{flow_nodes, node_of_tip, FlowNode};
+use crate::svg_read::{drawn, labels, nodes, Node, Pt};
 use crate::svg_shapes::frames;
 
 /// `edge:node` pairs (drawing order) where an edge runs through a node it
 /// does not end on; `-` for none. An edge ending on a subgraph frame owns
-/// the nodes inside that frame.
-fn crossings(svg: &str) -> String {
-    let (ns, fs) = (nodes(svg), frames(svg));
+/// the nodes inside that frame only when its other end lies inside it too
+/// (a member, or a nested frame).
+pub(crate) fn crossings(svg: &str) -> String {
+    let (ns, fs) = (flow_nodes(svg), frames(svg));
+    let within =
+        |b: (f64, f64, f64, f64), c: Pt| b.0 <= c.0 && c.0 <= b.2 && b.1 <= c.1 && c.1 <= b.3;
     let pairs: Vec<String> = drawn(svg)
         .iter()
         .enumerate()
         .flat_map(|(ei, d)| {
             let tips = [d.raw[0], d.raw[d.raw.len() - 1]];
-            let ends = tips.map(|p| node_at(&ns, p));
+            let ends = tips.map(|p| node_of_tip(&ns, p));
             let owned: Vec<&Node> = fs
                 .iter()
-                .filter(|f| tips.iter().any(|&p| f.on_outline(p)))
+                .filter(|f| {
+                    (f.on_outline(tips[0]) && within(f.b, tips[1]))
+                        || (f.on_outline(tips[1]) && within(f.b, tips[0]))
+                })
                 .collect();
-            let owns = |n: &Node| {
-                let c = n.center();
-                owned
-                    .iter()
-                    .any(|f| f.b.0 <= c.0 && c.0 <= f.b.2 && f.b.1 <= c.1 && c.1 <= f.b.3)
-            };
+            let owns = |n: &FlowNode| owned.iter().any(|f| within(f.b, n.center()));
             ns.iter()
                 .enumerate()
                 .filter(|&(i, n)| !ends.contains(&Some(i)) && !owns(n))
-                .filter(|(_, n)| walk(&d.curve).any(|p| inside(n, p)))
+                .filter(|(_, n)| walk(&d.curve).any(|p| n.inside(p, 1.0)))
                 .map(|(i, _)| format!("{ei}:{i}"))
                 .collect::<Vec<_>>()
         })
@@ -58,24 +60,6 @@ fn walk(curve: &[Pt]) -> impl Iterator<Item = Pt> + '_ {
     })
 }
 
-/// Strictly inside the node's outline, 1px in from it.
-fn inside(n: &Node, p: Pt) -> bool {
-    let (c, hw, hh) = (
-        n.center(),
-        (n.b.2 - n.b.0) / 2.0 - 1.0,
-        (n.b.3 - n.b.1) / 2.0 - 1.0,
-    );
-    let (dx, dy) = ((p.0 - c.0).abs(), (p.1 - c.1).abs());
-    if hw <= 0.0 || hh <= 0.0 {
-        return false;
-    }
-    match n.kind {
-        Kind::Rect => dx < hw && dy < hh,
-        Kind::Circle => dx.hypot(dy) < hw,
-        Kind::Rhombus => dx / hw + dy / hh < 1.0,
-    }
-}
-
 #[test]
 fn flowchart_edges_cross_no_nodes() {
     let bad: Vec<String> = graph_sources(&["flowchart"])
@@ -93,28 +77,32 @@ fn flowchart_edges_cross_no_nodes() {
     );
 }
 
-/// The gate above sees a crossing: a straight edge from A to C drawn right
-/// through B is reported, the same edge bent around B is not.
+/// The gate above sees a crossing whatever the node's colours, through a
+/// straight-sided outline by its real shape: a line through B is reported,
+/// the same line bent around B is not, and one through the empty corner of
+/// a parallelogram's box is not either.
 #[test]
 fn crossing_check_reports_an_edge_through_a_node() {
-    let node = |x: f64| {
+    let rect = |x: f64| {
         format!(
-            "<rect x=\"{x}\" y=\"0\" width=\"40\" height=\"20\" fill=\"#ECECFF\" stroke=\"#9370DB\"/>"
+            "<rect x=\"{x}\" y=\"0\" width=\"40\" height=\"20\" fill=\"#bbf\" stroke=\"#33f\"/><text>n</text>"
         )
     };
-    let svg = |d: &str| {
+    let lean =
+        "<path d=\"M110 0 L140 0 L130 20 L100 20 Z\" fill=\"#fdd\" stroke=\"#900\"/><text>p</text>";
+    let svg = |d: &str, mid: &str| {
         format!(
-            "<svg viewBox=\"0 0 300 100\">{}{}{}<path d=\"{d}\" fill=\"none\" stroke-width=\"1.5\"/></svg>",
-            node(0.0),
-            node(100.0),
-            node(200.0)
+            "<svg viewBox=\"0 0 300 100\"><defs></defs><path d=\"{d}\" fill=\"none\" stroke-width=\"1.5\"/>{}{mid}{}</svg>",
+            rect(0.0),
+            rect(200.0)
         )
     };
-    assert_eq!(crossings(&svg("M40 10L200 10")), "0:1");
-    assert_eq!(
-        crossings(&svg("M40 10L70 10L70 60L170 60L170 10L200 10")),
-        "-"
-    );
+    assert_eq!(crossings(&svg("M40 10L200 10", &rect(100.0))), "0:1");
+    let around = "M40 10L70 10L70 60L170 60L170 10L200 10";
+    assert_eq!(crossings(&svg(around, &rect(100.0))), "-");
+    assert_eq!(crossings(&svg("M40 10L200 10", lean)), "0:1");
+    let corner = "M40 2L106 2L95 30L95 60L190 60L190 10L200 10";
+    assert_eq!(crossings(&svg(corner, lean)), "-");
 }
 
 fn overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
