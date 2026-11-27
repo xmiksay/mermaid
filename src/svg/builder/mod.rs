@@ -14,7 +14,9 @@ mod curves;
 mod tests;
 mod text;
 
-pub(crate) use curves::{curve_basis_path, curve_basis_points, curve_linear_path, curve_step_path};
+pub(crate) use curves::{
+    curve_basis_path, curve_basis_points, curve_basis_samples, curve_linear_path, curve_step_path,
+};
 pub use text::{escape, split_label_lines};
 
 /// Baseline-to-baseline spacing used when a label is split across lines.

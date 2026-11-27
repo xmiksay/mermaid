@@ -10,6 +10,7 @@ use super::builder::SvgBuilder;
 use super::style::resolve_edge_style;
 use super::theme::Theme;
 
+mod detour;
 mod directions;
 mod edges;
 mod nodes;
@@ -18,6 +19,7 @@ mod route;
 mod shapes;
 mod slots;
 
+use detour::Obstacle;
 use directions::*;
 use edges::*;
 use nodes::*;
@@ -284,7 +286,22 @@ fn route_edges(
             })
         })
         .collect();
-    route_all(ins)
+    let obstacles: Vec<Obstacle> = d
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| {
+            Some(Obstacle {
+                id: &n.id,
+                node: EndClip {
+                    center: *pos.get(&(i as NodeId))?,
+                    size: *node_sizes.get(i)?,
+                    shape: Some(n.shape),
+                },
+            })
+        })
+        .collect();
+    route_all(ins, &obstacles)
 }
 
 #[cfg(test)]

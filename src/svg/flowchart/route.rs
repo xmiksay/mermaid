@@ -8,6 +8,7 @@ use crate::svg::builder::curve_basis_points;
 use crate::svg::geometry::clip_polyline;
 use crate::svg::style::ResolvedStyle;
 
+use super::detour::{detour_all, DetourEdge, Obstacle};
 use super::edges::{basis_control_points, clip_end, EdgeGeometry, EndClip};
 use super::round::{is_round, nudge_round_tips, RoundEnd};
 use super::slots::{kind, marker_width, slot_offsets};
@@ -18,7 +19,7 @@ pub(super) type Pt = (f64, f64);
 pub(super) const ALIGNED_EPS: f64 = 2.0;
 /// Clearance between an arrowhead's base and the point where the curve may
 /// start to turn.
-const LEAD_MARGIN: f64 = 4.0;
+pub(super) const LEAD_MARGIN: f64 = 4.0;
 
 /// One edge, resolved: what is drawn and what its label is placed along.
 pub(super) struct EdgePath {
@@ -134,8 +135,9 @@ pub(super) struct Approach {
     pub(super) from_cross: f64,
 }
 
-/// Route every edge; `None` stays `None` (invisible or unresolved).
-pub(super) fn route_all(ins: Vec<Option<EdgeIn>>) -> Vec<Option<EdgePath>> {
+/// Route every edge; `None` stays `None` (invisible or unresolved). Edges
+/// that would run through one of the `obstacles` are detoured last.
+pub(super) fn route_all(ins: Vec<Option<EdgeIn>>, obstacles: &[Obstacle]) -> Vec<Option<EdgePath>> {
     let aps: Vec<[Option<Approach>; 2]> = ins
         .iter()
         .map(|e| e.as_ref().map_or([None, None], approaches))
@@ -147,12 +149,23 @@ pub(super) fn route_all(ins: Vec<Option<EdgeIn>>) -> Vec<Option<EdgePath>> {
         .filter_map(|(i, e)| Some((i, e.as_ref()?)))
         .flat_map(|(i, e)| (0..2).filter_map(move |which| round_end(i, e, which)))
         .collect();
+    let detours: Vec<Option<DetourEdge>> = ins
+        .iter()
+        .map(|e| {
+            e.as_ref().map(|e| DetourEdge {
+                ends: [e.edge.from.as_str(), e.edge.to.as_str()],
+                clips: [e.geom.0, e.geom.1],
+                leads: [e.lead(0), e.lead(1)],
+            })
+        })
+        .collect();
     let mut paths: Vec<Option<EdgePath>> = ins
         .into_iter()
         .zip(aps.iter().zip(offsets))
         .map(|(e, (ap, off))| e.map(|e| route_edge(e, ap, off)))
         .collect();
     nudge_round_tips(&round, &mut paths);
+    detour_all(&mut paths, &detours, obstacles);
     paths
 }
 

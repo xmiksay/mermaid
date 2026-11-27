@@ -43,6 +43,8 @@ src/
 │   ├── interact.rs  shared click/link wrappers (open_click/close_click)
 │   ├── sankey_layout.rs  d3-sankey column assignment + ordering relaxation
 │   ├── {sequence,flowchart,state,class,c4,block,timeline}/  multi-file per-diagram renderers (mod + submodules)
+│   │                flowchart/ edge geometry: route.rs (control points), slots.rs (face slots),
+│   │                round.rs (round ends), detour/ (steers edges around nodes they cross, #403)
 │   └── {pie,er,gantt,journey,sankey,quadrant,xychart,radar,packet,
 │        mindmap,gitgraph,requirement,architecture,kanban,treemap}.rs
 ├── sugiyama/        layered graph layout (private)
@@ -143,13 +145,12 @@ ends meet faces by rank relation (routed ends too) and run straight under
 every marker, aligned edges stay straight, every marker tip stays on its
 node (on a circle's or rhombus's actual outline), edges never hook into their
 heads, small round targets keep edges in their band, no edge leaves the viewBox
-(flowchart/state/class/ER/requirement), output is deterministic, and
-baselines captured before #402 guard against regressions:
+(flowchart/state/class/ER/requirement), no flowchart edge runs through a
+rect, circle or rhombus it does not end on (a subgraph end owns the nodes
+inside its frame; strict, no baseline or waivers — #403), output is
+deterministic, and baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
-one translation), `baseline-crossings.txt` (per flowchart case, each
-`edge:node` pair where an edge runs through a rect, circle or rhombus it does
-not end on — compared per edge, so a swap still fails; accepted exceptions
-are listed with their reason in `crossing-waivers.txt`), `baseline-counts.txt`
+one translation), `baseline-counts.txt`
 (flowchart sample label collisions) and `baseline-heads.txt` (flowchart
 different-kind heads closer than 12px, and bare ends within 3px of an
 arrowhead tip); counts may only drop. `EDGE_BASELINE_WRITE=1 make
