@@ -26,8 +26,8 @@ mod scene;
 mod search;
 
 use body::{unit, Body};
-use lines::Lines;
-use scene::Scene;
+use lines::{Lines, FRAME};
+pub(super) use scene::Scene;
 use search::detour;
 
 /// A node edges may not run through, unless they end on it.
@@ -45,6 +45,8 @@ pub(super) struct DetourEdge<'a> {
     pub(super) leads: [f64; 2],
     /// The flow axis between the ends (0 x, 1 y).
     pub(super) flow: usize,
+    /// Its place among the edges (drawing order).
+    pub(super) index: usize,
 }
 
 /// Whether `c` lies within the box of `e`.
@@ -69,13 +71,14 @@ impl DetourEdge<'_> {
 /// Detour every edge (self-loops excepted) around the nodes it runs through.
 /// Other edges' markers, where it does not end itself, are avoided too, but
 /// only by a detour: an edge already running over one is not moved for it.
-/// `frames` are the subgraph frames `(x0, y0, x1, y1)`.
-pub(super) fn detour_all(
+/// `frames` are the subgraph frames `(x0, y0, x1, y1)`. Returns the nodes
+/// as obstacles, for what moves the edges after.
+pub(super) fn detour_all<'a>(
     paths: &mut [Option<EdgePath>],
-    edges: &[Option<DetourEdge>],
-    obstacles: &[Obstacle],
+    edges: &[Option<DetourEdge<'a>>],
+    obstacles: &[Obstacle<'a>],
     frames: &[[f64; 4]],
-) {
+) -> Scene<'a> {
     let gap = LayoutConfig::default().node_gap;
     let nodes: Vec<(&str, Body)> = obstacles
         .iter()
@@ -89,8 +92,9 @@ pub(super) fn detour_all(
         .flat_map(|(i, p, e)| marks(&p.ctrl, e).into_iter().map(move |m| (i, m)))
         .collect();
     let mut scene = Scene::new(nodes, first_marks);
-    // Each edge's drawn points, sampled when a detour nearby first needs them.
-    let drawn_cache: RefCell<Vec<Option<Vec<Pt>>>> = RefCell::new(vec![None; paths.len()]);
+    // Every edge's lines and the frame borders, gathered when a detour
+    // first scores running along them, patched as edges move.
+    let lines: RefCell<Option<Lines>> = RefCell::new(None);
     for i in 0..paths.len() {
         let (Some(Some(path)), Some(Some(edge))) = (paths.get(i), edges.get(i)) else {
             continue;
@@ -98,68 +102,42 @@ pub(super) fn detour_all(
         if edge.ends[0] == edge.ends[1] {
             continue;
         }
-        let lines = |region: [f64; 4]| lines_near(paths, &drawn_cache, frames, i, region);
-        let Some(ctrl) = detour(&path.ctrl, path.curve, edge, &scene, gap, &lines) else {
+        let along = |samples: &[Pt]| {
+            let mut lines = lines.borrow_mut();
+            lines
+                .get_or_insert_with(|| all_lines(paths, frames))
+                .along(i, samples)
+        };
+        let Some(ctrl) = detour(&path.ctrl, path.curve, edge, &scene, gap, &along) else {
             continue;
         };
         scene.moved(i, marks(&ctrl, edge));
         if let Some(Some(path)) = paths.get_mut(i) {
             path.label = ctrl.clone();
             path.ctrl = ctrl;
-            if let Some(slot) = drawn_cache.borrow_mut().get_mut(i) {
-                *slot = None;
+            if let Some(lines) = lines.borrow_mut().as_mut() {
+                lines.moved(i, &path.drawn_points());
             }
         }
     }
+    scene
 }
 
-/// The drawn lines of every edge but `skip` that overlap `region`, and
-/// every frame border (few, and long: a detour may run along one far from
-/// the node it passes).
-fn lines_near(
-    paths: &[Option<EdgePath>],
-    cache: &RefCell<Vec<Option<Vec<Pt>>>>,
-    frames: &[[f64; 4]],
-    skip: usize,
-    region: [f64; 4],
-) -> Lines {
-    let mut cache = cache.borrow_mut();
-    let meets = |b: [f64; 4]| {
-        b[0] <= region[2] && b[2] >= region[0] && b[1] <= region[3] && b[3] >= region[1]
-    };
-    let mut segs: Vec<(Pt, Pt)> = Vec::new();
+/// Every edge's drawn lines, and every frame border.
+fn all_lines(paths: &[Option<EdgePath>], frames: &[[f64; 4]]) -> Lines {
+    let mut segs: Vec<(usize, (Pt, Pt))> = Vec::new();
     for (j, p) in paths.iter().enumerate() {
-        let Some(p) = p.as_ref().filter(|_| j != skip) else {
-            continue;
-        };
-        if !meets(hull(&p.ctrl)) {
-            continue;
+        if let Some(p) = p {
+            let s = p.drawn_points();
+            segs.extend(s.windows(2).map(|w| (j, (w[0], w[1]))));
         }
-        let Some(slot) = cache.get_mut(j) else {
-            continue;
-        };
-        let s = slot.get_or_insert_with(|| p.drawn_points());
-        segs.extend(
-            s.windows(2)
-                .map(|w| (w[0], w[1]))
-                .filter(|&(a, b)| meets(hull(&[a, b]))),
-        );
     }
     for f in frames {
         let c = [(f[0], f[1]), (f[2], f[1]), (f[2], f[3]), (f[0], f[3])];
         let sides = c.iter().zip(c.iter().cycle().skip(1));
-        segs.extend(sides.map(|(a, b)| (*a, *b)));
+        segs.extend(sides.map(|(a, b)| (FRAME, (*a, *b))));
     }
     Lines::new(segs)
-}
-
-/// The bounding box of `pts`; a basis curve stays inside its control
-/// points' (so do linear and step ones).
-pub(super) fn hull(pts: &[Pt]) -> [f64; 4] {
-    let inf = f64::INFINITY;
-    pts.iter().fold([inf, inf, -inf, -inf], |m, p| {
-        [m[0].min(p.0), m[1].min(p.1), m[2].max(p.0), m[3].max(p.1)]
-    })
 }
 
 /// The markers of an edge drawn through `ctrl`.

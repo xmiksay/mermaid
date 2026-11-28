@@ -102,12 +102,22 @@ pub(crate) fn curve_basis_points(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
 
 /// [`curve_basis_points`] with `samples` steps per bezier.
 pub(crate) fn curve_basis_samples(pts: &[(f64, f64)], samples: usize) -> Vec<(f64, f64)> {
+    curve_basis_samples_by(pts, |_| samples)
+}
+
+/// As `curve_basis_samples`, with `samples(&[p0, c1, c2, p])` points on each
+/// cubic.
+pub(crate) fn curve_basis_samples_by(
+    pts: &[(f64, f64)],
+    samples: impl Fn(&[(f64, f64); 4]) -> usize,
+) -> Vec<(f64, f64)> {
     let mut out: Vec<(f64, f64)> = Vec::new();
     for seg in basis_segments(pts) {
         match seg {
             BasisSeg::Move(p) | BasisSeg::Line(p) => out.push(p),
             BasisSeg::Cubic(c1, c2, p) => {
                 let Some(&p0) = out.last() else { continue };
+                let samples = samples(&[p0, c1, c2, p]);
                 for k in 1..=samples {
                     let t = k as f64 / samples as f64;
                     let u = 1.0 - t;

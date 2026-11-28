@@ -5,7 +5,12 @@ use std::collections::BTreeMap;
 
 use super::super::route::Pt;
 use super::body::Body;
-use super::index::Index;
+use super::index::Layer;
+use super::DetourEdge;
+use crate::svg::builder::curve_basis_samples;
+
+/// How close a re-aimed end may come to another edge's head.
+const HEAD_ROOM: f64 = 6.0;
 
 /// One body a curve runs through: its index in the scene and the first and
 /// last sample segments inside it.
@@ -44,89 +49,15 @@ pub(super) fn segment_box(a: Pt, b: Pt, m: f64) -> [f64; 4] {
     ]
 }
 
-/// Items with an owning edge, indexed and patched as edges move: a moved
-/// edge's old items die and its new ones go into a small second index,
-/// folded into the main one once it holds a quarter as many.
-struct Layer<T> {
-    items: Vec<T>,
-    owner: Vec<usize>,
-    dead: Vec<bool>,
-    area: fn(&T) -> [f64; 4],
-    index: Index,
-    fresh: Vec<usize>,
-    fresh_index: Index,
-}
-
-impl<T> Layer<T> {
-    fn new(items: Vec<(usize, T)>, area: fn(&T) -> [f64; 4]) -> Self {
-        let (owner, items): (Vec<usize>, Vec<T>) = items.into_iter().unzip();
-        let all: Vec<usize> = (0..items.len()).collect();
-        let mut layer = Self {
-            dead: vec![false; items.len()],
-            items,
-            owner,
-            area,
-            index: Index::new(&[]),
-            fresh: Vec::new(),
-            fresh_index: Index::new(&[]),
-        };
-        layer.index = layer.index_of(&all);
-        layer
-    }
-
-    fn index_of(&self, ids: &[usize]) -> Index {
-        let boxes: Vec<(usize, [f64; 4])> = ids
-            .iter()
-            .filter(|&&i| !self.dead.get(i).copied().unwrap_or(true))
-            .filter_map(|&i| Some((i, (self.area)(self.items.get(i)?))))
-            .collect();
-        Index::new(&boxes)
-    }
-
-    /// Live items that may overlap `b`, possibly repeated.
-    fn near(&self, b: &[f64; 4], out: &mut Vec<usize>) {
-        out.clear();
-        for (index, all) in [(&self.index, None), (&self.fresh_index, Some(&self.fresh))] {
-            let start = out.len();
-            if index.near(b, out).is_none() {
-                out.truncate(start);
-                match all {
-                    Some(fresh) => out.extend(fresh),
-                    None => out.extend(0..self.items.len()),
-                }
-            }
-        }
-        out.retain(|&i| !self.dead.get(i).copied().unwrap_or(true));
-    }
-
-    fn replace(&mut self, edge: usize, new: Vec<T>) {
-        for (o, d) in self.owner.iter().zip(&mut self.dead) {
-            *d |= *o == edge;
-        }
-        for t in new {
-            self.fresh.push(self.items.len());
-            self.items.push(t);
-            self.owner.push(edge);
-            self.dead.push(false);
-        }
-        if self.fresh.len() * 4 > self.items.len() {
-            let all: Vec<usize> = (0..self.items.len()).collect();
-            self.index = self.index_of(&all);
-            self.fresh.clear();
-        }
-        self.fresh_index = self.index_of(&self.fresh);
-    }
-}
-
 /// Every obstacle — nodes, then markers — with the id of the node it
 /// belongs to.
-pub(super) struct Scene<'a> {
+pub(in super::super) struct Scene<'a> {
     nodes: Layer<(&'a str, Body)>,
     marks: Layer<(&'a str, Body)>,
 }
 
 /// Closer than this to a node, a curve all but touches it.
-pub(super) const CLOSE: f64 = 4.0;
+pub(super) const CLOSE: f64 = 5.0;
 
 /// What a curve touches: nodes cut, nodes grazed (and of those, the ones
 /// come `CLOSE`), markers cut.
@@ -156,6 +87,29 @@ impl<'a> Scene<'a> {
         } else {
             self.marks.items.get(i)
         }
+    }
+
+    /// The nodes overlapping a node `edge` ends on (a layout that stacks
+    /// nodes leaves no way past them): the edge may run through those.
+    pub(super) fn stacked(&self, edge: &DetourEdge) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut near = Vec::new();
+        for (end, id) in edge.clips.iter().zip(edge.ends) {
+            if end.shape.is_none() {
+                continue;
+            }
+            let (c, h) = (end.center, (end.size.0 / 2.0 - 1.0, end.size.1 / 2.0 - 1.0));
+            let b = [c.0 - h.0, c.1 - h.1, c.0 + h.0, c.1 + h.1];
+            self.nodes.near(&b, &mut near);
+            for &i in &near {
+                if let Some(&(other, body)) = self.nodes.items.get(i) {
+                    if other != id && body.overlaps(&b) && !out.contains(&other) {
+                        out.push(other);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Whether any node but those `skip` names overlaps the box `b`.
@@ -299,33 +253,58 @@ impl<'a> Scene<'a> {
         t
     }
 
-    /// Whether the sampled curve runs through anything but `allowed` (as
-    /// `hits`), stopping at the first.
-    pub(super) fn hits_other(
+    /// Whether the sampled curve runs through anything (as `hits`),
+    /// stopping at the first.
+    pub(super) fn hits_any(
         &self,
         samples: &[Pt],
         marks: bool,
         grow: f64,
         skip: impl Fn(&str, Pt) -> bool,
-        allowed: &[Ob],
     ) -> bool {
         let mut other = false;
-        self.scan(samples, marks, grow, skip, |ob, _| {
-            other = !allowed.contains(&ob);
-            !other
+        self.scan(samples, marks, grow, skip, |_, _| {
+            other = true;
+            false
         });
         other
     }
 
-    /// Whether `p` lies on a marker at the node `id`.
-    pub(super) fn head_at(&self, id: &str, p: Pt) -> bool {
+    /// Whether the end `which` of `edge`, drawn through `ctrl`, keeps out of
+    /// every node it does not own (the few spans near that end).
+    pub(in super::super) fn keeps_clear(
+        &self,
+        edge: &DetourEdge,
+        ctrl: &[Pt],
+        which: usize,
+    ) -> bool {
+        const NEAR_END: usize = 6;
+        let n = ctrl.len();
+        let part = if which == 0 {
+            ctrl.get(..NEAR_END.min(n))
+        } else {
+            ctrl.get(n.saturating_sub(NEAR_END)..)
+        };
+        let samples = curve_basis_samples(part.unwrap_or(ctrl), 16);
+        let stacked = self.stacked(edge);
+        !self.hits_any(&samples, false, 0.0, |id, c| {
+            edge.owns(id, c) || stacked.contains(&id)
+        })
+    }
+
+    /// Whether `p` lies on (or within `HEAD_ROOM` of) a marker at the node
+    /// `id` of an edge other than `edge`: heads of different kinds there
+    /// would run together.
+    pub(super) fn head_at(&self, id: &str, p: Pt, edge: usize) -> bool {
         let mut near = Vec::new();
-        self.marks.near(&[p.0, p.1, p.0, p.1], &mut near);
+        self.marks.near(&segment_box(p, p, HEAD_ROOM), &mut near);
         near.iter().any(|&i| {
-            self.marks
-                .items
-                .get(i)
-                .is_some_and(|(m, b)| *m == id && b.contains(p))
+            self.marks.owner.get(i).is_some_and(|&o| o != edge)
+                && self
+                    .marks
+                    .items
+                    .get(i)
+                    .is_some_and(|(m, b)| *m == id && b.grown(HEAD_ROOM).contains(p))
         })
     }
 
@@ -387,5 +366,16 @@ mod tests {
         let samples = [(4_990.0, 200.0), (5_010.0, 200.0)];
         assert!(scene.hits(&samples, false, 0.0, |_, _| false).is_empty());
         assert!(cut(&scene, (f64::NAN, 0.0), (0.0, 0.0), 4).is_empty());
+    }
+
+    #[test]
+    fn a_head_counts_near_it_but_not_for_its_own_edge() {
+        let marks = vec![(3, ("a", body((0.0, 0.0), (10.0, 10.0))))];
+        let scene = Scene::new(vec![("a", body((0.0, 30.0), (60.0, 40.0)))], marks);
+        assert!(scene.head_at("a", (0.0, 0.0), 1));
+        assert!(scene.head_at("a", (9.0, 0.0), 1), "within HEAD_ROOM");
+        assert!(!scene.head_at("a", (13.0, 0.0), 1));
+        assert!(!scene.head_at("a", (0.0, 0.0), 3), "its own head");
+        assert!(!scene.head_at("b", (0.0, 0.0), 1), "another node's");
     }
 }

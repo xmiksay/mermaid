@@ -15,7 +15,8 @@ mod tests;
 mod text;
 
 pub(crate) use curves::{
-    curve_basis_path, curve_basis_points, curve_basis_samples, curve_linear_path, curve_step_path,
+    curve_basis_path, curve_basis_points, curve_basis_samples, curve_basis_samples_by,
+    curve_linear_path, curve_step_path,
 };
 pub use text::{escape, split_label_lines};
 

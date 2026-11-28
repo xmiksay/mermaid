@@ -101,12 +101,14 @@ runs, re-aiming), `detour/body.rs` (node outlines, segment tests, the
 outline's reach past a line), `detour/scene.rs` (nodes and markers,
 indexed), `detour/index.rs` (bands about one box thick, as rows and
 columns, each sorted along the other axis; a plain list below 48 boxes),
-`detour/lines.rs` (other edges and frame borders, for scoring).
+`detour/lines.rs` (one grid of every edge's drawn segments and the frame
+borders, built on first use; a moved edge's segments are marked dead and
+its new ones added, as the scene does with markers).
 
 - **Trigger.** An edge whose control points' bounding box (a basis curve
   stays inside it) overlaps no node it does not own is skipped without
-  sampling. Otherwise the drawn curve (basis at 8 steps per bezier, step
-  curves as drawn) is tested segment by segment against the outline (rect,
+  sampling. Otherwise the drawn curve (basis sampled per bezier so no
+  chord exceeds 8px, 8 to 64 steps; step curves as drawn) is tested segment by segment against the outline (rect,
   circle, rhombus) of every node it does not end on. A subgraph end owns
   the nodes inside its frame only when the other end lies inside that frame
   too (a member to its own frame, nested frames): an edge from outside to a
@@ -119,7 +121,8 @@ columns, each sorted along the other axis; a plain list below 48 boxes),
   the curve by the corner, not by half the node; then a gap out. Only when
   none of those clears the node without coming close to another: 2 gaps
   out, and waypoints out from the node's corners (one corner, or a side
-  past two) — what reaches a far end sitting behind a wide node, going
+  past two, or two sides past three; a circle's corners are those of the
+  octagon round it) — what reaches a far end sitting behind a wide node, going
   round its end. Step curves instead get a pair of waypoints on one
   vertical (or horizontal) line, a clearance off the node's box, which makes
   that line the step's leg. Waypoints replace at most one existing control
@@ -133,9 +136,12 @@ columns, each sorted along the other axis; a plain list below 48 boxes),
   on the ray toward the detour — the head then meets its face at an angle
   but stays straight. A free end — round, or unmarked — is clipped again on
   the ray from its new neighbour (`reaim`), lead-ins on that ray; a rect
-  tip stays 8px off the corners, and a bare rect end keeps its old tip when
-  the new way out would come within 6px of a node or land on a head already
-  there. Linear and step curves keep only the tips.
+  tip stays 8px off the corners. A bare rect end slides along its face
+  toward the detour, or (a second candidate) turns onto the face it now
+  heads for, each only where the way out keeps 6px off every node and
+  lands clear of another edge's head; else it keeps its tip. A round end
+  that would land within 6px of another edge's head at that node keeps its
+  tip and only turns its run. Linear and step curves keep only the tips.
 - **Rules.** A candidate may not run through a node the curve did not, nor
   (step, linear) come within 6px of one; may not run back against the flow
   axis by more than 10px more than before (round a wide node's end it may
@@ -143,19 +149,26 @@ columns, each sorted along the other axis; a plain list below 48 boxes),
   gap. Only the stretch that changed is re-tested. When no candidate is
   clean, one that trades the node for a single node not passed before is
   taken (also over a clean one that comes close to a node) and the next
-  round goes round that one; an edge gets at most 6 rounds. The result is
+  round goes round that one; an edge gets at most 10 rounds. The result is
   kept only if it runs through fewer nodes than the input (or as many and
-  grazes fewer).
+  grazes fewer). Nodes stacked on an end (overlapping it by more than 1px)
+  are exempt. If the cut node cannot be passed, a node the curve comes
+  within 5px of is gone round instead (an *off-round*: no candidate may
+  then cut or come close to anything new); every state reached is kept and
+  the best by (cuts, close, grazed) wins.
 - **Score** = sideways movement + 1000 per node the moved stretch comes
-  within 4px of (rhombi grown face by face) + 40 per node newly grazed
+  within 5px of (rhombi grown face by face) + 40 per node newly grazed
   within 6px + 150 per other edge's marker newly run over + 4 per px of
   running along another edge (near the node) or any frame border (within
   6px, nearly parallel, stretches of 30px or more). A way that comes within
-  4px is pushed off what it comes close to, 3 to 22px, before it is
+  5px is pushed off what it comes close to, 3 to 45px, before it is
   accepted. The shorter side wins unless it traces another line; one clean
   crossing beats a traced stretch. Candidates are built and scored lazily,
   best bound first.
-- After a detour the edge's marker discs are replaced in the scene.
+- After a detour the edge's marker discs and drawn segments are replaced.
+  The round-tip nudge that follows only takes an angle whose sampled end
+  stretch keeps out of every node the edge does not own
+  (`Scene::keeps_clear`), so it cannot undo a detour.
   Iteration is in edge and node order, so output is deterministic. The
   label polyline becomes the detoured control points.
 

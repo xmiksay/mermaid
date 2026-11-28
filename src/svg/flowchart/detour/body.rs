@@ -2,16 +2,19 @@
 //! segments against.
 
 use crate::parse::{EdgeCurve, NodeShape};
-use crate::svg::builder::curve_basis_samples;
+use crate::svg::builder::curve_basis_samples_by;
 
 use super::super::edges::EndClip;
 use super::super::round::is_round;
 use super::super::route::Pt;
 
-/// Steps per basis bezier when testing a curve, as many as the canvas
-/// measurement takes: a 1px chord sag between two samples is within the
-/// clearance kept.
+/// The fewest steps per basis bezier when testing a curve, as many as the
+/// canvas measurement takes.
 pub(super) const SAMPLES: usize = 8;
+/// The most steps per basis bezier.
+const MAX_SAMPLES: usize = 64;
+/// The longest chord between two samples of a long bezier.
+const STEP: f64 = 8.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Outline {
@@ -71,11 +74,19 @@ impl Body {
         }
     }
 
-    /// The outline's corners, each with the way out of it (a circle has
-    /// none: going round it beside the crossing is enough).
+    /// The outline's corners, each with the way out of it (a circle's are
+    /// those of the octagon around it).
     pub(super) fn corners(&self) -> Vec<(Pt, Pt)> {
         if self.outline == Outline::Circle {
-            return Vec::new();
+            // The octagon around it, each corner leaving radially.
+            let r = self.hw / (std::f64::consts::PI / 8.0).cos();
+            return (0..8)
+                .map(|k| {
+                    let a = f64::from(k) * std::f64::consts::PI / 4.0;
+                    let u = (a.cos(), a.sin());
+                    ((self.c.0 + r * u.0, self.c.1 + r * u.1), u)
+                })
+                .collect();
         }
         self.polygon()
             .into_iter()
@@ -237,7 +248,11 @@ pub(super) fn dist(a: Pt, b: Pt) -> f64 {
     (a.0 - b.0).hypot(a.1 - b.1)
 }
 
-/// The points an edge's drawn curve passes through.
+/// The points an edge's drawn curve passes through: on a basis curve,
+/// enough per bezier that no chord between two samples is longer than
+/// `STEP` (so a cut of a node's corner cannot hide between samples on a long
+/// sweep), each bezier sampled on its own so the stretch a detour leaves
+/// alone samples the same.
 pub(super) fn drawn(ctrl: &[Pt], curve: EdgeCurve) -> Vec<Pt> {
     match curve {
         EdgeCurve::Linear => ctrl.to_vec(),
@@ -250,7 +265,11 @@ pub(super) fn drawn(ctrl: &[Pt], curve: EdgeCurve) -> Vec<Pt> {
             }
             out
         }
-        _ => curve_basis_samples(ctrl, SAMPLES),
+        _ => curve_basis_samples_by(ctrl, |c| {
+            // The control polygon is never shorter than the curve.
+            let span: f64 = c.windows(2).map(|w| dist(w[0], w[1])).sum();
+            ((span / STEP).ceil() as usize).clamp(SAMPLES, MAX_SAMPLES)
+        }),
     }
 }
 
@@ -297,5 +316,17 @@ mod tests {
         let out = |k: f64| (20.0 + n.0 * k, -10.0 - n.1 * k);
         assert!(g.contains(out(5.9)));
         assert!(!g.contains(out(6.1)));
+    }
+
+    #[test]
+    fn a_circle_has_the_corners_of_the_octagon_round_it() {
+        let c = Body::new(&clip((0.0, 0.0), (40.0, 40.0), NodeShape::Circle)).expect("circle");
+        let corners = c.corners();
+        assert_eq!(corners.len(), 8);
+        for (v, out) in corners {
+            // Outside the circle, leaving radially.
+            assert!(dist(v, (0.0, 0.0)) > 20.0 && !c.contains(v));
+            assert!((out.0 * v.1 - out.1 * v.0).abs() < 1e-9);
+        }
     }
 }

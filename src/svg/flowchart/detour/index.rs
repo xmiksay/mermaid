@@ -2,6 +2,9 @@
 //! columns, each band sorted along the other axis, so a lookup is a binary
 //! search per band crossed.
 
+use std::cell::OnceCell;
+use std::collections::BTreeMap;
+
 /// Smallest band.
 const MIN_BAND: f64 = 8.0;
 /// Most bands across one axis; a larger scene gets wider bands.
@@ -109,11 +112,11 @@ impl Bands {
     }
 }
 
-/// One kind of body, indexed in rows and in columns; a box is looked up in
-/// whichever it crosses fewer of.
 /// Below this many boxes a plain list beats building bands.
 const SMALL: usize = 48;
 
+/// Boxes indexed in rows and in columns; a box is looked up in whichever
+/// it crosses fewer of.
 pub(super) enum Index {
     /// Few boxes: every lookup gets them all.
     List(Vec<usize>),
@@ -134,21 +137,104 @@ impl Index {
         }
     }
 
-    /// Bodies that may overlap the box `b`, possibly repeated; `None` when
-    /// the box is too large to look up.
-    pub(super) fn near(&self, b: &[f64; 4], out: &mut Vec<usize>) -> Option<()> {
-        let Self::Bands { rows, cols } = self else {
-            if let Self::List(all) = self {
-                out.extend(all);
-            }
-            return Some(());
-        };
-        match (rows.cost(b), cols.cost(b)) {
-            (Some(r), Some(c)) if c < r => cols.near(b, out),
-            (Some(_), _) => rows.near(b, out),
-            (None, Some(_)) => cols.near(b, out),
-            (None, None) => return None,
+    /// Adds to `out` the boxes that may overlap `b`, possibly repeated;
+    /// false when `b` is too large to look up.
+    pub(super) fn near(&self, b: &[f64; 4], out: &mut Vec<usize>) -> bool {
+        match self {
+            Self::List(all) => out.extend(all),
+            Self::Bands { rows, cols } => match (rows.cost(b), cols.cost(b)) {
+                (Some(r), Some(c)) if c < r => cols.near(b, out),
+                (Some(_), _) => rows.near(b, out),
+                (None, Some(_)) => cols.near(b, out),
+                (None, None) => return false,
+            },
         }
-        Some(())
+        true
+    }
+}
+
+/// Items with an owning edge, indexed and patched as edges move: a moved
+/// edge's old items die and its new ones go into a second index, built when
+/// first looked up and folded into the main one once it holds a quarter as
+/// many.
+pub(super) struct Layer<T> {
+    pub(super) items: Vec<T>,
+    pub(super) owner: Vec<usize>,
+    dead: Vec<bool>,
+    area: fn(&T) -> [f64; 4],
+    by_owner: BTreeMap<usize, Vec<usize>>,
+    index: Index,
+    fresh: Vec<usize>,
+    fresh_index: OnceCell<Index>,
+}
+
+impl<T> Layer<T> {
+    pub(super) fn new(items: Vec<(usize, T)>, area: fn(&T) -> [f64; 4]) -> Self {
+        let (owner, items): (Vec<usize>, Vec<T>) = items.into_iter().unzip();
+        let mut by_owner: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (i, &o) in owner.iter().enumerate() {
+            by_owner.entry(o).or_default().push(i);
+        }
+        let mut layer = Self {
+            dead: vec![false; items.len()],
+            items,
+            owner,
+            area,
+            by_owner,
+            index: Index::List(Vec::new()),
+            fresh: Vec::new(),
+            fresh_index: OnceCell::new(),
+        };
+        let all: Vec<usize> = (0..layer.items.len()).collect();
+        layer.index = layer.index_of(&all);
+        layer
+    }
+
+    fn index_of(&self, ids: &[usize]) -> Index {
+        let boxes: Vec<(usize, [f64; 4])> = ids
+            .iter()
+            .filter(|&&i| !self.dead.get(i).copied().unwrap_or(true))
+            .filter_map(|&i| Some((i, (self.area)(self.items.get(i)?))))
+            .collect();
+        Index::new(&boxes)
+    }
+
+    /// Live items that may overlap `b`, possibly repeated.
+    pub(super) fn near(&self, b: &[f64; 4], out: &mut Vec<usize>) {
+        out.clear();
+        if !self.index.near(b, out) {
+            out.clear();
+            out.extend(0..self.items.len());
+        } else if !self.fresh.is_empty() {
+            let fresh = self.fresh_index.get_or_init(|| self.index_of(&self.fresh));
+            if !fresh.near(b, out) {
+                out.extend(&self.fresh);
+            }
+        }
+        out.retain(|&i| !self.dead.get(i).copied().unwrap_or(true));
+    }
+
+    /// `edge`'s items are now `new`.
+    pub(super) fn replace(&mut self, edge: usize, new: Vec<T>) {
+        for i in self.by_owner.remove(&edge).unwrap_or_default() {
+            if let Some(d) = self.dead.get_mut(i) {
+                *d = true;
+            }
+        }
+        let mut mine = Vec::with_capacity(new.len());
+        for t in new {
+            mine.push(self.items.len());
+            self.fresh.push(self.items.len());
+            self.items.push(t);
+            self.owner.push(edge);
+            self.dead.push(false);
+        }
+        self.by_owner.insert(edge, mine);
+        self.fresh_index = OnceCell::new();
+        if self.fresh.len() * 4 > self.items.len() {
+            let all: Vec<usize> = (0..self.items.len()).collect();
+            self.index = self.index_of(&all);
+            self.fresh.clear();
+        }
     }
 }

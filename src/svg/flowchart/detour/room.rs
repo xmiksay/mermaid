@@ -9,7 +9,7 @@ use super::DetourEdge;
 
 /// The run kept straight off an unmarked end.
 const BARE_RUN: f64 = 8.0;
-/// The closest a re-aimed tip comes to a rect's corner.
+/// The closest a slid tip comes to a rect's corner.
 const CORNER: f64 = 8.0;
 /// The closest a detour waypoint comes to a neighbouring control point.
 pub(super) const MIN_SPACING: f64 = 10.0;
@@ -41,7 +41,7 @@ impl Room {
         edge: &DetourEdge,
         runs: bool,
         free_ok: &dyn Fn(usize, Pt, Pt) -> bool,
-    ) -> Vec<Pt> {
+    ) -> Vec<Vec<Pt>> {
         let new = |p: Option<&Pt>| p.is_some_and(|p| !self.pts.contains(p));
         let [(b, k), (a, m)] = self.extra;
         if m > 0 {
@@ -54,29 +54,65 @@ impl Room {
         if k > 0 && !new(c.get(b + k)) {
             c.drain(b..b + k);
         }
+        let mut out = vec![c];
         for (which, (node, lead)) in edge.clips.iter().zip(edge.leads).enumerate() {
             let lead = if runs { lead } else { 0.0 };
-            if self.free[which] {
-                let round = node.shape.is_some_and(is_round);
-                let mut aimed = c.clone();
-                reaim(&mut aimed, which, Some(node), lead);
-                // A bare rect end leaves where it was unless the new way out
-                // keeps clear (a side face can open into a tight gap, or
-                // onto another edge's head).
-                let n = aimed.len();
-                let out = if which == 0 {
-                    (aimed.first(), aimed.get(1))
-                } else {
-                    (aimed.last(), n.checked_sub(2).and_then(|i| aimed.get(i)))
-                };
-                if round || matches!(out, (Some(&a), Some(&b)) if free_ok(which, a, b)) {
-                    c = aimed;
+            if self.cut[which] {
+                out.iter_mut()
+                    .for_each(|c| reaim(c, which, None, lead, false));
+            } else if !self.free[which] {
+            } else if node.shape.is_some_and(is_round) {
+                // Aimed again, a round end must not land by another edge's
+                // head; there it keeps its tip and only turns its run.
+                for c in &mut out {
+                    let mut aimed = c.clone();
+                    reaim(&mut aimed, which, Some(node), lead, false);
+                    let tip = if which == 0 {
+                        aimed.first()
+                    } else {
+                        aimed.last()
+                    };
+                    if tip.is_some_and(|&t| free_ok(which, t, t)) {
+                        *c = aimed;
+                    } else {
+                        reaim(c, which, None, lead, false);
+                    }
                 }
-            } else if self.cut[which] {
-                reaim(&mut c, which, None, lead);
+            } else {
+                // A bare rect end slides along its face toward the detour, or
+                // turns onto the face it now heads for — each tried where it
+                // leaves clear of the nodes around and of the heads on its
+                // own node — else stays.
+                out = out
+                    .into_iter()
+                    .flat_map(|c| {
+                        let mut ways: Vec<Vec<Pt>> = [false, true]
+                            .into_iter()
+                            .map(|turn| {
+                                let mut aimed = c.clone();
+                                reaim(&mut aimed, which, Some(node), lead, turn);
+                                aimed
+                            })
+                            .filter(|aimed| {
+                                let n = aimed.len();
+                                let out = if which == 0 {
+                                    (aimed.first(), aimed.get(1))
+                                } else {
+                                    (aimed.last(), n.checked_sub(2).and_then(|i| aimed.get(i)))
+                                };
+                                matches!(out, (Some(&a), Some(&b)) if free_ok(which, a, b))
+                            })
+                            .collect();
+                        ways.dedup();
+                        if ways.is_empty() {
+                            ways.push(c);
+                        }
+                        ways
+                    })
+                    .collect();
             }
         }
-        c
+        out
     }
 }
 
@@ -143,19 +179,28 @@ pub(super) fn room(
 /// Clip end `which` again on the ray from its new neighbour toward the
 /// centre of `node` (`None`: keep the tip where it is), as `route` does,
 /// with its straight run (one and two lead-ins on a marked end) on that
-/// ray, each kept `MIN_SPACING` short of the neighbour so the curve does not
-/// corner there. A rect tip stays `CORNER` clear of the corners.
-fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64) {
+/// ray; a bare rect end slides along its face instead, or with `turn` is
+/// clipped as a round one and kept off the corners.
+fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64, turn: bool) {
     if which == 1 {
         ctrl.reverse();
     }
     if let (Some(&next), Some(&old)) = (ctrl.get(1), ctrl.first()) {
-        let tip = node.map_or(old, |n| off_corner(clip_end(next, n), n));
-        let full = node.is_none();
-        if full {
-            // A run laid again in place of one cut short must reach its full
-            // length to keep the marker straight: waypoints it would pass
-            // give way (the far end never does).
+        let tip = match node {
+            None => old,
+            Some(n) if n.shape.is_some_and(is_round) => clip_end(next, n),
+            // A bare rect end slides along the face it left from toward its
+            // new neighbour, or (`turn`) leaves the face it heads for.
+            Some(n) if turn => {
+                let t = clip_end(next, n);
+                slide(t, t, n)
+            }
+            Some(n) => slide(old, next, n),
+        };
+        // A marked end's run must reach its full length to keep the line
+        // straight under the marker: waypoints it would pass give way (the
+        // far end never does).
+        if lead > 0.0 {
             while ctrl.len() > 3
                 && ctrl
                     .get(1)
@@ -166,10 +211,8 @@ fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64) {
         }
         let run: Vec<Pt> = match unit(tip, next) {
             Some(u) if lead > 0.0 => [lead, 2.0 * lead]
-                .into_iter()
-                .filter(|&t| full || t + MIN_SPACING <= dist(tip, next))
                 .map(|t| (tip.0 + u.0 * t, tip.1 + u.1 * t))
-                .collect(),
+                .to_vec(),
             _ => Vec::new(),
         };
         ctrl[0] = tip;
@@ -180,12 +223,10 @@ fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64) {
     }
 }
 
-/// `tip` on `node`'s outline slid along its face to stay `CORNER` clear of
-/// a rect's corners, so an edge does not leave right at one.
-fn off_corner(tip: Pt, node: &EndClip) -> Pt {
-    if node.shape.is_some_and(is_round) {
-        return tip;
-    }
+/// `tip` moved along the rect face it lies on toward `toward`, kept
+/// `CORNER` clear of the face's corners so the edge does not leave right at
+/// one.
+fn slide(tip: Pt, toward: Pt, node: &EndClip) -> Pt {
     let (hw, hh) = (node.size.0 / 2.0, node.size.1 / 2.0);
     let (dx, dy) = (tip.0 - node.center.0, tip.1 - node.center.1);
     let clamp = |v: f64, h: f64| {
@@ -194,9 +235,9 @@ fn off_corner(tip: Pt, node: &EndClip) -> Pt {
     };
     // The face the tip lies on: the one it is relatively furthest out on.
     if dx.abs() * hh >= dy.abs() * hw {
-        (tip.0, node.center.1 + clamp(dy, hh))
+        (tip.0, node.center.1 + clamp(toward.1 - node.center.1, hh))
     } else {
-        (node.center.0 + clamp(dx, hw), tip.1)
+        (node.center.0 + clamp(toward.0 - node.center.0, hw), tip.1)
     }
 }
 
@@ -260,17 +301,16 @@ mod tests {
     }
 
     #[test]
-    fn a_tip_is_kept_off_a_rect_corner() {
+    fn a_bare_tip_slides_along_its_face_and_off_the_corners() {
         let node = EndClip {
             center: (0.0, 0.0),
             size: (60.0, 40.0),
             shape: Some(NodeShape::Rect),
         };
-        // 2px from the top-right corner on the right face: slid down.
-        assert_eq!(off_corner((30.0, -18.0), &node), (30.0, -12.0));
-        // On the top face near the corner: slid left.
-        assert_eq!(off_corner((29.0, -20.0), &node), (22.0, -20.0));
-        // Mid-face: left alone.
-        assert_eq!(off_corner((30.0, 3.0), &node), (30.0, 3.0));
+        // On the right face, toward a point up and to the right: slides up,
+        // but stops 8px short of the corner.
+        assert_eq!(slide((30.0, 0.0), (100.0, -100.0), &node), (30.0, -12.0));
+        // On the top face, toward a point left: slides left.
+        assert_eq!(slide((0.0, -20.0), (-10.0, -100.0), &node), (-10.0, -20.0));
     }
 }

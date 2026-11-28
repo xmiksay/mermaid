@@ -73,25 +73,45 @@ pub(super) struct Plan<'c> {
 }
 
 impl Plan<'_> {
-    /// The control points of `way` built on `ctrl`.
-    pub(super) fn build(&self, ctrl: &[Pt], way: &Way, edge: &DetourEdge) -> Option<Vec<Pt>> {
+    /// The control points of `way` built on `ctrl`: one or more variants
+    /// (a bare end sliding along its face or turning to another).
+    pub(super) fn build(&self, ctrl: &[Pt], way: &Way, edge: &DetourEdge) -> Vec<Vec<Pt>> {
         match way {
             Way::Step { i, a, z } => {
                 let mut c = ctrl.to_vec();
                 let at = (i + 1).min(c.len());
                 c.splice(at..at, [*a, *z]);
-                Some(c)
+                // Leading into a new vertical leg at the segment's own height,
+                // an inner point would make the step before it turn at its
+                // old mid-x and run back: the new leg takes its place.
+                let level = c.get(*i).is_some_and(|p| p.1 == a.1 && p.0 != a.0);
+                if *i > 0 && level {
+                    c.remove(*i);
+                    // A leg just beside the point before would jog over to
+                    // it halfway down: it starts level with that point.
+                    let before = c.get(*i - 1).copied();
+                    if let (Some(b), Some(a)) = (before, c.get_mut(*i)) {
+                        if (b.0 - a.0).abs() < MIN_SPACING {
+                            a.1 = b.1;
+                        }
+                    }
+                }
+                vec![c]
             }
-            Way::Beside { side, d, w, single } => {
-                let room = self.room.as_ref()?;
-                let c = insert(&room.pts, (room.lo, room.hi), *side, *d, *w, *single)?;
-                Some(room.finish(c, edge, self.runs, self.free_ok))
-            }
-            Way::Corners(run) => {
-                let room = self.room.as_ref()?;
-                let c = insert_run(&room.pts, (room.lo, room.hi), run)?;
-                Some(room.finish(c, edge, self.runs, self.free_ok))
-            }
+            Way::Beside { side, d, w, single } => self
+                .room
+                .as_ref()
+                .and_then(|r| Some((r, insert(&r.pts, (r.lo, r.hi), *side, *d, *w, *single)?)))
+                .map_or(Vec::new(), |(r, c)| {
+                    r.finish(c, edge, self.runs, self.free_ok)
+                }),
+            Way::Corners(run) => self
+                .room
+                .as_ref()
+                .and_then(|r| Some((r, insert_run(&r.pts, (r.lo, r.hi), run)?)))
+                .map_or(Vec::new(), |(r, c)| {
+                    r.finish(c, edge, self.runs, self.free_ok)
+                }),
         }
     }
 }
@@ -184,8 +204,8 @@ fn beside(
     out
 }
 
-/// Basis and linear curves round a corner of the node, or along one side
-/// past two: needed where the far end sits behind a wide node, so the curve
+/// Basis and linear curves round a corner of the node, along one side past
+/// two, or round two sides past three: needed where the far end sits behind a wide node, so the curve
 /// has to go round the node's end and come back under it. Waypoints sit a
 /// clearance out from each corner, in flow order.
 fn corners(
@@ -211,11 +231,15 @@ fn corners(
             .iter()
             .map(|&(v, o)| (v.0 + o.0 * c, v.1 + o.1 * c))
             .collect();
-        let next = pts.iter().cycle().skip(1);
-        let runs = pts
-            .iter()
-            .map(|&p| vec![p])
-            .chain(pts.iter().zip(next).map(|(&p, &q)| vec![p, q]));
+        // One corner, a side past two, or two sides past three.
+        let m = pts.len();
+        let run = |i: usize, len: usize| -> Vec<Pt> {
+            (i..i + len)
+                .filter_map(|j| pts.get(j % m).copied())
+                .collect()
+        };
+        let runs = (1..=3.min(m)).flat_map(|len| (0..m).map(move |i| (i, len)));
+        let runs = runs.map(|(i, len)| run(i, len));
         for mut run in runs {
             run.sort_by(|a, b| (forward * flow(*a)).total_cmp(&(forward * flow(*b))));
             let shift = run
@@ -337,8 +361,11 @@ fn insert(
                 continue;
             }
             let (t1, t2) = ((-along).max(ti), along.min(tj));
-            let run = if single || t2 - t1 < MIN_SPACING {
+            // Too short a span for a pair is the single variant's to build.
+            let run = if single {
                 vec![at(0.0_f64.max(t1).min(t2))]
+            } else if t2 - t1 < MIN_SPACING {
+                continue;
             } else {
                 vec![at(t1), at(t2)]
             };
