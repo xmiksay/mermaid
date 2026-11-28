@@ -1,5 +1,5 @@
 use super::body::{dist, drawn};
-use super::search::{measure, BACKTRACK};
+use super::judge::{measure, BACKTRACK};
 use super::*;
 use crate::parse::EdgeCurve;
 use crate::svg::style::resolve_edge_style;
@@ -53,7 +53,7 @@ fn hit_count(p: &EdgePath, nodes: &[(&str, EndClip)]) -> usize {
         .filter_map(|&(id, n)| Some((id, Body::new(&n)?)))
         .collect();
     Scene::new(bodies, Vec::new())
-        .hits(&drawn(&p.ctrl, p.curve), true, 0.0, |_, _| false)
+        .hits(&drawn(&p.ctrl, p.curve, &|_| true), true, 0.0, |_, _| false)
         .len()
 }
 
@@ -242,7 +242,11 @@ fn a_far_end_behind_a_wide_node_is_reached_round_its_end() {
         "round the end: {:?}",
         p.ctrl
     );
-    let (_, back) = measure(&drawn(&p.ctrl, p.curve), 1, ((30.0, 10.0), (500.0, 280.0)));
+    let (_, back) = measure(
+        &drawn(&p.ctrl, p.curve, &|_| true),
+        1,
+        ((30.0, 10.0), (500.0, 280.0)),
+    );
     assert!(back <= BACKTRACK, "never back up the flow: {back}");
 }
 

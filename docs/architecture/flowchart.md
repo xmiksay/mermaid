@@ -95,8 +95,8 @@ drawing both use them.
 `detour_all` (`src/svg/flowchart/detour.rs`) runs in `route_all` after the
 routes are built and **before** the round-tip nudge (so a re-aimed round end
 is nudged like any other), on every edge but self-loops — every curve kind
-and the plain routes included. Modules: `detour/search.rs` (the rounds and
-the scoring), `detour/cands.rs` (the ways round), `detour/room.rs` (end
+and the plain routes included. Modules: `detour/search.rs` (the rounds), `detour/judge.rs`
+(judging and scoring one candidate), `detour/cands.rs` (the ways round), `detour/room.rs` (end
 runs, re-aiming), `detour/body.rs` (node outlines, segment tests, the
 outline's reach past a line), `detour/scene.rs` (nodes and markers,
 indexed), `detour/index.rs` (bands about one box thick, as rows and
@@ -108,7 +108,8 @@ its new ones added, as the scene does with markers).
 - **Trigger.** An edge whose control points' bounding box (a basis curve
   stays inside it) overlaps no node it does not own is skipped without
   sampling. Otherwise the drawn curve (basis sampled per bezier so no
-  chord exceeds 8px, 8 to 64 steps; step curves as drawn) is tested segment by segment against the outline (rect,
+  chord exceeds 8px, 8 to 64 steps — only 8 for a bezier whose control
+  box comes within 12px of no node or marker; step curves as drawn) is tested segment by segment against the outline (rect,
   circle, rhombus) of every node it does not end on. A subgraph end owns
   the nodes inside its frame only when the other end lies inside that frame
   too (a member to its own frame, nested frames): an edge from outside to a
@@ -121,8 +122,8 @@ its new ones added, as the scene does with markers).
   the curve by the corner, not by half the node; then a gap out. Only when
   none of those clears the node without coming close to another: 2 gaps
   out, and waypoints out from the node's corners (one corner, or a side
-  past two, or two sides past three; a circle's corners are those of the
-  octagon round it) — what reaches a far end sitting behind a wide node, going
+  past two, or — only when none of those works — two sides past three; a
+  circle's corners are those of the octagon round it) — what reaches a far end sitting behind a wide node, going
   round its end. Step curves instead get a pair of waypoints on one
   vertical (or horizontal) line, a clearance off the node's box, which makes
   that line the step's leg. Waypoints replace at most one existing control
@@ -135,10 +136,12 @@ its new ones added, as the scene does with markers).
   stroke's lead-ins grow with it) is dropped and laid again, full length,
   on the ray toward the detour — the head then meets its face at an angle
   but stays straight. A free end — round, or unmarked — is clipped again on
-  the ray from its new neighbour (`reaim`), lead-ins on that ray; a rect
+  the ray from its new neighbour (`reaim`), lead-ins on that ray (a
+  waypoint those would pass gives way, and the tip is aimed again from the
+  next); a rect
   tip stays 8px off the corners. A bare rect end slides along its face
-  toward the detour, or (a second candidate) turns onto the face it now
-  heads for, each only where the way out keeps 6px off every node and
+  toward the detour, else turns onto the face it now heads for, each only
+  where the way out keeps 6px off every node and
   lands clear of another edge's head; else it keeps its tip. A round end
   that would land within 6px of another edge's head at that node keeps its
   tip and only turns its run. Linear and step curves keep only the tips.
@@ -164,7 +167,9 @@ its new ones added, as the scene does with markers).
   5px is pushed off what it comes close to, 3 to 45px, before it is
   accepted. The shorter side wins unless it traces another line; one clean
   crossing beats a traced stretch. Candidates are built and scored lazily,
-  best bound first.
+  best bound first; the score for running along other lines (the
+  costliest part) is added only to the candidates, least partial score
+  first, that may still beat the best.
 - After a detour the edge's marker discs and drawn segments are replaced.
   The round-tip nudge that follows only takes an angle whose sampled end
   stretch keeps out of every node the edge does not own

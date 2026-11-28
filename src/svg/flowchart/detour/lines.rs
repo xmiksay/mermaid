@@ -2,12 +2,11 @@
 //! and patched as edges move, and how long a candidate curve runs along
 //! them.
 
-use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::super::route::Pt;
-use super::body::{dot, unit};
-use super::scene::{bbox, segment_box, tail, CHUNK};
+use super::body::dot;
+use super::scene::segment_box;
 
 /// Closer than this to another line counts as running along it.
 const NEAR: f64 = 6.0;
@@ -20,9 +19,9 @@ pub(super) const FRAME: usize = usize::MAX;
 type Seg = (Pt, Pt, f64, [f64; 4]);
 
 fn seg((p, q): (Pt, Pt)) -> Option<Seg> {
-    let u = unit(p, q)?;
-    let len = (q.0 - p.0).hypot(q.1 - p.1);
-    Some((p, u, len, segment_box(p, q, NEAR)))
+    let (dx, dy) = (q.0 - p.0, q.1 - p.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    (len > 1e-9 && len.is_finite()).then(|| (p, (dx / len, dy / len), len, segment_box(p, q, NEAR)))
 }
 
 /// Smallest grid cell side.
@@ -45,12 +44,15 @@ pub(super) struct Lines {
     cell: f64,
     cols: usize,
     rows: usize,
-    cells: Vec<Vec<usize>>,
+    /// The first lines, cell by cell: cell `c` holds
+    /// `first[start[c]..start[c + 1]]` (placed in one go: tens of thousands
+    /// of short lines).
+    start: Vec<usize>,
+    first: Vec<usize>,
+    /// Lines added since, by cell.
+    added: HashMap<usize, Vec<usize>>,
     /// Lines covering too many cells.
     wide: Vec<usize>,
-    /// Per line, the last lookup that found it, so one lookup lists it once.
-    seen: Vec<Cell<u32>>,
-    lookup: Cell<u32>,
 }
 
 impl Lines {
@@ -86,13 +88,46 @@ impl Lines {
             cell,
             cols,
             rows,
-            cells: vec![Vec::new(); cols * rows],
+            start: Vec::new(),
+            first: Vec::new(),
+            added: HashMap::new(),
             wide: Vec::new(),
-            seen: Vec::new(),
-            lookup: Cell::new(0),
         };
-        for (o, sg) in all {
-            lines.add(o, sg);
+        // Counted, then placed.
+        let covers: Vec<_> = all.iter().map(|(_, s)| lines.cover(&s.3)).collect();
+        let mut start = vec![0usize; cols * rows + 1];
+        for c in covers.iter().flat_map(|c| lines.cells(*c)) {
+            if let Some(n) = start.get_mut(c + 1) {
+                *n += 1;
+            }
+        }
+        for c in 1..start.len() {
+            start[c] += start[c - 1];
+        }
+        let mut next = start.clone();
+        let mut first = vec![0; start.last().copied().unwrap_or(0)];
+        for (i, cover) in covers.iter().enumerate() {
+            for c in lines.cells(*cover) {
+                if let Some(n) = next.get_mut(c) {
+                    if let Some(slot) = first.get_mut(*n) {
+                        *slot = i;
+                    }
+                    *n += 1;
+                }
+            }
+        }
+        (lines.start, lines.first) = (start, first);
+        lines.wide = (0..covers.len()).filter(|&i| covers[i].is_none()).collect();
+        let n = all.len();
+        lines.owner = all.iter().map(|(o, _)| *o).collect();
+        lines.segs = all.into_iter().map(|(_, s)| s).collect();
+        lines.dead = vec![false; n];
+        // Lines come grouped by owner.
+        let mut i = 0;
+        while let Some(&o) = lines.owner.get(i) {
+            let j = (i..n).find(|&j| lines.owner[j] != o).unwrap_or(n);
+            lines.by_owner.entry(o).or_default().extend(i..j);
+            i = j;
         }
         lines
     }
@@ -116,25 +151,35 @@ impl Lines {
         ((x1 - x0 + 1) * (y1 - y0 + 1) <= MAX_CELLS).then_some((x0, x1, y0, y1))
     }
 
-    fn add(&mut self, owner: usize, sg: Seg) {
+    /// The cells of a cover, row by row.
+    fn cells(
+        &self,
+        cover: Option<(usize, usize, usize, usize)>,
+    ) -> impl Iterator<Item = usize> + '_ {
+        cover.into_iter().flat_map(move |(x0, x1, y0, y1)| {
+            (y0..=y1).flat_map(move |y| (x0..=x1).map(move |x| y * self.cols + x))
+        })
+    }
+
+    fn push(&mut self, owner: usize, sg: Seg) {
         let i = self.segs.len();
-        match self.cover(&sg.3) {
-            Some((x0, x1, y0, y1)) => {
-                for y in y0..=y1 {
-                    for x in x0..=x1 {
-                        if let Some(c) = self.cells.get_mut(y * self.cols + x) {
-                            c.push(i);
-                        }
-                    }
-                }
-            }
-            None => self.wide.push(i),
-        }
         self.segs.push(sg);
         self.owner.push(owner);
         self.dead.push(false);
-        self.seen.push(Cell::new(0));
         self.by_owner.entry(owner).or_default().push(i);
+    }
+
+    fn add(&mut self, owner: usize, sg: Seg) {
+        let i = self.segs.len();
+        let cover = self.cover(&sg.3);
+        if cover.is_none() {
+            self.wide.push(i);
+        }
+        let cells: Vec<usize> = self.cells(cover).collect();
+        for c in cells {
+            self.added.entry(c).or_default().push(i);
+        }
+        self.push(owner, sg);
     }
 
     /// Edge `edge` is now drawn through `samples`.
@@ -151,39 +196,25 @@ impl Lines {
         }
     }
 
-    /// Live lines of edges other than `edge` that may come within `NEAR` of
-    /// the box `b`, each once.
-    fn near(&self, edge: usize, b: &[f64; 4], out: &mut Vec<usize>) {
-        out.clear();
-        let stamp = self.lookup.get().wrapping_add(1);
-        self.lookup.set(stamp);
-        let mut take = |i: usize| {
-            let fresh = self.seen.get(i).is_some_and(|c| c.replace(stamp) != stamp);
-            let keep = fresh
-                && !self.dead.get(i).copied().unwrap_or(true)
-                && self.owner.get(i).is_some_and(|&o| o != edge)
-                && self.segs.get(i).is_some_and(|s| {
-                    s.3[0] <= b[2] && b[0] <= s.3[2] && s.3[1] <= b[3] && b[1] <= s.3[3]
-                });
-            if keep {
-                out.push(i);
-            }
-        };
-        match self.cover(b) {
-            Some((x0, x1, y0, y1)) => {
-                for y in y0..=y1 {
-                    for x in x0..=x1 {
-                        for &i in self.cells.get(y * self.cols + x).into_iter().flatten() {
-                            take(i);
-                        }
-                    }
-                }
-                for &i in &self.wide {
-                    take(i);
-                }
-            }
-            None => (0..self.segs.len()).for_each(take),
-        }
+    /// Live lines of edges other than `edge` whose box (grown by `NEAR`)
+    /// may hold `m`: those in its cell, and the wide ones.
+    fn at(&self, edge: usize, m: Pt) -> impl Iterator<Item = usize> + '_ {
+        let c = self
+            .cover(&[m.0, m.1, m.0, m.1])
+            .map(|(x, _, y, _)| y * self.cols + x);
+        let first = c
+            .and_then(|c| Some(*self.start.get(c)?..*self.start.get(c + 1)?))
+            .and_then(|r| self.first.get(r));
+        first
+            .into_iter()
+            .flatten()
+            .chain(c.and_then(|c| self.added.get(&c)).into_iter().flatten())
+            .chain(&self.wide)
+            .copied()
+            .filter(move |&i| {
+                !self.dead.get(i).copied().unwrap_or(true)
+                    && self.owner.get(i).is_some_and(|&o| o != edge)
+            })
     }
 
     /// Whether the sample segment with middle `m` and direction `u` runs
@@ -203,34 +234,26 @@ impl Lines {
 
     /// How long the sampled curve of `edge` runs along another edge's line
     /// or a frame border (within `NEAR`, nearly parallel), counting only
-    /// stretches of at least `RUN`. Each run of segments looks up only the
-    /// lines near it.
+    /// stretches of at least `RUN`. Each segment looks up only the lines in
+    /// its middle's grid cell.
     pub(super) fn along(&self, edge: usize, samples: &[Pt]) -> f64 {
         let (mut total, mut run) = (0.0, 0.0);
-        let mut near: Vec<usize> = Vec::new();
-        let runs = samples
-            .windows(CHUNK + 1)
-            .step_by(CHUNK)
-            .chain(tail(samples));
-        for chunk in runs {
-            self.near(edge, &bbox(chunk), &mut near);
-            for w in chunk.windows(2) {
-                let (a, b) = (w[0], w[1]);
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let len2 = dx * dx + dy * dy;
-                let beside = len2 > 0.0 && {
-                    let len = len2.sqrt();
-                    let (m, u) = (((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), (dx / len, dy / len));
-                    near.iter().any(|&i| self.beside(i, m, u))
-                };
-                if beside {
-                    run += len2.sqrt();
-                } else {
-                    if run >= RUN {
-                        total += run;
-                    }
-                    run = 0.0;
+        for w in samples.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len2 = dx * dx + dy * dy;
+            let beside = len2 > 0.0 && {
+                let len = len2.sqrt();
+                let (m, u) = (((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), (dx / len, dy / len));
+                self.at(edge, m).any(|i| self.beside(i, m, u))
+            };
+            if beside {
+                run += len2.sqrt();
+            } else {
+                if run >= RUN {
+                    total += run;
                 }
+                run = 0.0;
             }
         }
         if run >= RUN {
