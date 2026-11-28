@@ -157,12 +157,14 @@ pub(super) fn route_all(
         .collect();
     let detours: Vec<Option<DetourEdge>> = ins
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(index, e)| {
             e.as_ref().map(|e| DetourEdge {
                 ends: [e.edge.from.as_str(), e.edge.to.as_str()],
                 clips: [e.geom.0, e.geom.1],
                 leads: [e.lead(0), e.lead(1)],
                 flow: e.axes().0,
+                index,
             })
         })
         .collect();
@@ -171,8 +173,14 @@ pub(super) fn route_all(
         .zip(aps.iter().zip(offsets))
         .map(|(e, (ap, off))| e.map(|e| route_edge(e, ap, off)))
         .collect();
-    detour_all(&mut paths, &detours, obstacles, frames);
-    nudge_round_tips(&round, &mut paths);
+    let scene = detour_all(&mut paths, &detours, obstacles, frames);
+    let clear = |i: usize, ctrl: &[Pt], which: usize| {
+        detours
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_none_or(|e| scene.keeps_clear(e, ctrl, which))
+    };
+    nudge_round_tips(&round, &mut paths, &clear);
     paths
 }
 

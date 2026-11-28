@@ -154,7 +154,10 @@ real outline when straight-sided or round, else their box; a subgraph end
 owns the nodes inside its frame only when the other end lies inside it too;
 the `d403-*` fixtures are the adversarial cases), no detour leaves an
 edge within 3px of a node it does not end on (`baseline-grazes.txt`: the
-grazes there were without detours, written with detours off), output is
+grazes there were without detours, written with detours off, each as
+`edge:node@distance`; an edge may never come closer than that), edge labels
+are told from nodes by structure (a lone `<rect>` without a stroke width),
+not by font size, output is
 deterministic, and baselines captured before #402 guard against regressions:
 `baseline-paths.txt` (class/ER/requirement/state edge points, compared up to
 one translation), `baseline-counts.txt`

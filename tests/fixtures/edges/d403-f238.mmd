@@ -1,0 +1,41 @@
+flowchart BT
+  n0("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+  n1("xx")
+  n2["n2"]
+  n3[["xxxx"]]
+  n4[["xxxxxxxx"]]
+  n5[["n5"]]
+  n6{"n6"}
+  n7{{"xx"}}
+  n8(("n8"))
+  n9("n9")
+  n10("x")
+  n11>"n11"]
+  n12[["n12"]]
+  n13[("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")]
+  n14[["n14"]]
+  n15{{"xx"}}
+  n16["xxxxxxxx"]
+  n17{{"n17"}}
+  subgraph sg[Group]
+    n0
+    n1
+  end
+  n5 -.-> n10
+  n16 ==> n8
+  n12 --> n9
+  n9 ==> n7
+  n13 <--> n6
+  n6 --> n13
+  n4 ==> n17
+  n1 ==>|lbl lbl lbl lbl lbl | n7
+  n4 o--o|lbl lbl lbl lbl | n8
+  n17 -->|lbl lbl lbl lbl | n5
+  n13 -.-> n6
+  n16 <--> n12
+  n4 --x n10
+  n12 ==>|lbl lbl | n10
+  n2 -->|lbl | n15
+  n14 -->|lbl lbl lbl lbl | n2
+  n16 ==> n2
+  n1 ==>|lbl lbl lbl lbl lbl lbl | n13

@@ -23,6 +23,7 @@ fn edge(a: EndClip, c: EndClip) -> DetourEdge<'static> {
         clips: [a, c],
         leads: [0.0, 22.0],
         flow: 1,
+        index: 0,
     }
 }
 
@@ -156,6 +157,7 @@ fn a_subgraph_end_owns_its_members_only_for_a_member() {
         clips: [nodes[0].1, g],
         leads: [0.0, 22.0],
         flow: 1,
+        index: 0,
     };
     // A sits inside the frame too: B is part of where the edge goes.
     let inner = to(frame((0.0, 100.0)));
@@ -183,6 +185,7 @@ fn other_markers_are_kept_clear_of_but_never_trigger_a_detour() {
         clips: [nodes[0].1, nodes[2].1],
         leads: [0.0, 22.0],
         flow: 1,
+        index: 1,
     };
     let far: Vec<Obstacle> = [("a", nodes[0].1), ("c", nodes[2].1)]
         .iter()
@@ -205,6 +208,7 @@ fn a_detour_keeps_clear_of_other_markers() {
         clips: [nodes[0].1, nodes[1].1],
         leads: [0.0, 22.0],
         flow: 1,
+        index: 1,
     };
     let obstacles: Vec<Obstacle> = nodes
         .iter()

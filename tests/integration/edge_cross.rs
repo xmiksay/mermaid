@@ -14,7 +14,8 @@ use crate::svg_shapes::frames;
 /// `reach` px of without ending on it — `depth` the closest it gets, signed
 /// distance to the outline, negative inside. An edge ending on a subgraph
 /// frame owns the nodes inside that frame only when its other end lies
-/// inside it too (a member, or a nested frame).
+/// inside it too (a member, or a nested frame); an edge owns the nodes a
+/// broken layout stacks on its end nodes.
 pub(crate) fn touching(svg: &str, reach: f64) -> Vec<(usize, usize, f64)> {
     let (ns, fs) = (flow_nodes(svg), frames(svg));
     let within =
@@ -30,7 +31,15 @@ pub(crate) fn touching(svg: &str, reach: f64) -> Vec<(usize, usize, f64)> {
                     || (f.on_outline(tips[1]) && within(f.b, tips[0]))
             })
             .collect();
-        let owns = |n: &FlowNode| owned.iter().any(|f| within(f.b, n.center()));
+        // A node stacked on an end node (overlapping it by more than 1px)
+        // leaves the edge no way past it.
+        let stacked = |n: &FlowNode| {
+            ends.iter().flatten().filter_map(|&e| ns.get(e)).any(|e| {
+                n.b.0.max(e.b.0) + 1.0 < n.b.2.min(e.b.2)
+                    && n.b.1.max(e.b.1) + 1.0 < n.b.3.min(e.b.3)
+            })
+        };
+        let owns = |n: &FlowNode| owned.iter().any(|f| within(f.b, n.center())) || stacked(n);
         let pts: Vec<Pt> = walk(&d.curve).collect();
         for (i, n) in ns.iter().enumerate() {
             if ends.contains(&Some(i)) || owns(n) {
@@ -97,13 +106,12 @@ fn flowchart_edges_cross_no_nodes() {
 /// Closer than this to a node it does not end on, an edge grazes it.
 const GRAZE: f64 = 3.0;
 
-/// `edge:node` pairs where an edge grazes a node (within `GRAZE` px, not
-/// through it); `-` for none.
+/// `edge:node@depth` for each node an edge comes within `GRAZE` px of (or
+/// through) without ending on it, `depth` the closest it gets; `-` for none.
 fn grazes(svg: &str) -> String {
     let pairs: Vec<String> = touching(svg, GRAZE)
         .iter()
-        .filter(|t| t.2 >= -1.0)
-        .map(|(e, n, _)| format!("{e}:{n}"))
+        .map(|(e, n, d)| format!("{e}:{n}@{d:.2}"))
         .collect();
     if pairs.is_empty() {
         "-".into()
@@ -112,10 +120,14 @@ fn grazes(svg: &str) -> String {
     }
 }
 
-/// Detours (#403) graze no node: every edge passing within `GRAZE` px of a
-/// node it does not end on did so before detours existed, the same edge
-/// past the same node (`baseline-grazes.txt`, written with detours off; the
-/// edges a detour leaves alone keep what they had).
+/// Room for rounding when comparing depths with the baseline.
+const SLACK: f64 = 0.05;
+
+/// Detours (#403) bring no edge closer to a node than it came before
+/// detours existed: every edge passing within `GRAZE` px of a node it does
+/// not end on did so then, the same edge past the same node, at least as
+/// closely (`baseline-grazes.txt`, written with detours off; the edges a
+/// detour leaves alone keep what they had).
 #[test]
 fn flowchart_detours_graze_no_nodes() {
     let current: Vec<(String, String)> = graph_sources(&["flowchart"])
@@ -126,11 +138,23 @@ fn flowchart_detours_graze_no_nodes() {
         })
         .collect();
     let base = baseline("baseline-grazes.txt", &current);
+    let split = |s: &str| -> Option<(String, f64)> {
+        let (pair, d) = s.split_once('@')?;
+        Some((pair.to_string(), d.parse().ok()?))
+    };
     let mut bad = Vec::new();
     for (name, now) in &current {
-        let was: Vec<&str> = base.get(name).map_or(vec![], |w| w.split(',').collect());
-        for pair in now.split(',').filter(|p| *p != "-" && !was.contains(p)) {
-            bad.push(format!("{name}: edge:node {pair}"));
+        let was: Vec<(String, f64)> = base
+            .get(name)
+            .map_or(vec![], |w| w.split(',').filter_map(split).collect());
+        for (pair, d) in now.split(',').filter_map(split) {
+            match was.iter().find(|(p, _)| *p == pair) {
+                Some(&(_, before)) if before <= d + SLACK => {}
+                Some(&(_, before)) => bad.push(format!(
+                    "{name}: edge:node {pair} at {d:.2}px (was {before:.2})"
+                )),
+                None => bad.push(format!("{name}: edge:node {pair} at {d:.2}px (was clear)")),
+            }
         }
     }
     assert!(bad.is_empty(), "new grazes:\n{}", bad.join("\n"));
@@ -144,11 +168,11 @@ fn flowchart_detours_graze_no_nodes() {
 fn crossing_check_reports_an_edge_through_a_node() {
     let rect = |x: f64| {
         format!(
-            "<rect x=\"{x}\" y=\"0\" width=\"40\" height=\"20\" fill=\"#bbf\" stroke=\"#33f\"/><text>n</text>"
+            "<rect x=\"{x}\" y=\"0\" width=\"40\" height=\"20\" fill=\"#bbf\" stroke=\"#33f\" stroke-width=\"2\"/><text>n</text>"
         )
     };
     let lean =
-        "<path d=\"M110 0 L140 0 L130 20 L100 20 Z\" fill=\"#fdd\" stroke=\"#900\"/><text>p</text>";
+        "<path d=\"M110 0 L140 0 L130 20 L100 20 Z\" fill=\"#fdd\" stroke=\"#900\" stroke-width=\"2\"/><text>p</text>";
     let svg = |d: &str, mid: &str| {
         format!(
             "<svg viewBox=\"0 0 300 100\"><defs></defs><path d=\"{d}\" fill=\"none\" stroke-width=\"1.5\"/>{}{mid}{}</svg>",
@@ -167,7 +191,7 @@ fn crossing_check_reports_an_edge_through_a_node() {
     assert_eq!(crossings(&svg("M40 10L200 10", hollow)), "0:1");
     // 2px past a node grazes it, 5px past does not.
     let past = |y: f64| format!("M40 10L70 10L70 {y}L170 {y}L170 10L200 10");
-    assert_eq!(grazes(&svg(&past(22.0), &rect(100.0))), "0:1");
+    assert!(grazes(&svg(&past(22.0), &rect(100.0))).starts_with("0:1@"));
     assert_eq!(grazes(&svg(&past(25.0), &rect(100.0))), "-");
 }
 

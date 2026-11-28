@@ -1,7 +1,8 @@
 //! Reading a rendered flowchart's nodes back by structure, not colour: the
 //! nodes are the shapes drawn after the edge paths, one node per run of
-//! shapes closed by its (non-edge-label) text, so `classDef`/`style` nodes
-//! (`fill:none` ones too) and every theme count. Each keeps its real outline
+//! shapes closed by its text (an edge label's lone unstroked rect is not a
+//! node), so `classDef`/`style` nodes (`fill:none` ones too), any font size
+//! and every theme count. Each keeps its real outline
 //! where that is cheap — rect (with its corner radius), circle,
 //! straight-sided polygon — and its bounding box otherwise.
 
@@ -253,27 +254,43 @@ pub(crate) fn flow_nodes(svg: &str) -> Vec<FlowNode> {
             .position(|t| !is_edge(t) && !t.starts_with("<animate"))
             .unwrap_or(tags.len() - first);
     let mut out = Vec::new();
+    // The shapes so far of the run being read, and whether it is a lone
+    // unstroked rect: an edge label's background (every node shape is
+    // drawn with a stroke width, whatever its style).
     let mut pending: Option<FlowNode> = None;
+    let mut label = false;
     for t in &tags[after..] {
         if t.starts_with("<text") {
-            // An edge label's text closes its background; a node's its shapes.
+            // A text closes the run of shapes before it.
             if let Some(node) = pending.take() {
-                if !t.contains("font-size=\"12\"") {
+                if !label {
                     out.push(node);
                 }
             }
         } else if let Some(s) = shape(t) {
+            let bare = t.starts_with("<rect ") && !t.contains("stroke-width=\"");
             pending = Some(match pending.take() {
-                Some(p) if touches(&p, &s) => union(&p, &s),
+                Some(p) if touches(&p, &s) => {
+                    label = false;
+                    union(&p, &s)
+                }
                 Some(p) => {
-                    out.push(p);
+                    if !label {
+                        out.push(p);
+                    }
+                    label = bare;
                     s
                 }
-                None => s,
+                None => {
+                    label = bare;
+                    s
+                }
             });
         }
     }
-    out.extend(pending);
+    if !label {
+        out.extend(pending);
+    }
     out
 }
 
@@ -289,4 +306,22 @@ pub(crate) fn node_of_tip(nodes: &[FlowNode], p: Pt) -> Option<usize> {
             d(a).total_cmp(&d(b))
         })
         .map(|(i, _)| i)
+}
+
+/// Nodes are told from edge labels by structure, not by font size: a label
+/// is a lone unstroked rect, a node's shape always has a stroke width.
+#[test]
+fn edge_labels_are_told_from_nodes_whatever_the_font_size() {
+    let svg = concat!(
+        "<svg><defs></defs>",
+        "<path d=\"M0 0L100 0\" fill=\"none\" stroke-width=\"1.5\"/>",
+        "<rect x=\"40\" y=\"-9\" width=\"20\" height=\"18\" fill=\"#e8e8e8\" stroke=\"none\"/>",
+        "<text font-size=\"12\">lbl</text>",
+        "<rect x=\"0\" y=\"20\" width=\"40\" height=\"20\" fill=\"#ececff\" stroke=\"#9370db\" stroke-width=\"1.5\"/>",
+        "<text font-size=\"12\">n</text>",
+        "</svg>"
+    );
+    let ns = flow_nodes(svg);
+    assert_eq!(ns.len(), 1, "{ns:?}");
+    assert_eq!(ns[0].b, (0.0, 20.0, 40.0, 40.0));
 }

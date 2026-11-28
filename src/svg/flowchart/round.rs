@@ -48,8 +48,13 @@ pub(super) struct RoundEnd<'a> {
 /// centre in 1° steps until clear (up to 90°, nearest angle first). Marked
 /// heads are placed before bare line ends, so a line never leaves from a
 /// head's tip. Its lead-in moves along onto the new ray. Same-kind tips may
-/// coincide. Self-loops keep their shape.
-pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]) {
+/// coincide. Self-loops keep their shape. A turn whose new end span `clear`
+/// rejects (edge, tip, the point past its lead-in) is passed over.
+pub(super) fn nudge_round_tips(
+    ends: &[RoundEnd],
+    paths: &mut [Option<EdgePath>],
+    clear: &dyn Fn(usize, &[Pt], usize) -> bool,
+) {
     let mut by_node: BTreeMap<&str, Vec<&RoundEnd>> = BTreeMap::new();
     for end in ends {
         by_node.entry(end.id).or_default().push(end);
@@ -69,15 +74,24 @@ pub(super) fn nudge_round_tips(ends: &[RoundEnd], paths: &mut [Option<EdgePath>]
             let n = path.ctrl.len();
             let at = if end.which == 0 { 0 } else { n - 1 };
             let tip = path.ctrl[at];
+            // The curve a turned tip leaves along must keep off the nodes
+            // the edge does not end on.
+            let base = path.ctrl.clone();
+            let keeps_clear = |t: Pt| {
+                let mut c = base.clone();
+                move_tip(&mut c, end, at, t);
+                clear(end.edge, &c, end.which)
+            };
             let new_tip = match placed.clash(end, tip) {
                 Some((other, _)) if end.movable => {
-                    turned_clear(end, tip, other, &|t| placed.clash(end, t))
+                    turned_clear(end, tip, other, &|t| placed.clash(end, t), &keeps_clear)
                 }
                 _ => None,
             };
             let tip = match new_tip {
                 Some(t) => {
-                    move_tip(path, end, at, t);
+                    move_tip(&mut path.ctrl, end, at, t);
+                    path.label = path.ctrl.clone();
                     t
                 }
                 None => tip,
@@ -179,6 +193,7 @@ fn turned_clear(
     tip: Pt,
     other: Pt,
     clash: &dyn Fn(Pt) -> Option<(Pt, f64)>,
+    clear: &dyn Fn(Pt) -> bool,
 ) -> Option<Pt> {
     let c = end.node.center;
     let angle = |p: Pt| (p.1 - c.1).atan2(p.0 - c.0);
@@ -194,7 +209,11 @@ fn turned_clear(
             let a = a0 + s * f64::from(deg).to_radians();
             let t = clip_end((c.0 + a.cos() * 1e4, c.1 + a.sin() * 1e4), &end.node);
             let Some((p, w)) = clash(t) else {
-                return Some((deg, t));
+                if clear(t) {
+                    return Some((deg, t));
+                }
+                deg += 1;
+                continue;
             };
             // p blocks the outline within this angle of itself (exact on a
             // circle, near enough on a rhombus).
@@ -217,31 +236,29 @@ fn turned_clear(
 /// Put the end's tip at `t`. A lead-in, if it has one, moves onto the line
 /// from the new tip to the control point beyond it, so the run under the
 /// head stays straight.
-fn move_tip(path: &mut EdgePath, end: &RoundEnd, at: usize, t: Pt) {
-    let n = path.ctrl.len();
+fn move_tip(ctrl: &mut Vec<Pt>, end: &RoundEnd, at: usize, t: Pt) {
+    let n = ctrl.len();
     let (lead_at, beyond) = if end.which == 0 {
         (1, 2)
     } else {
         (n - 2, n.saturating_sub(3))
     };
-    let old = path.ctrl[at];
-    let has_lead =
-        end.lead > 0.0 && n >= 3 && (dist(path.ctrl[lead_at], old) - end.lead).abs() < 1e-6;
-    path.ctrl[at] = t;
+    let old = ctrl[at];
+    let has_lead = end.lead > 0.0 && n >= 3 && (dist(ctrl[lead_at], old) - end.lead).abs() < 1e-6;
+    ctrl[at] = t;
     if has_lead {
-        let toward = path.ctrl[beyond];
+        let toward = ctrl[beyond];
         let d = dist(toward, t);
         if d > end.lead + 1.0 {
-            path.ctrl[lead_at] = (
+            ctrl[lead_at] = (
                 t.0 + (toward.0 - t.0) / d * end.lead,
                 t.1 + (toward.1 - t.1) / d * end.lead,
             );
         } else {
             // As `lead_in`: too close for a lead-in; the run is straight.
-            path.ctrl.remove(lead_at);
+            ctrl.remove(lead_at);
         }
     }
-    path.label = path.ctrl.clone();
 }
 
 fn dist(a: Pt, b: Pt) -> f64 {
@@ -290,7 +307,11 @@ mod tests {
             path(vec![(0.0, -100.0), (0.0, -30.0)]),
             path(vec![(50.0, -100.0), lead_on_ray, tip]),
         ];
-        nudge_round_tips(&[end(0, 1, 0.0), end(1, 2, 22.0)], &mut paths);
+        nudge_round_tips(
+            &[end(0, 1, 0.0), end(1, 2, 22.0)],
+            &mut paths,
+            &|_, _, _| true,
+        );
         let moved = paths[1].as_ref().expect("path").ctrl.clone();
         let tip = moved[2];
         assert!(
@@ -313,7 +334,9 @@ mod tests {
             path(vec![(0.0, -100.0), (0.0, -30.0)]),
             path(vec![(50.0, -100.0), (0.0, -30.0)]),
         ];
-        nudge_round_tips(&[end(0, 1, 0.0), end(1, 1, 0.0)], &mut paths);
+        nudge_round_tips(&[end(0, 1, 0.0), end(1, 1, 0.0)], &mut paths, &|_, _, _| {
+            true
+        });
         assert_eq!(paths[1].as_ref().expect("path").ctrl[1], (0.0, -30.0));
     }
 }

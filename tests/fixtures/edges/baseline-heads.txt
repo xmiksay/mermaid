@@ -89,3 +89,5 @@ d403-subg-member.mmd	0 2
 d403-subg-nested.mmd	0 0
 d403-subg.mmd	0 0
 d403-wide-rank.mmd	0 0
+d403-f238.mmd	0 1
+d403-z05.mmd	0 0
