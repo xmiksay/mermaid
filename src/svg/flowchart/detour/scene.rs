@@ -1,7 +1,8 @@
 //! The obstacles of one diagram — nodes and markers — indexed so a curve
 //! only tests what is near it.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 use super::super::route::Pt;
 use super::body::Body;
@@ -54,6 +55,9 @@ pub(super) fn segment_box(a: Pt, b: Pt, m: f64) -> [f64; 4] {
 pub(in super::super) struct Scene<'a> {
     nodes: Layer<(&'a str, Body)>,
     marks: Layer<(&'a str, Body)>,
+    /// `near_any` answers by box, until the markers move: a search asks
+    /// the same of every candidate's unchanged beziers.
+    near: RefCell<HashMap<[u64; 4], bool>>,
 }
 
 /// Closer than this to a node, a curve all but touches it.
@@ -78,6 +82,7 @@ impl<'a> Scene<'a> {
         Self {
             nodes: Layer::new(nodes.into_iter().map(|n| (NONE, n)).collect(), |n| n.1.bbox),
             marks: Layer::new(marks, |m| m.1.bbox),
+            near: RefCell::default(),
         }
     }
 
@@ -292,6 +297,28 @@ impl<'a> Scene<'a> {
         })
     }
 
+    /// Whether anything — node or marker, owned or not — overlaps the box
+    /// `b` grown by `m`.
+    pub(super) fn near_any(&self, b: &[f64; 4], m: f64) -> bool {
+        let b = [b[0] - m, b[1] - m, b[2] + m, b[3] + m];
+        let key = b.map(f64::to_bits);
+        if let Some(&v) = self.near.borrow().get(&key) {
+            return v;
+        }
+        let mut near = Vec::new();
+        let v = [&self.nodes, &self.marks].iter().any(|layer| {
+            layer.near(&b, &mut near);
+            near.iter().any(|&i| {
+                layer
+                    .items
+                    .get(i)
+                    .is_some_and(|(_, body)| body.overlaps(&b))
+            })
+        });
+        self.near.borrow_mut().insert(key, v);
+        v
+    }
+
     /// Whether `p` lies on (or within `HEAD_ROOM` of) a marker at the node
     /// `id` of an edge other than `edge`: heads of different kinds there
     /// would run together.
@@ -311,71 +338,9 @@ impl<'a> Scene<'a> {
     /// `edge` moved: its markers are now these.
     pub(super) fn moved(&mut self, edge: usize, marks: Vec<(&'a str, Body)>) {
         self.marks.replace(edge, marks);
+        self.near.get_mut().clear();
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parse::NodeShape;
-    use crate::svg::flowchart::edges::EndClip;
-
-    fn body(center: Pt, size: (f64, f64)) -> Body {
-        Body::new(&EndClip {
-            center,
-            size,
-            shape: Some(NodeShape::Rect),
-        })
-        .expect("finite")
-    }
-
-    /// The bodies a straight line from `a` to `b` cuts, sampled in `n` steps.
-    fn cut(scene: &Scene, a: Pt, b: Pt, n: usize) -> Vec<Ob> {
-        let samples: Vec<Pt> = (0..=n)
-            .map(|k| {
-                let t = k as f64 / n as f64;
-                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
-            })
-            .collect();
-        scene
-            .hits(&samples, true, 0.0, |_, _| false)
-            .iter()
-            .map(|h| h.ob)
-            .collect()
-    }
-
-    #[test]
-    fn the_index_finds_what_a_full_scan_finds() {
-        // A dense rank of small nodes, one huge node, one far away and a
-        // marker; lines across them in both directions and through the gap.
-        let mut nodes: Vec<(&str, Body)> = (0..200)
-            .map(|i| ("n", body((f64::from(i) * 100.0, 0.0), (60.0, 40.0))))
-            .collect();
-        nodes.push(("big", body((10_000.0, 500.0), (1e6, 100.0))));
-        nodes.push(("far", body((1e12, 1e12), (60.0, 40.0))));
-        let marks = vec![(0, ("m", body((5_000.0, 200.0), (20.0, 20.0))))];
-        let scene = Scene::new(nodes, marks);
-        assert_eq!(cut(&scene, (-50.0, 0.0), (19_950.0, 0.0), 500).len(), 200);
-        assert!(cut(&scene, (-50.0, 100.0), (19_950.0, 100.0), 37).is_empty());
-        assert_eq!(
-            cut(&scene, (5_000.0, -100.0), (5_000.0, 600.0), 3),
-            [(true, 50), (false, 0), (true, 200)]
-        );
-        assert_eq!(cut(&scene, (1e12, 0.0), (1e12, 2e12), 1), [(true, 201)]);
-        // Marks are only looked at on request.
-        let samples = [(4_990.0, 200.0), (5_010.0, 200.0)];
-        assert!(scene.hits(&samples, false, 0.0, |_, _| false).is_empty());
-        assert!(cut(&scene, (f64::NAN, 0.0), (0.0, 0.0), 4).is_empty());
-    }
-
-    #[test]
-    fn a_head_counts_near_it_but_not_for_its_own_edge() {
-        let marks = vec![(3, ("a", body((0.0, 0.0), (10.0, 10.0))))];
-        let scene = Scene::new(vec![("a", body((0.0, 30.0), (60.0, 40.0)))], marks);
-        assert!(scene.head_at("a", (0.0, 0.0), 1));
-        assert!(scene.head_at("a", (9.0, 0.0), 1), "within HEAD_ROOM");
-        assert!(!scene.head_at("a", (13.0, 0.0), 1));
-        assert!(!scene.head_at("a", (0.0, 0.0), 3), "its own head");
-        assert!(!scene.head_at("b", (0.0, 0.0), 1), "another node's");
-    }
-}
+mod tests;

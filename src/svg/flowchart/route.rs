@@ -9,7 +9,7 @@ use crate::svg::geometry::clip_polyline;
 use crate::svg::style::ResolvedStyle;
 
 use super::detour::{detour_all, DetourEdge, Obstacle};
-use super::edges::{basis_control_points, clip_end, EdgeGeometry, EndClip};
+use super::edges::{basis_control_points, clip_end, marker_reach, EdgeGeometry, EndClip};
 use super::round::{is_round, nudge_round_tips, RoundEnd};
 use super::slots::{kind, marker_width, slot_offsets};
 
@@ -361,12 +361,6 @@ fn route_edge(e: EdgeIn, ap: &[Option<Approach>; 2], off: [f64; 2]) -> EdgePath 
     }
 }
 
-impl EndClip {
-    pub(super) fn center_on(&self, axis: usize) -> f64 {
-        axes(self.center)[axis]
-    }
-}
-
 pub(super) fn axes(p: Pt) -> [f64; 2] {
     [p.0, p.1]
 }
@@ -387,17 +381,6 @@ fn lead_in(face: Pt, toward: Pt, len: f64) -> Option<Pt> {
     let (dx, dy) = (toward.0 - face.0, toward.1 - face.1);
     let d = dx.hypot(dy);
     (len > 0.0 && d > len + 1.0).then(|| (face.0 + dx / d * len, face.1 + dy / d * len))
-}
-
-/// How far a marker reaches back along the edge from its tip, per unit of
-/// stroke width (markers scale with the stroke), from the defs in `edges.rs`.
-fn marker_reach(head: EdgeHead) -> Option<f64> {
-    match head {
-        EdgeHead::Arrow => Some(12.0),
-        EdgeHead::Circle => Some(10.0),
-        EdgeHead::Cross => Some(5.0),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

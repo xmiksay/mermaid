@@ -237,3 +237,20 @@ pub(super) fn define_markers(svg: &mut SvgBuilder, theme: &Theme) {
          <path d=\"M1 1 L9 9 M9 1 L1 9\" stroke=\"{flow_edge_stroke}\" stroke-width=\"1.5\"/></marker>"
     ));
 }
+
+impl EndClip {
+    pub(super) fn center_on(&self, axis: usize) -> f64 {
+        super::route::axes(self.center)[axis]
+    }
+}
+
+/// How far a marker reaches back along the edge from its tip, per unit of
+/// stroke width (markers scale with the stroke), from the defs here.
+pub(super) fn marker_reach(head: EdgeHead) -> Option<f64> {
+    match head {
+        EdgeHead::Arrow => Some(12.0),
+        EdgeHead::Circle => Some(10.0),
+        EdgeHead::Cross => Some(5.0),
+        _ => None,
+    }
+}

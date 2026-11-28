@@ -4,212 +4,20 @@
 use crate::parse::EdgeCurve;
 
 use super::super::route::Pt;
-use super::body::{dist, drawn, unit, SAMPLES};
+use super::body::{drawn, unit};
 use super::cands::{candidates, Checks, Way};
-use super::scene::{bbox, Hit, Ob, Scene, CLOSE};
+use super::judge::{
+    measure, settle, Best, Pick, Round, Search, Verdict, GRAZE, GRAZE_COST, NEAR_ANY,
+};
+use super::scene::{bbox, Ob, Scene, CLOSE};
 use super::DetourEdge;
 
 /// Detour rounds per edge, one node each.
 const MAX_ROUNDS: usize = 10;
-/// A curve this close to a node grazes it.
-pub(super) const GRAZE: f64 = 6.0;
-/// Score per node newly come `CLOSE` to: more than any clean way round
-/// costs, so that is taken only when nothing else clears the node.
-const GRAZE_COST: f64 = 1000.0;
-/// Score per node newly grazed, but not that close.
-const SOFT_COST: f64 = 40.0;
-/// Score per other edge's marker newly run over.
-const MARK_COST: f64 = 150.0;
-/// Score per px of running along another line (for stretches past `RUN`).
-const ALONG_COST: f64 = 4.0;
-/// Slack on how far a detour may run back against the edge's direction.
-pub(super) const BACKTRACK: f64 = 10.0;
 /// How far a way that grazes a node is pushed off it, in turn.
 const PUSH: [f64; 7] = [3.0, 6.0, 10.0, 15.0, 22.0, 32.0, 45.0];
 /// How many grazing ways are pushed.
 const PUSHED: usize = 3;
-
-/// Whether a polyline doubles back on itself: a leg followed by one
-/// running the opposite way along the same line.
-fn retraces(pts: &[Pt]) -> bool {
-    let legs: Vec<Pt> = pts
-        .windows(2)
-        .map(|w| (w[1].0 - w[0].0, w[1].1 - w[0].1))
-        .filter(|d| d.0.abs() + d.1.abs() > 1e-9)
-        .collect();
-    legs.windows(2).any(|l| {
-        let (a, b) = (l[0], l[1]);
-        (a.0 * b.1 - a.1 * b.0).abs() < 1e-9 && a.0 * b.0 + a.1 * b.1 < 0.0
-    })
-}
-
-/// How many leading and trailing samples `a` and `b` share.
-fn shared(a: &[Pt], b: &[Pt]) -> (usize, usize) {
-    let pre = a.iter().zip(b).take_while(|(p, q)| p == q).count();
-    let room = a.len().min(b.len()) - pre;
-    let post = a
-        .iter()
-        .rev()
-        .zip(b.iter().rev())
-        .take(room)
-        .take_while(|(p, q)| p == q)
-        .count();
-    (pre, post)
-}
-
-/// Length and backtrack of a sampled curve: travel against the direction
-/// the edge heads along the flow axis `flow`, from tip to tip (`tips`; along
-/// their line when both sit in one rank). Going round the end of a wide
-/// node may run back across the flow, never against it.
-pub(super) fn measure(samples: &[Pt], flow: usize, (a, b): (Pt, Pt)) -> (f64, f64) {
-    let along = if flow == 0 { b.0 - a.0 } else { b.1 - a.1 };
-    let u = if along.abs() >= 1.0 {
-        let s = along.signum();
-        Some(if flow == 0 { (s, 0.0) } else { (0.0, s) })
-    } else {
-        unit(a, b)
-    };
-    samples.windows(2).fold((0.0, 0.0), |(len, back), w| {
-        let step = (w[1].0 - w[0].0, w[1].1 - w[0].1);
-        let along = u.map_or(0.0, |u| step.0 * u.0 + step.1 * u.1);
-        (len + dist(w[0], w[1]), back + (-along).max(0.0))
-    })
-}
-
-/// A way round worth keeping: its score, control points, samples, length
-/// and backtrack, and the nodes it newly grazes.
-struct Pick {
-    score: f64,
-    ctrl: Vec<Pt>,
-    samples: Vec<Pt>,
-    moved: (f64, f64),
-    grazes: Vec<Ob>,
-}
-
-enum Verdict {
-    No,
-    /// Clears the node but runs through one other, never passed before.
-    Trade(Pick),
-    Clean(Pick),
-}
-
-/// One edge's search.
-struct Search<'s, 'a, 'e> {
-    scene: &'s Scene<'a>,
-    edge: &'s DetourEdge<'e>,
-    curve: EdgeCurve,
-    gap: f64,
-    tips: (Pt, Pt),
-    /// Nodes stacked on an end, which the edge may run through.
-    stacked: &'s [&'s str],
-    len0: f64,
-    back0: f64,
-}
-
-/// One round: the curve so far and the node it is being taken round.
-struct Round<'r> {
-    samples: &'r [Pt],
-    h: &'r Hit,
-    /// What else the curve runs through now (nodes and markers).
-    rest: Vec<Ob>,
-    /// The nodes it grazes now.
-    grazed: Vec<Ob>,
-    passed: &'r [Ob],
-    moved: (f64, f64),
-    /// How long a sampled stretch runs along other edges or frame borders.
-    along: &'r dyn Fn(&[Pt]) -> f64,
-    /// The round takes the curve off a node it comes close to, not out of
-    /// one it runs through.
-    off: bool,
-}
-
-impl Search<'_, '_, '_> {
-    fn owned(&self) -> impl Fn(&str, Pt) -> bool + '_ {
-        |id, c| self.edge.owns(id, c) || self.stacked.contains(&id)
-    }
-
-    /// Judge the candidate `ctrl`, which moves the curve `shift` aside.
-    fn assess(&self, r: &Round, ctrl: Vec<Pt>, shift: f64, bound: f64) -> Verdict {
-        let s = drawn(&ctrl, self.curve);
-        // Only the stretch that changed can hit anything new; the node
-        // being passed must not be hit in what did not change.
-        let (pre, post) = shared(r.samples, &s);
-        let kept = r.samples.len().saturating_sub(post);
-        if r.h.first + 1 < pre || r.h.last >= kept {
-            return Verdict::No;
-        }
-        let span = |v: &[Pt]| pre.saturating_sub(1)..v.len() + 1 - post.max(1);
-        let (Some(part), Some(was)) = (s.get(span(&s)), r.samples.get(span(r.samples))) else {
-            return Verdict::No;
-        };
-        if self.curve == EdgeCurve::Step && retraces(part) {
-            return Verdict::No;
-        }
-        let ((nl, nb), (ol, ob)) = (
-            measure(part, self.edge.flow, self.tips),
-            measure(was, self.edge.flow, self.tips),
-        );
-        let moved = (r.moved.0 + nl - ol, r.moved.1 + nb - ob);
-        if moved.0 > 2.0 * self.len0 + self.gap || moved.1 > self.back0 + BACKTRACK {
-            return Verdict::No;
-        }
-        let touch = self.scene.touches(part, GRAZE, self.owned());
-        let fresh: Vec<&Ob> = touch.cut.iter().filter(|o| !r.rest.contains(o)).collect();
-        let new = |v: &[Ob], had: &[Ob]| -> Vec<Ob> {
-            v.iter()
-                .filter(|o| !had.contains(o) && !fresh.contains(o))
-                .copied()
-                .collect()
-        };
-        // Coming close in the stretch that moved counts even next to a node
-        // the curve was close to before: it may be closer now.
-        let grazes = new(&touch.close, &[]);
-        let soft = new(&touch.grazed, &r.grazed)
-            .len()
-            .saturating_sub(grazes.len());
-        // Still through (or close to) the node being passed: no way round.
-        if fresh.contains(&&r.h.ob) || (r.off && (!fresh.is_empty() || grazes.contains(&r.h.ob))) {
-            return Verdict::No;
-        }
-        if let [&one] = fresh[..] {
-            if r.passed.contains(&one) {
-                return Verdict::No;
-            }
-            return Verdict::Trade(Pick {
-                score: shift,
-                ctrl,
-                samples: s,
-                moved,
-                grazes,
-            });
-        }
-        // Step and linear curves run straight at what they pass: no grazing.
-        if !fresh.is_empty() || (self.curve != EdgeCurve::Basis && grazes.len() + soft > 0) {
-            return Verdict::No;
-        }
-        let new_marks = touch.marks.iter().filter(|o| !r.rest.contains(o)).count();
-        let base = shift
-            + GRAZE_COST * grazes.len() as f64
-            + SOFT_COST * soft as f64
-            + MARK_COST * new_marks as f64;
-        // Already no better than the best: no need to score running along.
-        let along = if base >= bound {
-            0.0
-        } else {
-            // Over the whole stretch that moved, a bezier either side.
-            let pad = |k: usize| k.saturating_sub(SAMPLES);
-            (r.along)(s.get(pad(pre)..s.len() - pad(post)).unwrap_or(&s))
-        };
-        let score = base + ALONG_COST * along;
-        Verdict::Clean(Pick {
-            score,
-            ctrl,
-            samples: s,
-            moved,
-            grazes,
-        })
-    }
-}
 
 /// How many nodes the sampled curve runs through, comes `CLOSE` to and
 /// grazes (nodes it runs through counted once).
@@ -240,7 +48,7 @@ pub(super) fn detour(
     }
     // Sampled as finely as its longest span needs, kept for every candidate
     // so the stretch a candidate shares with it compares sample for sample.
-    let mut samples = drawn(ctrl, curve);
+    let mut samples = drawn(ctrl, curve, &|b| scene.near_any(b, NEAR_ANY));
     if !scene.hits_any(&samples, false, 0.0, owned) {
         return None;
     }
@@ -301,7 +109,6 @@ pub(super) fn detour(
             grazed,
             passed: &passed,
             moved,
-            along,
             off,
         };
         let clear = |a: Pt, b: Pt| !scene.hits_any(&[a, b], false, GRAZE, owned);
@@ -319,39 +126,40 @@ pub(super) fn detour(
             free_ok: &free_ok,
         };
         let plan = candidates(&cur, &samples, h, &body, edge, (curve, gap), checks);
-        let mut best: Option<(Pick, &Way)> = None;
         let mut trade: Option<Pick> = None;
-        // The few best ways that graze, to push off what they graze.
-        let mut grazing: Vec<(f64, Vec<Ob>, &Way)> = Vec::new();
+        // The best clean way, and the few that graze, to push off what they
+        // graze; clean ways wait to be scored in full until they may win.
+        let mut found: Best<Way> = (None, Vec::new());
+        let mut pending: Vec<(Pick, &Way)> = Vec::new();
         for (phase, ways) in plan.ways.iter().enumerate() {
             // Wide ways only when no close one clears the node cleanly.
-            if best
+            if found
+                .0
                 .as_ref()
                 .is_some_and(|b| b.0.grazes.is_empty() && phase > 0)
             {
                 break;
             }
             for (shift, way) in ways {
-                if best.as_ref().is_some_and(|b| *shift >= b.0.score) {
+                settle(&mut pending, &mut found, *shift, along);
+                let bound = found.0.as_ref().map_or(f64::INFINITY, |b| b.0.score);
+                if *shift >= bound {
                     break;
                 }
-                for c in plan.build(&cur, way, edge) {
-                    let bound = best.as_ref().map_or(f64::INFINITY, |b| b.0.score);
-                    match search.assess(&round, c, *shift, bound) {
-                        Verdict::Clean(p) if best.as_ref().is_none_or(|b| p.score < b.0.score) => {
-                            if !p.grazes.is_empty() {
-                                grazing.push((p.score, p.grazes.clone(), way));
-                            }
-                            best = Some((p, way));
-                        }
-                        Verdict::Trade(p) if trade.as_ref().is_none_or(|t| p.score < t.score) => {
-                            trade = Some(p);
-                        }
-                        _ => {}
+                let Some(c) = plan.build(&cur, way, edge) else {
+                    continue;
+                };
+                match search.assess(&round, c, *shift, bound) {
+                    Verdict::Clean(p) => pending.push((p, way)),
+                    Verdict::Trade(p) if trade.as_ref().is_none_or(|t| p.score < t.score) => {
+                        trade = Some(p);
                     }
+                    _ => {}
                 }
             }
+            settle(&mut pending, &mut found, f64::INFINITY, along);
         }
+        let (mut best, mut grazing) = found;
         // Ways that graze a node: push them off it (off each grazed node,
         // and off all together), a little more each time, until one clears.
         if best.as_ref().is_some_and(|b| !b.0.grazes.is_empty()) {
@@ -371,12 +179,11 @@ pub(super) fn detour(
                         let base = score - GRAZE_COST * grazes.len() as f64;
                         dirs.into_iter().find_map(|u| {
                             let moved = way.shifted((u.0 * k, u.1 * k));
-                            plan.build(&cur, &moved, edge).into_iter().find_map(|c| {
-                                match search.assess(&round, c, base + k, f64::INFINITY) {
-                                    Verdict::Clean(p) if p.grazes.is_empty() => Some((p, *way)),
-                                    _ => None,
-                                }
-                            })
+                            let c = plan.build(&cur, &moved, edge)?;
+                            match search.assess(&round, c, base + k, f64::INFINITY) {
+                                Verdict::Clean(p) if p.grazes.is_empty() => Some((p, *way)),
+                                _ => None,
+                            }
                         })
                     })
             });

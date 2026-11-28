@@ -62,10 +62,14 @@ impl Way {
     }
 }
 
+/// Ways round one node, each with how far it moves the curve aside.
+pub(super) type Ways = Vec<(f64, Way)>;
+
 /// The ways round one node, least sideways movement first: the close ones,
-/// then — tried only when none of those works — the wide ones.
+/// then — each tried only when none before works — the wide ones and those
+/// round two sides of the node.
 pub(super) struct Plan<'c> {
-    pub(super) ways: [Vec<(f64, Way)>; 2],
+    pub(super) ways: [Ways; 3],
     room: Option<Room>,
     runs: bool,
     /// Whether a re-aimed bare end `(which, tip, next)` may leave there.
@@ -73,9 +77,8 @@ pub(super) struct Plan<'c> {
 }
 
 impl Plan<'_> {
-    /// The control points of `way` built on `ctrl`: one or more variants
-    /// (a bare end sliding along its face or turning to another).
-    pub(super) fn build(&self, ctrl: &[Pt], way: &Way, edge: &DetourEdge) -> Vec<Vec<Pt>> {
+    /// The control points of `way` built on `ctrl`.
+    pub(super) fn build(&self, ctrl: &[Pt], way: &Way, edge: &DetourEdge) -> Option<Vec<Pt>> {
         match way {
             Way::Step { i, a, z } => {
                 let mut c = ctrl.to_vec();
@@ -96,22 +99,18 @@ impl Plan<'_> {
                         }
                     }
                 }
-                vec![c]
+                Some(c)
             }
             Way::Beside { side, d, w, single } => self
                 .room
                 .as_ref()
                 .and_then(|r| Some((r, insert(&r.pts, (r.lo, r.hi), *side, *d, *w, *single)?)))
-                .map_or(Vec::new(), |(r, c)| {
-                    r.finish(c, edge, self.runs, self.free_ok)
-                }),
+                .map(|(r, c)| r.finish(c, edge, self.runs, self.free_ok)),
             Way::Corners(run) => self
                 .room
                 .as_ref()
                 .and_then(|r| Some((r, insert_run(&r.pts, (r.lo, r.hi), run)?)))
-                .map_or(Vec::new(), |(r, c)| {
-                    r.finish(c, edge, self.runs, self.free_ok)
-                }),
+                .map(|(r, c)| r.finish(c, edge, self.runs, self.free_ok)),
         }
     }
 }
@@ -138,7 +137,7 @@ pub(super) fn candidates<'c>(
     let Checks { clear, free_ok } = checks;
     let runs = curve != EdgeCurve::Linear;
     let mut plan = Plan {
-        ways: [Vec::new(), Vec::new()],
+        ways: [Vec::new(), Vec::new(), Vec::new()],
         room: None,
         runs,
         free_ok,
@@ -151,11 +150,14 @@ pub(super) fn candidates<'c>(
     };
     let (close, wide) = OFFSETS.split_at(2);
     if curve == EdgeCurve::Step {
-        plan.ways = [close, wide].map(|o| steps(ctrl, (entry, exit), h, body, gap, o));
+        let [a, b] = [close, wide].map(|o| steps(ctrl, (entry, exit), h, body, gap, o));
+        plan.ways = [a, b, Vec::new()];
     } else if let Some(d) = unit(entry, exit) {
         plan.room = room(ctrl, edge, runs, clear);
-        plan.ways = [close, wide].map(|o| beside(ctrl, (entry, exit), d, body, gap, o));
-        plan.ways[1].extend(corners(ctrl, (entry, exit), d, body, edge, gap));
+        let [a, mut b] = [close, wide].map(|o| beside(ctrl, (entry, exit), d, body, gap, o));
+        let [near, far] = corners(ctrl, (entry, exit), d, body, edge, gap);
+        b.extend(near);
+        plan.ways = [a, b, far];
     }
     for ways in &mut plan.ways {
         ways.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -175,7 +177,7 @@ fn beside(
     body: &Body,
     gap: f64,
     offsets: &[f64],
-) -> Vec<(f64, Way)> {
+) -> Ways {
     let span = dist(
         ctrl.first().copied().unwrap_or(entry),
         ctrl.last().copied().unwrap_or(exit),
@@ -215,7 +217,7 @@ fn corners(
     body: &Body,
     edge: &DetourEdge,
     gap: f64,
-) -> Vec<(f64, Way)> {
+) -> [Ways; 2] {
     let corners = body.corners();
     let mid = ((entry.0 + exit.0) / 2.0, (entry.1 + exit.1) / 2.0);
     let n = (-d.1, d.0);
@@ -224,7 +226,7 @@ fn corners(
         (Some(&a), Some(&b)) if flow(b) < flow(a) => -1.0,
         _ => 1.0,
     };
-    let mut out = Vec::new();
+    let (mut out, mut far) = (Vec::new(), Vec::new());
     for k in OFFSETS {
         let c = k * gap;
         let pts: Vec<Pt> = corners
@@ -246,10 +248,11 @@ fn corners(
                 .iter()
                 .map(|p| dot((p.0 - mid.0, p.1 - mid.1), n).abs())
                 .fold(0.0, f64::max);
-            out.push((shift, Way::Corners(run)));
+            let to = if run.len() > 2 { &mut far } else { &mut out };
+            to.push((shift, Way::Corners(run)));
         }
     }
-    out
+    [out, far]
 }
 
 /// `ctrl` with `run` put between two points `i < j` in `lo..=hi + 1`, in
@@ -294,7 +297,7 @@ fn steps(
     body: &Body,
     gap: f64,
     offsets: &[f64],
-) -> Vec<(f64, Way)> {
+) -> Ways {
     let m = ((entry.0 + exit.0) / 2.0, (entry.1 + exit.1) / 2.0);
     let b = body.bbox;
     let last = ctrl.len().saturating_sub(2);

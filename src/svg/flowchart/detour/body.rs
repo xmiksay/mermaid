@@ -7,6 +7,7 @@ use crate::svg::builder::curve_basis_samples_by;
 use super::super::edges::EndClip;
 use super::super::round::is_round;
 use super::super::route::Pt;
+use super::scene::bbox;
 
 /// The fewest steps per basis bezier when testing a curve, as many as the
 /// canvas measurement takes.
@@ -248,12 +249,13 @@ pub(super) fn dist(a: Pt, b: Pt) -> f64 {
     (a.0 - b.0).hypot(a.1 - b.1)
 }
 
-/// The points an edge's drawn curve passes through: on a basis curve,
-/// enough per bezier that no chord between two samples is longer than
-/// `STEP` (so a cut of a node's corner cannot hide between samples on a long
-/// sweep), each bezier sampled on its own so the stretch a detour leaves
-/// alone samples the same.
-pub(super) fn drawn(ctrl: &[Pt], curve: EdgeCurve) -> Vec<Pt> {
+/// The points an edge's drawn curve passes through: on a basis curve, a
+/// bezier that may come near something (`near`, given its control box) gets
+/// enough samples that no chord is longer than `STEP` (so a cut of a node's
+/// corner cannot hide between samples on a long sweep), any other `SAMPLES`;
+/// each bezier sampled on its own so the stretch a detour leaves alone
+/// samples the same.
+pub(super) fn drawn(ctrl: &[Pt], curve: EdgeCurve, near: &dyn Fn(&[f64; 4]) -> bool) -> Vec<Pt> {
     match curve {
         EdgeCurve::Linear => ctrl.to_vec(),
         EdgeCurve::Step => {
@@ -266,6 +268,10 @@ pub(super) fn drawn(ctrl: &[Pt], curve: EdgeCurve) -> Vec<Pt> {
             out
         }
         _ => curve_basis_samples_by(ctrl, |c| {
+            // A bezier stays inside its control points' box.
+            if !near(&bbox(c)) {
+                return SAMPLES;
+            }
             // The control polygon is never shorter than the curve.
             let span: f64 = c.windows(2).map(|w| dist(w[0], w[1])).sum();
             ((span / STEP).ceil() as usize).clamp(SAMPLES, MAX_SAMPLES)
@@ -328,5 +334,16 @@ mod tests {
             assert!(dist(v, (0.0, 0.0)) > 20.0 && !c.contains(v));
             assert!((out.0 * v.1 - out.1 * v.0).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn a_bezier_near_nothing_is_sampled_coarsely() {
+        let ctrl = [(0.0, 0.0), (400.0, 0.0), (800.0, 0.0), (1200.0, 0.0)];
+        let fine = drawn(&ctrl, EdgeCurve::Basis, &|_| true);
+        let coarse = drawn(&ctrl, EdgeCurve::Basis, &|_| false);
+        assert!(coarse.len() < fine.len());
+        // The same curve: ends and every coarse sample's bezier ends agree.
+        assert_eq!(coarse.first(), fine.first());
+        assert_eq!(coarse.last(), fine.last());
     }
 }

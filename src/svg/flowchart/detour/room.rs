@@ -41,7 +41,7 @@ impl Room {
         edge: &DetourEdge,
         runs: bool,
         free_ok: &dyn Fn(usize, Pt, Pt) -> bool,
-    ) -> Vec<Vec<Pt>> {
+    ) -> Vec<Pt> {
         let new = |p: Option<&Pt>| p.is_some_and(|p| !self.pts.contains(p));
         let [(b, k), (a, m)] = self.extra;
         if m > 0 {
@@ -54,65 +54,45 @@ impl Room {
         if k > 0 && !new(c.get(b + k)) {
             c.drain(b..b + k);
         }
-        let mut out = vec![c];
+        let tip = |c: &[Pt], which: usize| if which == 0 { c.first() } else { c.last() }.copied();
         for (which, (node, lead)) in edge.clips.iter().zip(edge.leads).enumerate() {
             let lead = if runs { lead } else { 0.0 };
             if self.cut[which] {
-                out.iter_mut()
-                    .for_each(|c| reaim(c, which, None, lead, false));
+                reaim(&mut c, which, None, lead, false);
             } else if !self.free[which] {
             } else if node.shape.is_some_and(is_round) {
                 // Aimed again, a round end must not land by another edge's
                 // head; there it keeps its tip and only turns its run.
-                for c in &mut out {
-                    let mut aimed = c.clone();
-                    reaim(&mut aimed, which, Some(node), lead, false);
-                    let tip = if which == 0 {
-                        aimed.first()
-                    } else {
-                        aimed.last()
-                    };
-                    if tip.is_some_and(|&t| free_ok(which, t, t)) {
-                        *c = aimed;
-                    } else {
-                        reaim(c, which, None, lead, false);
-                    }
+                let mut aimed = c.clone();
+                reaim(&mut aimed, which, Some(node), lead, false);
+                if tip(&aimed, which).is_some_and(|t| free_ok(which, t, t)) {
+                    c = aimed;
+                } else {
+                    reaim(&mut c, which, None, lead, false);
                 }
             } else {
-                // A bare rect end slides along its face toward the detour, or
-                // turns onto the face it now heads for — each tried where it
-                // leaves clear of the nodes around and of the heads on its
-                // own node — else stays.
-                out = out
-                    .into_iter()
-                    .flat_map(|c| {
-                        let mut ways: Vec<Vec<Pt>> = [false, true]
-                            .into_iter()
-                            .map(|turn| {
-                                let mut aimed = c.clone();
-                                reaim(&mut aimed, which, Some(node), lead, turn);
-                                aimed
-                            })
-                            .filter(|aimed| {
-                                let n = aimed.len();
-                                let out = if which == 0 {
-                                    (aimed.first(), aimed.get(1))
-                                } else {
-                                    (aimed.last(), n.checked_sub(2).and_then(|i| aimed.get(i)))
-                                };
-                                matches!(out, (Some(&a), Some(&b)) if free_ok(which, a, b))
-                            })
-                            .collect();
-                        ways.dedup();
-                        if ways.is_empty() {
-                            ways.push(c);
-                        }
-                        ways
-                    })
-                    .collect();
+                // A bare rect end slides along its face toward the detour,
+                // else turns onto the face it now heads for, else stays —
+                // whichever first leaves clear of the nodes around and of
+                // the heads on its own node.
+                for turn in [false, true] {
+                    let mut aimed = c.clone();
+                    reaim(&mut aimed, which, Some(node), lead, turn);
+                    let n = aimed.len();
+                    let next = if which == 0 {
+                        aimed.get(1)
+                    } else {
+                        n.checked_sub(2).and_then(|i| aimed.get(i))
+                    };
+                    if matches!((tip(&aimed, which), next), (Some(a), Some(&b)) if free_ok(which, a, b))
+                    {
+                        c = aimed;
+                        break;
+                    }
+                }
             }
         }
-        out
+        c
     }
 }
 
@@ -185,8 +165,11 @@ fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64, tu
     if which == 1 {
         ctrl.reverse();
     }
-    if let (Some(&next), Some(&old)) = (ctrl.get(1), ctrl.first()) {
-        let tip = match node {
+    if let Some(&old) = ctrl.first() {
+        // A marked end's run must reach its full length to keep the line
+        // straight under the marker: waypoints it would pass give way (the
+        // far end never does), and the tip is aimed again from the next.
+        let aim = |next: Pt| match node {
             None => old,
             Some(n) if n.shape.is_some_and(is_round) => clip_end(next, n),
             // A bare rect end slides along the face it left from toward its
@@ -197,16 +180,13 @@ fn reaim(ctrl: &mut Vec<Pt>, which: usize, node: Option<&EndClip>, lead: f64, tu
             }
             Some(n) => slide(old, next, n),
         };
-        // A marked end's run must reach its full length to keep the line
-        // straight under the marker: waypoints it would pass give way (the
-        // far end never does).
-        if lead > 0.0 {
-            while ctrl.len() > 3
-                && ctrl
-                    .get(1)
-                    .is_some_and(|&p| dist(tip, p) < 2.0 * lead + MIN_SPACING)
-            {
+        let (mut next, mut tip) = (old, old);
+        while let Some(&p) = ctrl.get(1) {
+            (next, tip) = (p, aim(p));
+            if lead > 0.0 && ctrl.len() > 3 && dist(tip, p) < 2.0 * lead + MIN_SPACING {
                 ctrl.remove(1);
+            } else {
+                break;
             }
         }
         let run: Vec<Pt> = match unit(tip, next) {

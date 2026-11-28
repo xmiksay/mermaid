@@ -20,6 +20,7 @@ use super::route::{EdgePath, Pt, LEAD_MARGIN};
 mod body;
 mod cands;
 mod index;
+mod judge;
 mod lines;
 mod room;
 mod scene;
